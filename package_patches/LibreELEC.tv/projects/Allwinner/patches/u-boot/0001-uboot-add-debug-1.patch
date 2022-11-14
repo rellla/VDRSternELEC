@@ -1,0 +1,24 @@
+From eeea54a076c890350018e0a24e41f5a5198f1f89 Mon Sep 17 00:00:00 2001
+From: Andreas Baierl <ichgeh@imkreisrum.de>
+Date: Mon, 14 Nov 2022 22:25:04 +0100
+Subject: [PATCH 1/2] uboot: add debug 1
+
+---
+ arch/arm/mach-sunxi/dram_sun50i_h6.c | 1 +
+ 1 file changed, 1 insertion(+)
+
+diff --git a/arch/arm/mach-sunxi/dram_sun50i_h6.c b/arch/arm/mach-sunxi/dram_sun50i_h6.c
+index b332f3a3e4..86eb70c18e 100644
+--- a/arch/arm/mach-sunxi/dram_sun50i_h6.c
++++ b/arch/arm/mach-sunxi/dram_sun50i_h6.c
+@@ -5,6 +5,7 @@
+  * (C) Copyright 2017      Icenowy Zheng <icenowy@aosc.io>
+  *
+  */
++#define DEBUG 1
+ #include <common.h>
+ #include <init.h>
+ #include <log.h>
+-- 
+2.30.2
+

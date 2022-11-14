@@ -1,0 +1,38 @@
+From 3d1db943b63e0505cd16b9b7944302fb4f47c49b Mon Sep 17 00:00:00 2001
+From: Andreas Baierl <ichgeh@imkreisrum.de>
+Date: Mon, 14 Nov 2022 23:27:08 +0100
+Subject: [PATCH 2/2] add some debugs
+
+---
+ arch/arm/mach-sunxi/dram_sun50i_h6.c | 6 ++++++
+ 1 file changed, 6 insertions(+)
+
+diff --git a/arch/arm/mach-sunxi/dram_sun50i_h6.c b/arch/arm/mach-sunxi/dram_sun50i_h6.c
+index 86eb70c18e..b9a085d2fa 100644
+--- a/arch/arm/mach-sunxi/dram_sun50i_h6.c
++++ b/arch/arm/mach-sunxi/dram_sun50i_h6.c
+@@ -688,15 +688,21 @@ unsigned long sunxi_dram_init(void)
+ 	clrbits_le32(&prcm->ohms240, 0x3f);
+ 
+ 	mctl_auto_detect_rank_width(&para);
++	debug("after mctl_auto_detect_rank_width\n");
+ 	mctl_auto_detect_dram_size(&para);
++	debug("after mctl_auto_detect_dram_size\n");
+ 
+ 	mctl_core_init(&para);
++	debug("after mctl_core_init\n");
+ 
+ 	size = mctl_calc_size(&para);
++	debug("after mctl_calc_size\n");
+ 
+ 	clrsetbits_le32(&mctl_com->cr, 0xf0, (size >> (10 + 10 + 4)) & 0xf0);
++	debug("after clrsetbits_le32\n");
+ 
+ 	mctl_set_master_priority();
++	debug("after mctl_set_master_priority\n");
+ 
+ 	return size;
+ };
+-- 
+2.30.2
+
