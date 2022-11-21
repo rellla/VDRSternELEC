@@ -1,0 +1,25 @@
+From d50b6ddab4810ba7a923cc5dbf8b2143a4e148cd Mon Sep 17 00:00:00 2001
+From: Andreas Baierl <ichgeh@imkreisrum.de>
+Date: Mon, 21 Nov 2022 16:33:15 +0100
+Subject: [PATCH] fix epg
+
+---
+ epg.c | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/epg.c b/epg.c
+index d917e669..0fe771b3 100644
+--- a/epg.c
++++ b/epg.c
+@@ -451,7 +451,7 @@ cString cEvent::GetVpsString(void) const
+ void cEvent::Dump(FILE *f, const char *Prefix, bool InfoOnly) const
+ {
+   if (InfoOnly || startTime + duration + EPG_LINGER_TIME >= time(NULL)) {
+-     fprintf(f, "%sE %u %ld %d %X %X\n", Prefix, eventID, startTime, duration, tableID, version);
++     fprintf(f, "%sE %u %ld %d %X %X\n", Prefix, eventID, (long)startTime, duration, tableID, version);
+      if (!isempty(title))
+         fprintf(f, "%sT %s\n", Prefix, title);
+      if (!isempty(shortText))
+-- 
+2.30.2
+
