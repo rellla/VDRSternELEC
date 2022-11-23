@@ -1,0 +1,29 @@
+From fcfe125b7be0893b46ca9dfcaa327098df26795d Mon Sep 17 00:00:00 2001
+From: Andreas Baierl <ichgeh@imkreisrum.de>
+Date: Wed, 23 Nov 2022 22:02:58 +0100
+Subject: [PATCH 4/9] GL: remove SetLayer logging
+
+This was very loud, when activated.
+
+Signed-off-by: Andreas Baierl <ichgeh@imkreisrum.de>
+---
+ openglosd.cpp | 3 ---
+ 1 file changed, 3 deletions(-)
+
+diff --git a/openglosd.cpp b/openglosd.cpp
+index f867156..40f3c9b 100644
+--- a/openglosd.cpp
++++ b/openglosd.cpp
+@@ -2315,9 +2315,6 @@ void cOglPixmap::SetClean(void) {
+ }
+ 
+ void cOglPixmap::SetLayer(int Layer) {
+-#ifdef GL_DEBUG
+-    esyslog("[softhddev] SetLayer %d", Layer);
+-#endif
+     cPixmap::SetLayer(Layer);
+     if (cPixmap::Layer() >= 0 || Layer >= 0)
+         SetDirty();
+-- 
+2.30.2
+

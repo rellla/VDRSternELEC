@@ -1,0 +1,96 @@
+From dc2dfa9823ae25d75cb74be188455dc7c974e7c4 Mon Sep 17 00:00:00 2001
+From: Andreas Baierl <ichgeh@imkreisrum.de>
+Date: Wed, 23 Nov 2022 12:48:12 +0100
+Subject: [PATCH 2/9] drm: fix zpos handling
+
+On Amlogic devices we can read the planes' z-order value, but they can't be changed.
+Introduce a check, if zpos can be changed with a drm atomic commit, otherwise ignore
+zpos.
+
+Signed-off-by: Andreas Baierl <ichgeh@imkreisrum.de>
+---
+ video_drm.c | 54 +++++++++++++++++++++++++++++++++++++++++++++--------
+ 1 file changed, 46 insertions(+), 8 deletions(-)
+
+diff --git a/video_drm.c b/video_drm.c
+index 57678ec..66dd1ab 100644
+--- a/video_drm.c
++++ b/video_drm.c
+@@ -360,6 +360,29 @@ static int TestCaps(int fd)
+ 	return 0;
+ }
+ 
++static int CheckZpos(VideoRender * render, uint64_t plane_id, uint64_t zpos)
++{
++	drmModeAtomicReqPtr ModeReq;
++	const uint32_t flags = DRM_MODE_ATOMIC_ALLOW_MODESET;
++
++	if (!(ModeReq = drmModeAtomicAlloc()))
++		fprintf(stderr, "CheckZpos: cannot allocate atomic request (%d): %m\n", errno);
++
++	SetPlaneZpos(ModeReq, plane_id, zpos);
++
++	if (drmModeAtomicCommit(render->fd_drm, ModeReq, flags, NULL) != 0) {
++		fprintf(stderr, "CheckZpos: cannot set atomic mode (%d): %m\n", errno);
++		render->use_zpos = 0;
++		fprintf(stderr, "CheckZpos: don't use zpos change\n");
++		drmModeAtomicFree(ModeReq);
++		return 1;
++	}
++
++	drmModeAtomicFree(ModeReq);
++
++	return 0;
++}
++
+ #ifdef USE_GLES
+ static const EGLint context_attribute_list[] =
+ {
+@@ -648,14 +671,22 @@ search_mode:
+ 	}
+ 
+ #ifdef DRM_DEBUG
+-	fprintf(stderr, "best_primary_video_plane: plane_id %d, type %s, zpos %lld\n",
+-		best_primary_video_plane.plane_id, best_primary_video_plane.type == DRM_PLANE_TYPE_PRIMARY ? "PRIMARY" : "OVERLAY", best_primary_video_plane.zpos);
+-	fprintf(stderr, "best_overlay_video_plane: plane_id %d, type %s, zpos %lld\n",
+-		best_overlay_video_plane.plane_id, best_overlay_video_plane.type == DRM_PLANE_TYPE_PRIMARY ? "PRIMARY" : "OVERLAY", best_overlay_video_plane.zpos);
+-	fprintf(stderr, "best_primary_osd_plane: plane_id %d, type %s, zpos %lld\n",
+-		best_primary_osd_plane.plane_id, best_primary_osd_plane.type == DRM_PLANE_TYPE_PRIMARY ? "PRIMARY" : "OVERLAY", best_primary_osd_plane.zpos);
+-	fprintf(stderr, "best_overlay_osd_plane: plane_id %d, type %s, zpos %lld\n",
+-		best_overlay_osd_plane.plane_id, best_overlay_osd_plane.type == DRM_PLANE_TYPE_PRIMARY ? "PRIMARY" : "OVERLAY", best_overlay_osd_plane.zpos);
++	if (best_primary_video_plane.plane_id) {
++		fprintf(stderr, "best_primary_video_plane: plane_id %d, type %s, zpos %lld\n",
++			best_primary_video_plane.plane_id, best_primary_video_plane.type == DRM_PLANE_TYPE_PRIMARY ? "PRIMARY" : "OVERLAY", best_primary_video_plane.zpos);
++	}
++	if (best_overlay_video_plane.plane_id) {
++		fprintf(stderr, "best_overlay_video_plane: plane_id %d, type %s, zpos %lld\n",
++			best_overlay_video_plane.plane_id, best_overlay_video_plane.type == DRM_PLANE_TYPE_PRIMARY ? "PRIMARY" : "OVERLAY", best_overlay_video_plane.zpos);
++	}
++	if (best_primary_osd_plane.plane_id) {
++		fprintf(stderr, "best_primary_osd_plane: plane_id %d, type %s, zpos %lld\n",
++			best_primary_osd_plane.plane_id, best_primary_osd_plane.type == DRM_PLANE_TYPE_PRIMARY ? "PRIMARY" : "OVERLAY", best_primary_osd_plane.zpos);
++	}
++	if (best_overlay_osd_plane.plane_id) {
++		fprintf(stderr, "best_overlay_osd_plane: plane_id %d, type %s, zpos %lld\n",
++			best_overlay_osd_plane.plane_id, best_overlay_osd_plane.type == DRM_PLANE_TYPE_PRIMARY ? "PRIMARY" : "OVERLAY", best_overlay_osd_plane.zpos);
++	}
+ #endif
+ 
+ 	// See which planes we should use
+@@ -683,6 +714,13 @@ search_mode:
+ 	get_properties(render->fd_drm, render->planes[VIDEO_PLANE]->plane_id, render->planes[VIDEO_PLANE]);
+ 	get_properties(render->fd_drm, render->planes[OSD_PLANE]->plane_id, render->planes[OSD_PLANE]);
+ 
++	// Check, if we can set z-order (meson has fixed z-order, which cannot be changed)
++	if (render->use_zpos && CheckZpos(render, render->planes[VIDEO_PLANE]->plane_id, render->planes[VIDEO_PLANE]->zpos)) {
++		render->use_zpos = 0;
++	}
++	if (render->use_zpos && CheckZpos(render, render->planes[OSD_PLANE]->plane_id, render->planes[VIDEO_PLANE]->zpos)) {
++		render->use_zpos = 0;
++	}
+ 
+ 	// render->use_zpos was set, if Video is on OVERLAY, and Osd is on PRIMARY
+ 	// Check if the OVERLAY plane really got a higher zpos than the PRIMARY plane
+-- 
+2.30.2
+
