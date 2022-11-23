@@ -1,0 +1,92 @@
+From b2652bf5d2d96231755fed35c46cf2a44519a9c6 Mon Sep 17 00:00:00 2001
+From: Andreas Baierl <ichgeh@imkreisrum.de>
+Date: Wed, 23 Nov 2022 12:48:12 +0100
+Subject: [PATCH 2/5] fix zpos handling
+
+---
+ video_drm.c | 55 +++++++++++++++++++++++++++++++++++++++++++++--------
+ 1 file changed, 47 insertions(+), 8 deletions(-)
+
+diff --git a/video_drm.c b/video_drm.c
+index 57678ec..d0398b2 100644
+--- a/video_drm.c
++++ b/video_drm.c
+@@ -360,6 +360,29 @@ static int TestCaps(int fd)
+ 	return 0;
+ }
+ 
++static int CheckZpos(VideoRender * render, uint64_t plane_id, uint64_t zpos)
++{
++	drmModeAtomicReqPtr ModeReq;
++	const uint32_t flags = DRM_MODE_ATOMIC_ALLOW_MODESET;
++
++	if (!(ModeReq = drmModeAtomicAlloc()))
++		fprintf(stderr, "CheckZpos: cannot allocate atomic request (%d): %m\n", errno);
++
++	SetPlaneZpos(ModeReq, plane_id, zpos);
++
++	if (drmModeAtomicCommit(render->fd_drm, ModeReq, flags, NULL) != 0) {
++		fprintf(stderr, "CheckZpos: cannot set atomic mode (%d): %m\n", errno);
++		render->use_zpos = 0;
++		fprintf(stderr, "CheckZpos: don't use zpos change\n");
++		drmModeAtomicFree(ModeReq);
++		return 1;
++	}
++
++	drmModeAtomicFree(ModeReq);
++
++	return 0;
++}
++
+ #ifdef USE_GLES
+ static const EGLint context_attribute_list[] =
+ {
+@@ -648,14 +671,22 @@ search_mode:
+ 	}
+ 
+ #ifdef DRM_DEBUG
+-	fprintf(stderr, "best_primary_video_plane: plane_id %d, type %s, zpos %lld\n",
+-		best_primary_video_plane.plane_id, best_primary_video_plane.type == DRM_PLANE_TYPE_PRIMARY ? "PRIMARY" : "OVERLAY", best_primary_video_plane.zpos);
+-	fprintf(stderr, "best_overlay_video_plane: plane_id %d, type %s, zpos %lld\n",
+-		best_overlay_video_plane.plane_id, best_overlay_video_plane.type == DRM_PLANE_TYPE_PRIMARY ? "PRIMARY" : "OVERLAY", best_overlay_video_plane.zpos);
+-	fprintf(stderr, "best_primary_osd_plane: plane_id %d, type %s, zpos %lld\n",
+-		best_primary_osd_plane.plane_id, best_primary_osd_plane.type == DRM_PLANE_TYPE_PRIMARY ? "PRIMARY" : "OVERLAY", best_primary_osd_plane.zpos);
+-	fprintf(stderr, "best_overlay_osd_plane: plane_id %d, type %s, zpos %lld\n",
+-		best_overlay_osd_plane.plane_id, best_overlay_osd_plane.type == DRM_PLANE_TYPE_PRIMARY ? "PRIMARY" : "OVERLAY", best_overlay_osd_plane.zpos);
++	if (best_primary_video_plane.plane_id) {
++		fprintf(stderr, "best_primary_video_plane: plane_id %d, type %s, zpos %lld\n",
++			best_primary_video_plane.plane_id, best_primary_video_plane.type == DRM_PLANE_TYPE_PRIMARY ? "PRIMARY" : "OVERLAY", best_primary_video_plane.zpos);
++	}
++	if (best_overlay_video_plane.plane_id) {
++		fprintf(stderr, "best_overlay_video_plane: plane_id %d, type %s, zpos %lld\n",
++			best_overlay_video_plane.plane_id, best_overlay_video_plane.type == DRM_PLANE_TYPE_PRIMARY ? "PRIMARY" : "OVERLAY", best_overlay_video_plane.zpos);
++	}
++	if (best_primary_osd_plane.plane_id) {
++		fprintf(stderr, "best_primary_osd_plane: plane_id %d, type %s, zpos %lld\n",
++			best_primary_osd_plane.plane_id, best_primary_osd_plane.type == DRM_PLANE_TYPE_PRIMARY ? "PRIMARY" : "OVERLAY", best_primary_osd_plane.zpos);
++	}
++	if (best_overlay_osd_plane.plane_id) {
++		fprintf(stderr, "best_overlay_osd_plane: plane_id %d, type %s, zpos %lld\n",
++			best_overlay_osd_plane.plane_id, best_overlay_osd_plane.type == DRM_PLANE_TYPE_PRIMARY ? "PRIMARY" : "OVERLAY", best_overlay_osd_plane.zpos);
++	}
+ #endif
+ 
+ 	// See which planes we should use
+@@ -2333,6 +2364,14 @@ void VideoInit(VideoRender * render)
+ 	if (!(ModeReq = drmModeAtomicAlloc()))
+ 		fprintf(stderr, "cannot allocate atomic request (%d): %m\n", errno);
+ 
++	// Check, if we can set z-order (meson has fixed z-order, which cannot be changed)
++	if (render->use_zpos && CheckZpos(render, render->planes[VIDEO_PLANE]->plane_id, render->planes[VIDEO_PLANE]->zpos)) {
++		render->use_zpos = 0;
++	}
++	if (render->use_zpos && CheckZpos(render, render->planes[OSD_PLANE]->plane_id, render->planes[VIDEO_PLANE]->zpos)) {
++		render->use_zpos = 0;
++	}
++
+ 	SetPropertyRequest(ModeReq, render->fd_drm, render->crtc_id,
+ 						DRM_MODE_OBJECT_CRTC, "MODE_ID", modeID);
+ 	SetPropertyRequest(ModeReq, render->fd_drm, render->connector_id,
+-- 
+2.30.2
+
