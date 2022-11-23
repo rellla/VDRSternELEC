@@ -1,0 +1,31 @@
+From e7aea22e96605a20a31f3a105f595a2c23318146 Mon Sep 17 00:00:00 2001
+From: Andreas Baierl <ichgeh@imkreisrum.de>
+Date: Thu, 24 Nov 2022 12:07:47 +0100
+Subject: [PATCH 5/6] codec: add amlogic hardware decoder
+
+---
+ video_drm.c | 8 ++++++++
+ 1 file changed, 8 insertions(+)
+
+diff --git a/video_drm.c b/video_drm.c
+index 66dd1ab..fe98c94 100644
+--- a/video_drm.c
++++ b/video_drm.c
+@@ -329,6 +329,14 @@ void ReadHWPlatform(VideoRender * render)
+ 			break;
+ 		}
+ 
++		if (strstr(read_ptr, "amlogic")) {
++#ifdef DEBUG
++			printf("ReadHWPlatform: amlogic found\n");
++#endif
++			render->CodecMode = 3;	// set _v4l2m2m for H264
++			break;
++		}
++
+ 		read_size -= (strlen(read_ptr) + 1);
+ 		read_ptr = (char *)&read_ptr[(strlen(read_ptr) + 1)];
+ 	}
+-- 
+2.30.2
+

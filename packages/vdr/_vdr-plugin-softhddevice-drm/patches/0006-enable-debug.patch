@@ -1,0 +1,39 @@
+From 651f86592274f0459f62b1f8fafc0306610f18f0 Mon Sep 17 00:00:00 2001
+From: Andreas Baierl <ichgeh@imkreisrum.de>
+Date: Thu, 24 Nov 2022 12:09:23 +0100
+Subject: [PATCH 6/6] enable debug
+
+---
+ Makefile | 10 +++++-----
+ 1 file changed, 5 insertions(+), 5 deletions(-)
+
+diff --git a/Makefile b/Makefile
+index d4b8617..29a42ec 100644
+--- a/Makefile
++++ b/Makefile
+@@ -16,17 +16,17 @@ MMAL ?= 0
+ 	# Use OpenGL/ES for OSD? Disable autodetection by setting GLES=1 or GLES=0 with make command
+ GLES ?= $(shell pkg-config --exists glesv2 egl gbm && echo 1)
+ 
+-CONFIG := #-DDEBUG 				# enable debug output+functions
++CONFIG := -DDEBUG 				# enable debug output+functions
+ #CONFIG += -DAV_SYNC_DEBUG		# enable debug messages AV_SYNC
+-#CONFIG += -DSOUND_DEBUG		# enable debug messages SOUND
++CONFIG += -DSOUND_DEBUG		# enable debug messages SOUND
+ #CONFIG += -DOSD_DEBUG			# enable debug messages OSD
+-#CONFIG += -DDRM_DEBUG			# enable debug messages in drm configuration
+-#CONFIG += -DCODEC_DEBUG		# enable debug messages in codec configuration
++CONFIG += -DDRM_DEBUG			# enable debug messages in drm configuration
++CONFIG += -DCODEC_DEBUG		# enable debug messages in codec configuration
+ #CONFIG += -DSTILL_DEBUG		# still picture debug
+ #CONFIG += -DMEDIA_DEBUG		# media player debug
+ 
+ ifeq ($(GLES),1)
+-#CONFIG += -DGL_DEBUG			# enable debug messages OpenGL/ES OSD
++CONFIG += -DGL_DEBUG			# enable debug messages OpenGL/ES OSD
+ #CONFIG += -DGL_DEBUG_TIME #-DGL_DEBUG_TIME_ALL # enable time measurement debug messages OpenGL/ES OSD
+ #CONFIG += -DWRITE_PNG			# enable writing OSD to png file
+ CONFIG += -DUSE_GLES			# build with OpenGL/ES support
+-- 
+2.30.2
+
