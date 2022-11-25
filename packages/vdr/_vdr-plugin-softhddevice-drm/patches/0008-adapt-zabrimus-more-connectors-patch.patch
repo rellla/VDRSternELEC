@@ -1,0 +1,98 @@
+From 043b212291b4d0aca9aafcd9103e693296554391 Mon Sep 17 00:00:00 2001
+From: Andreas Baierl <ichgeh@imkreisrum.de>
+Date: Fri, 25 Nov 2022 10:41:54 +0100
+Subject: [PATCH 8/8] adapt zabrimus more connectors patch
+
+---
+ video_drm.c | 30 ++++++++++++++++--------------
+ 1 file changed, 16 insertions(+), 14 deletions(-)
+
+diff --git a/video_drm.c b/video_drm.c
+index f1893c3..672aeb1 100644
+--- a/video_drm.c
++++ b/video_drm.c
+@@ -518,8 +518,8 @@ static int FindDevice(VideoRender * render)
+ 	drmModePlaneRes *plane_res;
+ 	int hdr;
+ 	uint32_t vrefresh;
+-	uint32_t j, k;
+-	int i;
++	uint32_t k, l;
++	int i, j;
+ 
+ 	render->fd_drm = open("/dev/dri/card0", O_RDWR);
+ 	if (render->fd_drm < 0) {
+@@ -575,19 +575,21 @@ static int FindDevice(VideoRender * render)
+ 		}
+ 		// search Modes
+ search_mode:
+-		for (i = 0; i < connector->count_modes; i++) {
+-			mode = &connector->modes[i];
++		for (j = 0; j < connector->count_modes; j++) {
++			mode = &connector->modes[j];
++			Info(_("Found Monitor Mode %dx%d@%d\n"),
++				mode->hdisplay, mode->vdisplay, mode->vrefresh);
+ 			// Mode HD
+ 			if(mode->hdisplay == 1920 && mode->vdisplay == 1080 &&
+ 				mode->vrefresh == vrefresh &&
+ 				!(mode->flags & DRM_MODE_FLAG_INTERLACE) && !hdr) {
+-				memcpy(&render->mode, &connector->modes[i], sizeof(drmModeModeInfo));
++				memcpy(&render->mode, &connector->modes[j], sizeof(drmModeModeInfo));
+ 			}
+ 			// Mode HDready
+ 			if(mode->hdisplay == 1280 && mode->vdisplay == 720 &&
+ 				mode->vrefresh == vrefresh &&
+ 				!(mode->flags & DRM_MODE_FLAG_INTERLACE) && hdr) {
+-				memcpy(&render->mode, &connector->modes[i], sizeof(drmModeModeInfo));
++				memcpy(&render->mode, &connector->modes[j], sizeof(drmModeModeInfo));
+ 			}
+ 		}
+ 		if (!render->mode.hdisplay || !render->mode.vdisplay) {
+@@ -623,11 +625,11 @@ search_mode:
+ 	struct plane best_primary_osd_plane = { .plane_id = 0};   // is the AR24 capable primary plane with the highest plane_id
+ 	struct plane best_overlay_osd_plane = { .plane_id = 0};   // is the AR24 capable overlay plane with the highest plane_id
+ 
+-	for (j = 0; j < plane_res->count_planes; j++) {
+-		plane = drmModeGetPlane(render->fd_drm, plane_res->planes[j]);
++	for (k = 0; k < plane_res->count_planes; k++) {
++		plane = drmModeGetPlane(render->fd_drm, plane_res->planes[k]);
+ 
+ 		if (plane == NULL)
+-			fprintf(stderr, "FindDevice: cannot query DRM-KMS plane %d\n", j);
++			fprintf(stderr, "FindDevice: cannot query DRM-KMS plane %d\n", k);
+ 
+ 		for (i = 0; i < resources->count_crtcs; i++) {
+ 			if (plane->possible_crtcs & (1 << i))
+@@ -636,11 +638,11 @@ search_mode:
+ 
+ 		uint64_t type;
+ 		uint64_t zpos;
+-		if (GetPropertyValue(render->fd_drm, plane_res->planes[j],
++		if (GetPropertyValue(render->fd_drm, plane_res->planes[k],
+ 				     DRM_MODE_OBJECT_PLANE, "type", &type)) {
+ 			fprintf(stderr, "FindDevice: Failed to get property 'type'\n");
+ 		}
+-		if (GetPropertyValue(render->fd_drm, plane_res->planes[j],
++		if (GetPropertyValue(render->fd_drm, plane_res->planes[k],
+ 				     DRM_MODE_OBJECT_PLANE, "zpos", &zpos)) {
+ 			fprintf(stderr, "FindDevice: Failed to get property 'zpos'\n");
+ 		} else {
+@@ -656,12 +658,12 @@ search_mode:
+ 		fprintf(stderr, "FindDevice: PixelFormats");
+ #endif
+ 		// test pixel format and plane caps
+-		for (k = 0; k < plane->count_formats; k++) {
++		for (l = 0; l < plane->count_formats; l++) {
+ 			if (encoder->possible_crtcs & plane->possible_crtcs) {
+ #ifdef DRM_DEBUG
+-				fprintf(stderr, " %4.4s", (char *)&plane->formats[k]);
++				fprintf(stderr, " %4.4s", (char *)&plane->formats[l]);
+ #endif
+-				switch (plane->formats[k]) {
++				switch (plane->formats[l]) {
+ 					case DRM_FORMAT_NV12:
+ 						if (type == DRM_PLANE_TYPE_PRIMARY && !best_primary_video_plane.plane_id) {
+ 							best_primary_video_plane.plane_id = plane->plane_id;
+-- 
+2.30.2
+
