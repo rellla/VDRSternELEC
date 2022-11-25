@@ -1,0 +1,67 @@
+From a346445be4ae075fd4ae73a079c293e749d20e4c Mon Sep 17 00:00:00 2001
+From: Andreas Baierl <ichgeh@imkreisrum.de>
+Date: Fri, 25 Nov 2022 10:30:07 +0100
+Subject: [PATCH 7/7] loud drm debugs
+
+---
+ video_drm.c | 19 +++++++++++++++++++
+ 1 file changed, 19 insertions(+)
+
+diff --git a/video_drm.c b/video_drm.c
+index fe98c94..f1893c3 100644
+--- a/video_drm.c
++++ b/video_drm.c
+@@ -211,17 +211,29 @@ static int SetPropertyRequest(drmModeAtomicReqPtr ModeReq, int fd_drm,
+ 
+ void SetPlaneFbId(drmModeAtomicReqPtr ModeReq, uint32_t plane_id, uint64_t fb_id)
+ {
++#ifdef DRM_DEBUG
++	Info(_("SetPlaneFbId: plane_id %i FB_ID: %lld\n"),
++		plane_id, fb_id);
++#endif
+ 	SetPlanePropertyRequest(ModeReq, plane_id, "FB_ID", fb_id);
+ }
+ 
+ void SetPlaneCrtcId(drmModeAtomicReqPtr ModeReq, uint32_t plane_id, uint64_t crtc_id)
+ {
++#ifdef DRM_DEBUG
++	Info(_("SetPlaneCrtcId: plane_id %i CRTC_ID: %lld\n"),
++		plane_id, crtc_id);
++#endif
+ 	SetPlanePropertyRequest(ModeReq, plane_id, "CRTC_ID", crtc_id);
+ }
+ 
+ void SetPlaneCrtc(drmModeAtomicReqPtr ModeReq, uint32_t plane_id,
+ 		  int crtc_x, int crtc_y, int crtc_w, int crtc_h)
+ {
++#ifdef DRM_DEBUG
++	Info(_("SetPlaneCrtc: plane_id %i CRTC_X: %i, CRTC_Y: %i, CRTC_W: %i, CRTC_H: %i\n"),
++		plane_id, crtc_x, crtc_y, crtc_w, crtc_h);
++#endif
+ 	SetPlanePropertyRequest(ModeReq, plane_id, "CRTC_X", crtc_x);
+ 	SetPlanePropertyRequest(ModeReq, plane_id, "CRTC_Y", crtc_y);
+ 	SetPlanePropertyRequest(ModeReq, plane_id, "CRTC_W", crtc_w);
+@@ -231,6 +243,10 @@ void SetPlaneCrtc(drmModeAtomicReqPtr ModeReq, uint32_t plane_id,
+ void SetPlaneSrc(drmModeAtomicReqPtr ModeReq, uint32_t plane_id,
+ 		 int src_x, int src_y, int src_w, int src_h)
+ {
++#ifdef DRM_DEBUG
++	Info(_("SetPlaneSrc: plane_id %i SRC_X: %i, SRC_Y: %i, SRC_W: %i, SRC_H: %i\n"),
++		plane_id, src_x, src_y, src_w, src_h);
++#endif
+ 	SetPlanePropertyRequest(ModeReq, plane_id, "SRC_X", src_x);
+ 	SetPlanePropertyRequest(ModeReq, plane_id, "SRC_Y", src_y);
+ 	SetPlanePropertyRequest(ModeReq, plane_id, "SRC_W", src_w << 16);
+@@ -239,6 +255,9 @@ void SetPlaneSrc(drmModeAtomicReqPtr ModeReq, uint32_t plane_id,
+ 
+ void SetPlaneZpos(drmModeAtomicReqPtr ModeReq, uint32_t plane_id, uint64_t zpos)
+ {
++#ifdef DRM_DEBUG
++	Info(_("SetPlaneZpos: plane_id %i zpos: %lld\n"), plane_id, zpos);
++#endif
+ 	SetPlanePropertyRequest(ModeReq, plane_id, "zpos", zpos);
+ }
+ 
+-- 
+2.30.2
+
