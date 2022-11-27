@@ -1,7 +1,7 @@
 From dc2dfa9823ae25d75cb74be188455dc7c974e7c4 Mon Sep 17 00:00:00 2001
 From: Andreas Baierl <ichgeh@imkreisrum.de>
 Date: Wed, 23 Nov 2022 12:48:12 +0100
-Subject: [PATCH 2/9] drm: fix zpos handling
+Subject: [PATCH 2/7] drm: fix zpos handling
 
 On Amlogic devices we can read the planes' z-order value, but they can't be changed.
 Introduce a check, if zpos can be changed with a drm atomic commit, otherwise ignore

@@ -1,7 +1,7 @@
 From 4504e199ee188ea9504aaec407afd358d924d239 Mon Sep 17 00:00:00 2001
 From: Andreas Baierl <ichgeh@imkreisrum.de>
 Date: Wed, 23 Nov 2022 21:21:37 +0100
-Subject: [PATCH 3/9] GL: fix texture shader
+Subject: [PATCH 3/7] GL: fix texture shader
 
 Fix the shaders to link on OpenGL ES 3.1 systems.
 

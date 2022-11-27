@@ -1,7 +1,7 @@
 From edbb683a9a7ca922f71ed6c5ea86cd3182b87e5e Mon Sep 17 00:00:00 2001
 From: Jens Ziller <zillevdr@gmx.de>
 Date: Wed, 23 Nov 2022 08:57:44 +0100
-Subject: [PATCH 1/9] improve audio pes parsing
+Subject: [PATCH 1/7] improve audio pes parsing
 
 ---
  audio.c     |   4 +-

@@ -1,17 +1,17 @@
-From 1258cfbe392ad655801613f9d54609f7705e06aa Mon Sep 17 00:00:00 2001
+From 23ee3628921e8281f4b4e40adbc74a646dca68f3 Mon Sep 17 00:00:00 2001
 From: Andreas Baierl <ichgeh@imkreisrum.de>
 Date: Fri, 25 Nov 2022 10:41:54 +0100
-Subject: [PATCH 7/9] adapt zabrimus more connectors patch
+Subject: [PATCH 6/7] adapt zabrimus more connectors patch
 
 ---
  video_drm.c | 30 ++++++++++++++++--------------
  1 file changed, 16 insertions(+), 14 deletions(-)
 
 diff --git a/video_drm.c b/video_drm.c
-index 8b190d5..310abd6 100644
+index f421ff7..581ec31 100644
 --- a/video_drm.c
 +++ b/video_drm.c
-@@ -499,8 +499,8 @@ static int FindDevice(VideoRender * render)
+@@ -491,8 +491,8 @@ static int FindDevice(VideoRender * render)
  	drmModePlaneRes *plane_res;
  	int hdr;
  	uint32_t vrefresh;
@@ -22,7 +22,7 @@ index 8b190d5..310abd6 100644
  
  	render->fd_drm = open("/dev/dri/card0", O_RDWR);
  	if (render->fd_drm < 0) {
-@@ -556,19 +556,21 @@ static int FindDevice(VideoRender * render)
+@@ -548,19 +548,21 @@ static int FindDevice(VideoRender * render)
  		}
  		// search Modes
  search_mode:
@@ -48,7 +48,7 @@ index 8b190d5..310abd6 100644
  			}
  		}
  		if (!render->mode.hdisplay || !render->mode.vdisplay) {
-@@ -604,11 +606,11 @@ search_mode:
+@@ -596,11 +598,11 @@ search_mode:
  	struct plane best_primary_osd_plane = { .plane_id = 0};   // is the AR24 capable primary plane with the highest plane_id
  	struct plane best_overlay_osd_plane = { .plane_id = 0};   // is the AR24 capable overlay plane with the highest plane_id
  
@@ -63,7 +63,7 @@ index 8b190d5..310abd6 100644
  
  		for (i = 0; i < resources->count_crtcs; i++) {
  			if (plane->possible_crtcs & (1 << i))
-@@ -617,11 +619,11 @@ search_mode:
+@@ -609,11 +611,11 @@ search_mode:
  
  		uint64_t type;
  		uint64_t zpos;
@@ -77,7 +77,7 @@ index 8b190d5..310abd6 100644
  				     DRM_MODE_OBJECT_PLANE, "zpos", &zpos)) {
  			fprintf(stderr, "FindDevice: Failed to get property 'zpos'\n");
  		} else {
-@@ -637,12 +639,12 @@ search_mode:
+@@ -629,12 +631,12 @@ search_mode:
  		fprintf(stderr, "FindDevice: PixelFormats");
  #endif
  		// test pixel format and plane caps
