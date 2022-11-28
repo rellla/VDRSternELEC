@@ -1,0 +1,83 @@
+From 4c8f8c4378ced02af2d43a447eb5d7c28856a16c Mon Sep 17 00:00:00 2001
+From: Andreas Baierl <ichgeh@imkreisrum.de>
+Date: Mon, 28 Nov 2022 11:33:44 +0100
+Subject: [PATCH 9/9] debug 2
+
+---
+ video_drm.c | 37 ++++++++++++++++++++++++++++++-------
+ 1 file changed, 30 insertions(+), 7 deletions(-)
+
+diff --git a/video_drm.c b/video_drm.c
+index 852ac51..978f7ee 100644
+--- a/video_drm.c
++++ b/video_drm.c
+@@ -85,6 +85,10 @@ static pthread_t DisplayThread;
+ 
+ static pthread_t FilterThread;
+ 
++static uint64_t dw, dh, pw, ph = 0;
++static int fw, fh = 0;
++static double fsar = 0.0f;
++
+ //----------------------------------------------------------------------------
+ //	Helper functions
+ //----------------------------------------------------------------------------
+@@ -1317,19 +1321,22 @@ page_flip:
+ 		DispHeight = render->video.height;
+ 		DispX = render->video.x;
+ 		DispY = render->video.y;
+-		Info(_("[softhddev]video is scaled: DispWidth %d DispHeight %d"), DispWidth, DispHeight);
+ 	}
+ 
+ 	uint64_t PicWidth = DispWidth;
+ 	uint64_t PicHeight = DispHeight;
++	double frame_sar;
+ 
+ 	// resize frame to fit into video area/ screen and keep the aspect ratio
+ 	if (frame) {
+-		double frame_sar;
+ 		// use frame->sample_aspect_ratio of 1.0f if undefined (0.0f), otherwise we have division by 0
+ 		frame_sar = av_q2d(frame->sample_aspect_ratio) ? av_q2d(frame->sample_aspect_ratio) : 1.0f;
+-		Info(_("[softhddev]frame_sar %f frame->width %d frame->height %d"), frame_sar, frame->width, frame->height);
+-		Info(_("[softhddev]DispWidth %d DispHeight %d"), DispWidth, DispHeight);
++
++		if (frame_sar != fsar || frame->width != fw || frame->height != fh)
++			Info(_("[softhddev]frame_sar %f frame->width %d frame->height %d"), frame_sar, frame->width, frame->height);
++
++		if (DispWidth != dw || DispHeight != dh)
++			Info(_("[softhddev]DispWidth %lld DispHeight %lld"), DispWidth, DispHeight);
+ 
+ 		// frame b*h < display b*h, e.g. fit a 4:3 frame into 16:9 display or area
+ 		if (DispWidth / DispHeight >= frame->width / frame->height) {
+@@ -1344,9 +1351,25 @@ page_flip:
+ 				PicHeight = DispHeight;
+ 			}
+ 		}
+-	}
+-
+-	Info(_("[softhddev]PicWidth %d PicHeight %d"), PicWidth, PicHeight);
++		if (fw != frame->width)
++			fw = frame->width;
++		if (fh != frame->height)
++			fh = frame->height;
++	}
++
++	if (PicWidth != pw || PicHeight != ph)
++		Info(_("[softhddev]PicWidth %lld PicHeight %lld"), PicWidth, PicHeight);
++
++	if (PicWidth != pw)
++		pw = PicWidth;
++	if (PicHeight != ph)
++		ph = PicHeight;
++	if (frame_sar != fsar)
++		fsar = frame_sar;
++	if (DispWidth != dw)
++		dw = DispWidth;
++	if (DispHeight != dh)
++		dh = DispHeight;
+ 
+ 	SetPlane(ModeReq, render->planes[VIDEO_PLANE]->plane_id, render->crtc_id, buf->fb_id,
+ 		 DispX + (DispWidth - PicWidth) / 2, DispY + (DispHeight - PicHeight) / 2, PicWidth, PicHeight,
+-- 
+2.30.2
+
