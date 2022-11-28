@@ -1,0 +1,42 @@
+From caa213812d3d423d8cc07a9ff0abff85f3641d9d Mon Sep 17 00:00:00 2001
+From: Andreas Baierl <ichgeh@imkreisrum.de>
+Date: Mon, 28 Nov 2022 09:36:19 +0100
+Subject: [PATCH 8/8] debugs
+
+---
+ video_drm.c | 5 +++++
+ 1 file changed, 5 insertions(+)
+
+diff --git a/video_drm.c b/video_drm.c
+index 4c73408..852ac51 100644
+--- a/video_drm.c
++++ b/video_drm.c
+@@ -1317,6 +1317,7 @@ page_flip:
+ 		DispHeight = render->video.height;
+ 		DispX = render->video.x;
+ 		DispY = render->video.y;
++		Info(_("[softhddev]video is scaled: DispWidth %d DispHeight %d"), DispWidth, DispHeight);
+ 	}
+ 
+ 	uint64_t PicWidth = DispWidth;
+@@ -1327,6 +1328,8 @@ page_flip:
+ 		double frame_sar;
+ 		// use frame->sample_aspect_ratio of 1.0f if undefined (0.0f), otherwise we have division by 0
+ 		frame_sar = av_q2d(frame->sample_aspect_ratio) ? av_q2d(frame->sample_aspect_ratio) : 1.0f;
++		Info(_("[softhddev]frame_sar %f frame->width %d frame->height %d"), frame_sar, frame->width, frame->height);
++		Info(_("[softhddev]DispWidth %d DispHeight %d"), DispWidth, DispHeight);
+ 
+ 		// frame b*h < display b*h, e.g. fit a 4:3 frame into 16:9 display or area
+ 		if (DispWidth / DispHeight >= frame->width / frame->height) {
+@@ -1343,6 +1346,8 @@ page_flip:
+ 		}
+ 	}
+ 
++	Info(_("[softhddev]PicWidth %d PicHeight %d"), PicWidth, PicHeight);
++
+ 	SetPlane(ModeReq, render->planes[VIDEO_PLANE]->plane_id, render->crtc_id, buf->fb_id,
+ 		 DispX + (DispWidth - PicWidth) / 2, DispY + (DispHeight - PicHeight) / 2, PicWidth, PicHeight,
+ 		 0, 0, buf->width, buf->height);
+-- 
+2.30.2
+
