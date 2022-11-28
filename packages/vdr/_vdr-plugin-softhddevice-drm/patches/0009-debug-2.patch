@@ -48,7 +48,7 @@ index 852ac51..978f7ee 100644
 +			Info(_("[softhddev]DispWidth %lld DispHeight %lld"), DispWidth, DispHeight);
  
  		// frame b*h < display b*h, e.g. fit a 4:3 frame into 16:9 display or area
- 		if (DispWidth / DispHeight >= frame->width / frame->height) {
+ 		if (1000 * DispWidth / DispHeight >= 1000 * frame->width / frame->height) {
 @@ -1344,9 +1351,25 @@ page_flip:
  				PicHeight = DispHeight;
  			}
