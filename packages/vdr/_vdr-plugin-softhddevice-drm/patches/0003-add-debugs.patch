@@ -1,0 +1,177 @@
+From f7d4386c589a990fb07d4925146f9631b90c1808 Mon Sep 17 00:00:00 2001
+From: Andreas Baierl <ichgeh@imkreisrum.de>
+Date: Mon, 5 Dec 2022 11:05:05 +0100
+Subject: [PATCH 3/3] add debugs
+
+---
+ 0001-codec-add-amlogic-hardware-decoder.patch | 31 ++++++
+ ...adapt-zabrimus-more-connectors-patch.patch | 98 +++++++++++++++++++
+ Makefile                                      |  6 +-
+ 3 files changed, 132 insertions(+), 3 deletions(-)
+ create mode 100644 0001-codec-add-amlogic-hardware-decoder.patch
+ create mode 100644 0002-adapt-zabrimus-more-connectors-patch.patch
+
+diff --git a/0001-codec-add-amlogic-hardware-decoder.patch b/0001-codec-add-amlogic-hardware-decoder.patch
+new file mode 100644
+index 0000000..d1cf738
+--- /dev/null
++++ b/0001-codec-add-amlogic-hardware-decoder.patch
+@@ -0,0 +1,31 @@
++From 8c32cf430e5cf6152474442b9fb322b70e564de9 Mon Sep 17 00:00:00 2001
++From: Andreas Baierl <ichgeh@imkreisrum.de>
++Date: Thu, 24 Nov 2022 12:07:47 +0100
++Subject: [PATCH 1/2] codec: add amlogic hardware decoder
++
++---
++ video_drm.c | 8 ++++++++
++ 1 file changed, 8 insertions(+)
++
++diff --git a/video_drm.c b/video_drm.c
++index cfc4162..e626add 100644
++--- a/video_drm.c
+++++ b/video_drm.c
++@@ -329,6 +329,14 @@ void ReadHWPlatform(VideoRender * render)
++ 			break;
++ 		}
++ 
+++		if (strstr(read_ptr, "amlogic")) {
+++#ifdef DEBUG
+++			printf("ReadHWPlatform: amlogic found\n");
+++#endif
+++			render->CodecMode = 3;	// set _v4l2m2m for H264
+++			break;
+++		}
+++
++ 		read_size -= (strlen(read_ptr) + 1);
++ 		read_ptr = (char *)&read_ptr[(strlen(read_ptr) + 1)];
++ 	}
++-- 
++2.30.2
++
+diff --git a/0002-adapt-zabrimus-more-connectors-patch.patch b/0002-adapt-zabrimus-more-connectors-patch.patch
+new file mode 100644
+index 0000000..894614d
+--- /dev/null
++++ b/0002-adapt-zabrimus-more-connectors-patch.patch
+@@ -0,0 +1,98 @@
++From bdf92db1d8369cf50137992c938c0c6b6096961e Mon Sep 17 00:00:00 2001
++From: Andreas Baierl <ichgeh@imkreisrum.de>
++Date: Fri, 25 Nov 2022 10:41:54 +0100
++Subject: [PATCH 2/2] adapt zabrimus more connectors patch
++
++---
++ video_drm.c | 30 ++++++++++++++++--------------
++ 1 file changed, 16 insertions(+), 14 deletions(-)
++
++diff --git a/video_drm.c b/video_drm.c
++index e626add..f49be72 100644
++--- a/video_drm.c
+++++ b/video_drm.c
++@@ -499,8 +499,8 @@ static int FindDevice(VideoRender * render)
++ 	drmModePlaneRes *plane_res;
++ 	int hdr;
++ 	uint32_t vrefresh;
++-	uint32_t j, k;
++-	int i;
+++	uint32_t k, l;
+++	int i, j;
++ 
++ 	render->fd_drm = open("/dev/dri/card0", O_RDWR);
++ 	if (render->fd_drm < 0) {
++@@ -556,19 +556,21 @@ static int FindDevice(VideoRender * render)
++ 		}
++ 		// search Modes
++ search_mode:
++-		for (i = 0; i < connector->count_modes; i++) {
++-			mode = &connector->modes[i];
+++		for (j = 0; j < connector->count_modes; j++) {
+++			mode = &connector->modes[j];
+++			Info(_("Found Monitor Mode %dx%d@%d\n"),
+++				mode->hdisplay, mode->vdisplay, mode->vrefresh);
++ 			// Mode HD
++ 			if(mode->hdisplay == 1920 && mode->vdisplay == 1080 &&
++ 				mode->vrefresh == vrefresh &&
++ 				!(mode->flags & DRM_MODE_FLAG_INTERLACE) && !hdr) {
++-				memcpy(&render->mode, &connector->modes[i], sizeof(drmModeModeInfo));
+++				memcpy(&render->mode, &connector->modes[j], sizeof(drmModeModeInfo));
++ 			}
++ 			// Mode HDready
++ 			if(mode->hdisplay == 1280 && mode->vdisplay == 720 &&
++ 				mode->vrefresh == vrefresh &&
++ 				!(mode->flags & DRM_MODE_FLAG_INTERLACE) && hdr) {
++-				memcpy(&render->mode, &connector->modes[i], sizeof(drmModeModeInfo));
+++				memcpy(&render->mode, &connector->modes[j], sizeof(drmModeModeInfo));
++ 			}
++ 		}
++ 		if (!render->mode.hdisplay || !render->mode.vdisplay) {
++@@ -604,11 +606,11 @@ search_mode:
++ 	struct plane best_primary_osd_plane = { .plane_id = 0};   // is the AR24 capable primary plane with the highest plane_id
++ 	struct plane best_overlay_osd_plane = { .plane_id = 0};   // is the AR24 capable overlay plane with the highest plane_id
++ 
++-	for (j = 0; j < plane_res->count_planes; j++) {
++-		plane = drmModeGetPlane(render->fd_drm, plane_res->planes[j]);
+++	for (k = 0; k < plane_res->count_planes; k++) {
+++		plane = drmModeGetPlane(render->fd_drm, plane_res->planes[k]);
++ 
++ 		if (plane == NULL)
++-			fprintf(stderr, "FindDevice: cannot query DRM-KMS plane %d\n", j);
+++			fprintf(stderr, "FindDevice: cannot query DRM-KMS plane %d\n", k);
++ 
++ 		for (i = 0; i < resources->count_crtcs; i++) {
++ 			if (plane->possible_crtcs & (1 << i))
++@@ -617,11 +619,11 @@ search_mode:
++ 
++ 		uint64_t type;
++ 		uint64_t zpos;
++-		if (GetPropertyValue(render->fd_drm, plane_res->planes[j],
+++		if (GetPropertyValue(render->fd_drm, plane_res->planes[k],
++ 				     DRM_MODE_OBJECT_PLANE, "type", &type)) {
++ 			fprintf(stderr, "FindDevice: Failed to get property 'type'\n");
++ 		}
++-		if (GetPropertyValue(render->fd_drm, plane_res->planes[j],
+++		if (GetPropertyValue(render->fd_drm, plane_res->planes[k],
++ 				     DRM_MODE_OBJECT_PLANE, "zpos", &zpos)) {
++ 			fprintf(stderr, "FindDevice: Failed to get property 'zpos'\n");
++ 		} else {
++@@ -637,12 +639,12 @@ search_mode:
++ 		fprintf(stderr, "FindDevice: PixelFormats");
++ #endif
++ 		// test pixel format and plane caps
++-		for (k = 0; k < plane->count_formats; k++) {
+++		for (l = 0; l < plane->count_formats; l++) {
++ 			if (encoder->possible_crtcs & plane->possible_crtcs) {
++ #ifdef DRM_DEBUG
++-				fprintf(stderr, " %4.4s", (char *)&plane->formats[k]);
+++				fprintf(stderr, " %4.4s", (char *)&plane->formats[l]);
++ #endif
++-				switch (plane->formats[k]) {
+++				switch (plane->formats[l]) {
++ 					case DRM_FORMAT_NV12:
++ 						if (type == DRM_PLANE_TYPE_PRIMARY && !best_primary_video_plane.plane_id) {
++ 							best_primary_video_plane.plane_id = plane->plane_id;
++-- 
++2.30.2
++
+diff --git a/Makefile b/Makefile
+index d4b8617..0d8f11d 100644
+--- a/Makefile
++++ b/Makefile
+@@ -16,12 +16,12 @@ MMAL ?= 0
+ 	# Use OpenGL/ES for OSD? Disable autodetection by setting GLES=1 or GLES=0 with make command
+ GLES ?= $(shell pkg-config --exists glesv2 egl gbm && echo 1)
+ 
+-CONFIG := #-DDEBUG 				# enable debug output+functions
++CONFIG := -DDEBUG 				# enable debug output+functions
+ #CONFIG += -DAV_SYNC_DEBUG		# enable debug messages AV_SYNC
+ #CONFIG += -DSOUND_DEBUG		# enable debug messages SOUND
+ #CONFIG += -DOSD_DEBUG			# enable debug messages OSD
+-#CONFIG += -DDRM_DEBUG			# enable debug messages in drm configuration
+-#CONFIG += -DCODEC_DEBUG		# enable debug messages in codec configuration
++CONFIG += -DDRM_DEBUG			# enable debug messages in drm configuration
++CONFIG += -DCODEC_DEBUG		# enable debug messages in codec configuration
+ #CONFIG += -DSTILL_DEBUG		# still picture debug
+ #CONFIG += -DMEDIA_DEBUG		# media player debug
+ 
+-- 
+2.30.2
+
