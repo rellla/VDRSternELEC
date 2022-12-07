@@ -1,0 +1,25 @@
+From 39cdf088e3054c6adef687897558f792aa6900f7 Mon Sep 17 00:00:00 2001
+From: Andreas Baierl <ichgeh@imkreisrum.de>
+Date: Wed, 7 Dec 2022 20:55:15 +0100
+Subject: [PATCH] fix video size
+
+---
+ video_drm.c | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/video_drm.c b/video_drm.c
+index cfc4162..0d4c3b0 100644
+--- a/video_drm.c
++++ b/video_drm.c
+@@ -1318,7 +1318,7 @@ page_flip:
+ 		double frame_sar = av_q2d(frame->sample_aspect_ratio) ? av_q2d(frame->sample_aspect_ratio) : 1.0f;
+ 
+ 		// frame b*h < display b*h, e.g. fit a 4:3 frame into 16:9 display or area
+-		if (1000 * DispWidth / DispHeight >= 1000 * frame->width / frame->height) {
++		if (1000 * DispWidth / DispHeight > 1000 * frame->width / frame->height * frame_sar) {
+ 			PicWidth = DispHeight * frame->width / frame->height * frame_sar;
+ 			if (PicWidth <= 0 || PicWidth > DispWidth) {
+ 				PicWidth = DispWidth;
+-- 
+2.30.2
+
