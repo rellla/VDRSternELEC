@@ -1,0 +1,27 @@
+From 56fd6a44e931565b697840574eae22c7254d3160 Mon Sep 17 00:00:00 2001
+From: Andreas Baierl <ichgeh@imkreisrum.de>
+Date: Thu, 8 Dec 2022 20:22:57 +0100
+Subject: [PATCH] test
+
+---
+ video_drm.c | 4 ++++
+ 1 file changed, 4 insertions(+)
+
+diff --git a/video_drm.c b/video_drm.c
+index 1dc63f3..49f9f92 100644
+--- a/video_drm.c
++++ b/video_drm.c
+@@ -2427,6 +2427,10 @@ void VideoInit(VideoRender * render)
+ 	SetPlane(ModeReq, render->planes[VIDEO_PLANE]->plane_id, render->crtc_id, render->buf_black.fb_id,
+ 		 0, 0, render->mode.hdisplay, render->mode.vdisplay, 0, 0, render->buf_black.width, render->buf_black.height);
+ 
++	Info(_("VideoInit: plane_id %d crtc_id %d fb_id %d hdisplay %d vdisplay %d width %d height %d\n"),
++		render->planes[VIDEO_PLANE]->plane_id, render->crtc_id, render->buf_black.fb_id,
++		render->mode.hdisplay, render->mode.vdisplay, render->buf_black.width, render->buf_black.height);
++
+ 	if (drmModeAtomicCommit(render->fd_drm, ModeReq, flags, NULL) != 0) {
+ 		fprintf(stderr, "cannot set atomic mode (%d): %m\n", errno);
+ 		drmModeAtomicFree(ModeReq);
+-- 
+2.30.2
+
