@@ -2,18 +2,18 @@
 
 PKG_NAME="_vdr-plugin-softhddevice-drm"
 
-if [ "${PROJECT}" = "Amlogic" ] && [ "${DEVICE}" = "AMLGX" ]; then
-	PKG_VERSION="fb8209749bd7d927a4f586e89810911f8c6e36e8"
-	PKG_SHA256="57bbcde7a5c751233f0076484b027563af20249c1193440986f0a3d8a36a4d0f"
-	PKG_SITE="https://github.com/zillevdr/vdr-plugin-softhddevice-drm"
-	PKG_URL="https://github.com/zillevdr/vdr-plugin-softhddevice-drm/archive/${PKG_VERSION}.zip"
-else
+#if [ "${PROJECT}" = "Amlogic" ] && [ "${DEVICE}" = "AMLGX" ]; then
+#	PKG_VERSION="fb8209749bd7d927a4f586e89810911f8c6e36e8"
+#	PKG_SHA256="57bbcde7a5c751233f0076484b027563af20249c1193440986f0a3d8a36a4d0f"
+#	PKG_SITE="https://github.com/zillevdr/vdr-plugin-softhddevice-drm"
+#	PKG_URL="https://github.com/zillevdr/vdr-plugin-softhddevice-drm/archive/${PKG_VERSION}.zip"
+#else
 	PKG_VERSION="21c8dab4db34420aa43238594c73aa376cdee36c"
 	PKG_SHA256="09caec705c8b26774bdaaa41ef6f43f951b94bb3fb21a58d5bf81e2fa3ef1579"
     PKG_SITE="https://github.com/rellla/vdr-plugin-softhddevice-drm"
     PKG_URL="https://github.com/rellla/vdr-plugin-softhddevice-drm/archive/${PKG_VERSION}.zip"
     PKG_BRANCH="drm-atomic-gles"
-fi
+#fi
 
 PKG_LICENSE="GPL"
 
