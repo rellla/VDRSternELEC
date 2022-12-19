@@ -1,18 +1,19 @@
 # SPDX-License-Identifier: GPL-2.0-or-later
 
-PKG_NAME="_vdr-plugin-softhddevice-drm"
+PKG_NAME="_vdr-plugin-softhddevice-drm-gles"
 
-PKG_VERSION="fb8209749bd7d927a4f586e89810911f8c6e36e8"
-PKG_SHA256="57bbcde7a5c751233f0076484b027563af20249c1193440986f0a3d8a36a4d0f"
-PKG_SITE="https://github.com/zillevdr/vdr-plugin-softhddevice-drm"
-PKG_URL="https://github.com/zillevdr/vdr-plugin-softhddevice-drm/archive/${PKG_VERSION}.zip"
+PKG_VERSION="21c8dab4db34420aa43238594c73aa376cdee36c"
+PKG_SHA256="09caec705c8b26774bdaaa41ef6f43f951b94bb3fb21a58d5bf81e2fa3ef1579"
+PKG_SITE="https://github.com/rellla/vdr-plugin-softhddevice-drm"
+PKG_URL="https://github.com/rellla/vdr-plugin-softhddevice-drm/archive/${PKG_VERSION}.zip"
+PKG_BRANCH="drm-atomic-gles"
 
 PKG_LICENSE="GPL"
 
-PKG_SOURCE_DIR="vdr-plugin-softhddevice-drm-${PKG_VERSION}"
-PKG_DEPENDS_TARGET="toolchain glm alsa freetype ffmpeg _vdr libdrm"
+PKG_SOURCE_DIR="vdr-plugin-softhddevice-drm-gles-${PKG_VERSION}"
+PKG_DEPENDS_TARGET="toolchain glm alsa freetype ffmpeg _vdr libdrm mesa"
 PKG_NEED_UNPACK="$(get_pkg_directory _vdr)"
-PKG_LONGDESC="VDR Output Device (softhddevice-drm)"
+PKG_LONGDESC="VDR Output Device (softhddevice-drm-gles)"
 PKG_TOOLCHAIN="manual"
 
 pre_configure_target() {
@@ -48,5 +49,5 @@ post_makeinstall_target() {
   VERSION=$(pkg-config --variable=apiversion vdr)
   cd ${INSTALL}
   mkdir -p ${INSTALL}/usr/local/config/
-  zip -qrum9 "${INSTALL}/usr/local/config/softhddevice-drm-sample-config.zip" storage
+  zip -qrum9 "${INSTALL}/usr/local/config/softhddevice-drm-gles-sample-config.zip" storage
 }
