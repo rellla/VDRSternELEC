@@ -10,7 +10,7 @@ PKG_BRANCH="drm-atomic-gles-renamed"
 
 PKG_LICENSE="GPL"
 
-PKG_SOURCE_DIR="vdr-plugin-softhddevice-drm-gles-${PKG_VERSION}"
+PKG_SOURCE_DIR="vdr-plugin-softhddevice-drm-${PKG_VERSION}"
 PKG_DEPENDS_TARGET="toolchain glm alsa freetype ffmpeg _vdr libdrm mesa"
 PKG_NEED_UNPACK="$(get_pkg_directory _vdr)"
 PKG_LONGDESC="VDR Output Device (softhddevice-drm-gles)"
