@@ -1,0 +1,92 @@
+From aa7f70da1bbdb97b87aaa798390ad9c390504ddc Mon Sep 17 00:00:00 2001
+From: Andreas Baierl <ichgeh@imkreisrum.de>
+Date: Mon, 26 Dec 2022 20:06:32 +0100
+Subject: [PATCH] halve usleeps
+
+---
+ video_drm.c | 18 +++++++++---------
+ 1 file changed, 9 insertions(+), 9 deletions(-)
+
+diff --git a/video_drm.c b/video_drm.c
+index 1dc63f3..19fd378 100644
+--- a/video_drm.c
++++ b/video_drm.c
+@@ -1217,7 +1217,7 @@ dequeue:
+ 			render->act_buf = NULL;
+ 			goto page_flip_osd;
+ 		}
+-		usleep(10000);
++		usleep(5000);
+ 	}
+ 
+ 	frame = render->FramesRb[render->FramesRead];
+@@ -1248,7 +1248,7 @@ dequeue:
+ #endif
+ avready:
+ 		if (AudioVideoReady(video_pts)) {
+-			usleep(10000);
++			usleep(5000);
+ 			if (render->Closing)
+ 				goto closing;
+ 			goto avready;
+@@ -1262,7 +1262,7 @@ audioclock:
+ 		goto closing;
+ 
+ 	if (audio_pts == (int64_t)AV_NOPTS_VALUE && !render->TrickSpeed) {
+-		usleep(20000);
++		usleep(10000);
+ 		goto audioclock;
+ 	}
+ 
+@@ -1293,7 +1293,7 @@ audioclock:
+ 			atomic_read(&render->FramesFilled), AudioUsedBytes(), Timestamp2String(audio_pts),
+ 			Timestamp2String(video_pts), VideoAudioDelay, diff);
+ #endif
+-		usleep(20000);
++		usleep(10000);
+ 		goto audioclock;
+ 	}
+ 
+@@ -1310,7 +1310,7 @@ audioclock:
+ 		render->StartCounter++;
+ 
+ 	if (render->TrickSpeed)
+-		usleep(20000 * render->TrickSpeed);
++		usleep(10000 * render->TrickSpeed);
+ 
+ 	buf->frame = frame;
+ 	render->FramesRead = (render->FramesRead + 1) % VIDEO_SURFACES_MAX;
+@@ -1643,10 +1643,10 @@ static void *DecodeHandlerThread(void *arg)
+ 			atomic_read(&render->FramesFilled) < VIDEO_SURFACES_MAX) {
+ 
+ 			if (VideoDecodeInput(render->Stream))
+-				usleep(10000);
++				usleep(5000);
+ 
+ 		} else {
+-			usleep(10000);
++			usleep(5000);
+ 		}
+ 	}
+ 	pthread_exit((void *)pthread_self());
+@@ -1884,7 +1884,7 @@ static void *FilterHandlerThread(void * arg)
+ 
+ 	while (1) {
+ 		while (!atomic_read(&render->FramesDeintFilled) && !render->Filter_Close) {
+-			usleep(10000);
++			usleep(5000);
+ 		}
+ getinframe:
+ 		if (atomic_read(&render->FramesDeintFilled)) {
+@@ -1941,7 +1941,7 @@ fillframe:
+ 					atomic_inc(&render->FramesFilled);
+ 				}
+ 			} else {
+-				usleep(10000);
++				usleep(5000);
+ 				goto fillframe;
+ 			}
+ 		}
+-- 
+2.30.2
+
