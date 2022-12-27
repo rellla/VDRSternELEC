@@ -1,0 +1,56 @@
+From 35fd5084e297f5ddf6ee3b0cf0623edf4054f647 Mon Sep 17 00:00:00 2001
+From: Andreas Baierl <ichgeh@imkreisrum.de>
+Date: Tue, 27 Dec 2022 21:16:35 +0100
+Subject: [PATCH 3/3] page flip
+
+---
+ video_drm.c | 19 ++++---------------
+ 1 file changed, 4 insertions(+), 15 deletions(-)
+
+diff --git a/video_drm.c b/video_drm.c
+index fab9cca..498c200 100644
+--- a/video_drm.c
++++ b/video_drm.c
+@@ -1075,14 +1075,6 @@ static int SetupFB(VideoRender * render, struct drm_buf *buf,
+ 	return 0;
+ }
+ 
+-/*static void Drm_page_flip_event( __attribute__ ((unused)) int fd,
+-					__attribute__ ((unused)) unsigned int frame,
+-					__attribute__ ((unused)) unsigned int sec,
+-					__attribute__ ((unused)) unsigned int usec,
+-					__attribute__ ((unused)) void *data)
+-{
+-}*/
+-
+ static void DestroyFB(int fd_drm, struct drm_buf *buf)
+ {
+ 	struct drm_mode_destroy_dumb dreq;
+@@ -1179,7 +1171,8 @@ static void Frame2Display(VideoRender * render)
+ 	int i;
+ 
+ 	drmModeAtomicReqPtr ModeReq;
+-	uint32_t flags = DRM_MODE_PAGE_FLIP_EVENT;
++	uint32_t flags = DRM_MODE_PAGE_FLIP_EVENT | DRM_MODE_ATOMIC_NONBLOCK;
++
+ 	if (!(ModeReq = drmModeAtomicAlloc()))
+ 		fprintf(stderr, "Frame2Display: cannot allocate atomic request (%d): %m\n", errno);
+ 
+@@ -2416,12 +2409,8 @@ void VideoInit(VideoRender * render)
+ 	render->OsdShown = 0;
+ 
+ 	// init variables page flip
+-//    if (render->ev.page_flip_handler != Drm_page_flip_event) {
+-		memset(&render->ev, 0, sizeof(render->ev));
+-//		render->ev.version = DRM_EVENT_CONTEXT_VERSION;
+-		render->ev.version = 2;
+-//		render->ev.page_flip_handler = Drm_page_flip_event;
+-//	}
++	memset(&render->ev, 0, sizeof(render->ev));
++	render->ev.version = 2;
+ 
+ 	// Wakeup DisplayHandlerThread
+ 	VideoThreadWakeup(render, 0, 1);
+-- 
+2.30.2
+

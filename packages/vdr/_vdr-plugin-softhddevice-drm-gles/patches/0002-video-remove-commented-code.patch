@@ -1,7 +1,7 @@
-From c52b37a2957b59ab40192fbd4a978aea4fa4c977 Mon Sep 17 00:00:00 2001
+From eb6d167c42351d98364ec2b60463d35b60083880 Mon Sep 17 00:00:00 2001
 From: Andreas Baierl <ichgeh@imkreisrum.de>
 Date: Tue, 27 Dec 2022 18:43:16 +0100
-Subject: [PATCH 3/3] video: remove commented code
+Subject: [PATCH 2/3] video: remove commented code
 
 Signed-off-by: Andreas Baierl <ichgeh@imkreisrum.de>
 ---
@@ -10,7 +10,7 @@ Signed-off-by: Andreas Baierl <ichgeh@imkreisrum.de>
  2 files changed, 23 deletions(-)
 
 diff --git a/video.h b/video.h
-index bf93920..23f62fd 100644
+index aadabbe..facf1c5 100644
 --- a/video.h
 +++ b/video.h
 @@ -93,7 +93,6 @@ struct _Drm_Render_
@@ -22,7 +22,7 @@ index bf93920..23f62fd 100644
  	int Closing;			///< flag about closing current stream
  	int Filter_Close;
 diff --git a/video_drm.c b/video_drm.c
-index 461e4e3..251945f 100644
+index 19fd378..fab9cca 100644
 --- a/video_drm.c
 +++ b/video_drm.c
 @@ -48,12 +48,10 @@
@@ -49,7 +49,7 @@ index 461e4e3..251945f 100644
  #ifdef USE_GLES
  	render->gbm_device = gbm_create_device(render->fd_drm);
  	if (!render->gbm_device) {
-@@ -1085,8 +1079,6 @@ static void DestroyFB(int fd_drm, struct drm_buf *buf)
+@@ -1093,8 +1087,6 @@ static void DestroyFB(int fd_drm, struct drm_buf *buf)
  {
  	struct drm_mode_destroy_dumb dreq;
  
@@ -58,9 +58,9 @@ index 461e4e3..251945f 100644
  	if (buf->plane[0]) {
  		if (munmap(buf->plane[0], buf->size))
  				fprintf(stderr, "DestroyFB: failed unmap FB (%d): %m\n", errno);
-@@ -1470,20 +1462,6 @@ static void *DisplayHandlerThread(void * arg)
- 
- 		Frame2Display(render);
+@@ -1481,20 +1473,6 @@ static void *DisplayHandlerThread(void * arg)
+ 		if (drmHandleEvent(render->fd_drm, &render->ev) != 0)
+ 			fprintf(stderr, "DisplayHandlerThread: drmHandleEvent failed!\n");
  
 -/*#ifdef AV_SYNC_DEBUG
 -		static uint32_t last_tick;
