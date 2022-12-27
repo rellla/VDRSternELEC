@@ -1,0 +1,84 @@
+From c52b37a2957b59ab40192fbd4a978aea4fa4c977 Mon Sep 17 00:00:00 2001
+From: Andreas Baierl <ichgeh@imkreisrum.de>
+Date: Tue, 27 Dec 2022 18:43:16 +0100
+Subject: [PATCH 3/3] video: remove commented code
+
+Signed-off-by: Andreas Baierl <ichgeh@imkreisrum.de>
+---
+ video.h     |  1 -
+ video_drm.c | 22 ----------------------
+ 2 files changed, 23 deletions(-)
+
+diff --git a/video.h b/video.h
+index bf93920..23f62fd 100644
+--- a/video.h
++++ b/video.h
+@@ -93,7 +93,6 @@ struct _Drm_Render_
+ 
+ 	VideoStream *Stream;		///< video stream
+ 	int TrickSpeed;			///< current trick speed
+-//	int TrickCounter;			///< current trick speed counter
+ 	int VideoPaused;
+ 	int Closing;			///< flag about closing current stream
+ 	int Filter_Close;
+diff --git a/video_drm.c b/video_drm.c
+index 461e4e3..251945f 100644
+--- a/video_drm.c
++++ b/video_drm.c
+@@ -48,12 +48,10 @@
+ #include <fcntl.h>
+ #include <string.h>
+ #include <sys/mman.h>
+-//#include <sys/utsname.h>
+ #include <drm_fourcc.h>
+ #include <libavcodec/avcodec.h>
+ #include <libavutil/hwcontext_drm.h>
+ #include <libavutil/pixdesc.h>
+-//#include <libavutil/time.h>
+ #include <libavfilter/buffersink.h>
+ #include <libavfilter/buffersrc.h>
+ #include <libavutil/opt.h>
+@@ -759,10 +757,6 @@ search_mode:
+ 	drmModeFreeEncoder(encoder);
+ 	drmModeFreeResources(resources);
+ 
+-//	if (render->use_zpos &&
+-//		(render->video_plane > render->osd_plane))
+-//		render->use_zpos = 0;
+-
+ #ifdef USE_GLES
+ 	render->gbm_device = gbm_create_device(render->fd_drm);
+ 	if (!render->gbm_device) {
+@@ -1085,8 +1079,6 @@ static void DestroyFB(int fd_drm, struct drm_buf *buf)
+ {
+ 	struct drm_mode_destroy_dumb dreq;
+ 
+-//	fprintf(stderr, "DestroyFB: destroy FB %d\n", buf->fb_id);
+-
+ 	if (buf->plane[0]) {
+ 		if (munmap(buf->plane[0], buf->size))
+ 				fprintf(stderr, "DestroyFB: failed unmap FB (%d): %m\n", errno);
+@@ -1470,20 +1462,6 @@ static void *DisplayHandlerThread(void * arg)
+ 
+ 		Frame2Display(render);
+ 
+-/*#ifdef AV_SYNC_DEBUG
+-		static uint32_t last_tick;
+-		uint32_t tick;
+-
+-		tick = GetMsTicks();
+-		if (tick - last_tick > 21) {
+-			Debug(3, "DisplayHandlerThread: StartCounter %4d %dms\n",
+-				render->StartCounter, tick - last_tick);
+-			fprintf(stderr, "DisplayHandlerThread: StartCounter %4d FramesFilled %d %dms\n",
+-				render->StartCounter, atomic_read(&render->FramesFilled), tick - last_tick);
+-		}
+-		last_tick = tick;
+-#endif*/
+-
+ 		if (render->lastframe)
+ 			av_frame_free(&render->lastframe);
+ 
+-- 
+2.30.2
+
