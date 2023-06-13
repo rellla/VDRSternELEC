@@ -1,0 +1,25 @@
+From 9bccd2d2e92841ae3a5b2256cfb5ed66a7c1ab12 Mon Sep 17 00:00:00 2001
+From: Andreas Baierl <ichgeh@imkreisrum.de>
+Date: Fri, 2 Jun 2023 12:36:46 +0200
+Subject: [PATCH] tvguide: disable graphicsmagick signal handling
+
+---
+ tvguide.c | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/tvguide.c b/tvguide.c
+index d315dee..50ab874 100644
+--- a/tvguide.c
++++ b/tvguide.c
+@@ -99,7 +99,7 @@ bool cPluginTvguide::ProcessArgs(int argc, char *argv[]) {
+ }
+ 
+ __attribute__((constructor)) static void init(void) {
+-   Magick::InitializeMagick(NULL);
++   MagickLib::InitializeMagickEx(NULL, MAGICK_OPT_NO_SIGNAL_HANDER, NULL);
+ }
+ 
+ bool cPluginTvguide::Initialize(void) {
+-- 
+2.30.2
+
