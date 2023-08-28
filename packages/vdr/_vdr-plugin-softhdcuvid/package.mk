@@ -11,8 +11,8 @@ PKG_DEPENDS_TARGET="toolchain _vdr _nv-codec-headers nvidia _libplacebo glew _xc
 PKG_DEPENDS_CONFIG="_vdr"
 PKG_NEED_UNPACK="$(get_pkg_directory _vdr vdr-helper)"
 PKG_LONGDESC="VDR Output Device (softhdcuvid)"
-PKG_MAKE_OPTS_TARGET="NVIDIA="$(get_install_dir nvidia)"
-PKG_MAKEINSTALL_OPTS_TARGET="NVIDIA="$(get_install_dir nvidia)"
+PKG_MAKE_OPTS_TARGET="NVIDIA=$(get_install_dir nvidia)"
+PKG_MAKEINSTALL_OPTS_TARGET="NVIDIA=$(get_install_dir nvidia)"
 
 pre_make_target() {
   export LDFLAGS="$(echo ${LDFLAGS} | sed -e "s|-Wl,--as-needed||") -L${SYSROOT_PREFIX}/usr/local/lib"
