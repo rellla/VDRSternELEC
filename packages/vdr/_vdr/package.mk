@@ -118,10 +118,16 @@ EOF
 
   cp ${PKG_DIR}/config/commands.conf ${VDR_DIR}/storage/.config/vdropt-sample/commands.conf
 
+  mkdir -p ${INSTALL}/storage/.config/vdrlibs/save
+  mkdir -p ${INSTALL}/storage/.config/vdrlibs/bin
+  mv ${INSTALL}/usr/local/bin/vdr ${INSTALL}/storage/.config/vdrlibs/save/vdr
+  ln -s /storage/.config/vdrlibs/save/vdr ${INSTALL}/storage/.config/vdrlibs/bin/vdr
+  ln -s /storage/.config/vdrlibs/bin/vdr ${INSTALL}/usr/local/bin/vdr
+
   # create config.zip
   mkdir -p ${INSTALL}/usr/local/config
   cd ${INSTALL}
-  zip -qrum9 ${INSTALL}/usr/local/config/vdr-sample-config.zip storage
+  zip -yqrum9 ${INSTALL}/usr/local/config/vdr-sample-config.zip storage
 
   # copy sample XML (PowerMenu for Kodi which includes a Button to switch to VDR)
   cp ${PKG_DIR}/config/DialogButtonMenu.xml ${INSTALL}/usr/local/config/DialogButtonMenu.xml
@@ -129,5 +135,6 @@ EOF
   rm -f ${PKG_DIR}/patches/vdr-2.*-dynamite.patch
   rm -f ${PKG_DIR}/patches/vdr-plugin-easyvdr.patch
   rm -f ${PKG_DIR}/patches/vdr-2.6-patch-for-permashift.patch
+
 }
 
