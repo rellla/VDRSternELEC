@@ -20,5 +20,12 @@ pre_make_target() {
 }
 
 post_makeinstall_target() {
-  $(get_build_dir vdr-helper)/zip_config.sh ${INSTALL} ${PKG_DIR} ${PLUGIN} markad
+  mkdir -p ${INSTALL}/storage/.config/vdrlibs/save
+  mkdir -p ${INSTALL}/storage/.config/vdrlibs/bin
+  mv ${INSTALL}/usr/local/bin/markad ${INSTALL}/storage/.config/vdrlibs/save/markad
+  ln -s /storage/.config/vdrlibs/save/markad ${INSTALL}/storage/.config/vdrlibs/bin/markad
+  ln -s /storage/.config/vdrlibs/bin/markad ${INSTALL}/usr/local/bin/markad
+
+  # create config.zip
+  $(get_build_dir vdr-helper)/zip_config.sh ${INSTALL} ${PKG_DIR} markad "true"
 }
