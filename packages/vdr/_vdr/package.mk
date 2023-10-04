@@ -86,10 +86,16 @@ EOF
 
   chmod +x ${INSTALL}/usr/local/bin/*
 
+  mkdir -p ${INSTALL}/storage/.config/vdrlibs/save
+  mkdir -p ${INSTALL}/storage/.config/vdrlibs/bin
+  mv ${INSTALL}/usr/local/bin/vdr ${INSTALL}/storage/.config/vdrlibs/save/vdr
+  ln -s /storage/.config/vdrlibs/save/vdr ${INSTALL}/storage/.config/vdrlibs/bin/vdr
+  ln -s /storage/.config/vdrlibs/bin/vdr ${INSTALL}/usr/local/bin/vdr
+
   # create config.zip
   mkdir -p ${INSTALL}/usr/local/config
   cd ${INSTALL}
-  zip -qrum9 ${INSTALL}/usr/local/config/vdr-sample-config.zip storage
+  zip -yqrum9 ${INSTALL}/usr/local/config/vdr-sample-config.zip storage
 
   rm -f ${PKG_DIR}/patches/vdr-2.*-dynamite.patch
   rm -f ${PKG_DIR}/patches/vdr-plugin-easyvdr.patch
