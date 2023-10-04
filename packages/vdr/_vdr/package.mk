@@ -155,6 +155,12 @@ EOF
 
   cat ${PKG_DIR}/config/commands.conf | sed "s#XXBINDIRXX#${PREFIX}/bin#" > ${VDR_DIR}/storage/.config/vdropt-sample/commands.conf
 
+  mkdir -p ${INSTALL}/storage/.config/vdrlibs/save
+  mkdir -p ${INSTALL}/storage/.config/vdrlibs/bin
+  mv ${INSTALL}/usr/local/bin/vdr ${INSTALL}/storage/.config/vdrlibs/save/vdr
+  ln -s /storage/.config/vdrlibs/save/vdr ${INSTALL}/storage/.config/vdrlibs/bin/vdr
+  ln -s /storage/.config/vdrlibs/bin/vdr ${INSTALL}/usr/local/bin/vdr
+
   # create config.zip
   mkdir -p ${INSTALL}${PREFIX}/config
   cd ${INSTALL}
