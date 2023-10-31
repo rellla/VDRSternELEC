@@ -139,6 +139,10 @@ if [ "${EXTRA_REMOTETRANSCODE}" = "y" ]; then
 	PKG_DEPENDS_TARGET+=" _remotetranscode"
 fi
 
+if [ "${PRIVATE_CONF}" = "yes" ]; then
+	PKG_DEPENDS_TARGET+=" _private-conf"
+fi
+
 post_install() {
   if [ "${PROJECT} = "Amlogic-ce" ] || [ "${PROJECT} = "Amlogic" ]; then
      # Fix some links

@@ -214,6 +214,8 @@ build() {
     echo "   SYSTEM_SIZE=768"
   fi
 
+  export PRIVATE_CONF="$PRIVATE_CONF"
+
   # build
   if [ ! "${PACKAGE_ONLY}" = "" ]; then
     echo "Build ${PACKAGE_ONLY}"
@@ -273,6 +275,7 @@ while [[ "$#" -gt 0 ]]; do
         -package) shift; PACKAGE_ONLY=$1 ;;
         -release) shift; RELEASE_SERVER=$1; DORELEASE=true ;;
         -cef) shift; CEF_BINARIES=true ;;
+        -private) shift; PRIVATE_CONF=true ;;
         -help) shift; usage ;;
         *) echo "Unknown parameter passed: $1"; usage ;;
     esac
