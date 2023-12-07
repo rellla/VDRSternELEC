@@ -127,10 +127,6 @@ if [ "${EXTRA_DIRECTFB2SAMPLES}" = "y" ]; then
 	#PKG_DEPENDS_TARGET+=" _DirectFB2-media-samples"
 fi
 
-if [ "${EXTRA_CHANNELLOGOS}" = "y" ]; then
-	PKG_DEPENDS_TARGET+=" _MP_Logos"
-fi
-
 if [ "${EXTRA_CEFBROWSER}" = "y" ]; then
 	PKG_DEPENDS_TARGET+=" _cefbrowser"
 fi

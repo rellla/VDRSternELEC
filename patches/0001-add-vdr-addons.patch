@@ -1,0 +1,26 @@
+From 82d1ed5d66e4244a8a3d2ad53026a5731e0f4311 Mon Sep 17 00:00:00 2001
+From: Andreas Baierl <ichgeh@imkreisrum.de>
+Date: Wed, 6 Dec 2023 13:18:46 +0100
+Subject: [PATCH] add vdr addons
+
+---
+ scripts/create_addon | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/scripts/create_addon b/scripts/create_addon
+index 4961f0cd9d..c17408cf5f 100755
+--- a/scripts/create_addon
++++ b/scripts/create_addon
+@@ -54,7 +54,7 @@ get_addons() {
+     binary)   paths="^${ROOT}/packages/mediacenter/kodi-binary-addons/";;
+     official) paths="^${ROOT}/packages/addons/";;
+-    all)      paths="^${ROOT}/packages/|^${ROOT}/projects/.*/packages/";;
+-    *)        paths="^${ROOT}/packages/|^${ROOT}/projects/.*/packages/"; filter="${1}";;
++    all)      paths="^${ROOT}/packages/|^${ROOT}/projects/.*/packages/|^${ROOT}/../packages/addons/";;
++    *)        paths="^${ROOT}/packages/|^${ROOT}/projects/.*/packages/|^${ROOT}/../packages/addons/"; filter="${1}";;
+   esac
+ 
+   exit() { exited=1; }
+-- 
+2.30.2
+

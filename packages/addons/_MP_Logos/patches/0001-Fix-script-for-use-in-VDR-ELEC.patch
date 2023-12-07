@@ -37,7 +37,7 @@ index 4aef41f..66f8646 100755
          f_log INFO "Verlinke neue Datei (${FILE}) mit $channel"
          # Symlink erstellen (--force überschreibt bereits existierenen Link)
 -        ln -f -s "$LOGO_FILE" "${LOGODIR}/${channel}" || \
-+        ln -f -s "/usr/local/vdrshare/logofiles/$LOGO_NAME" "${LOGODIR}/${channel}" || \
++        ln -f -s "../logos/$LOGO_NAME" "${LOGODIR}/${channel}" || \
            { f_log ERR "Symbolischer Link \"${LOGODIR}/${channel}\" konnte nicht erstellt werden!" ; continue ;}
        else
          logoname="${LOGO_FILE##*/}"

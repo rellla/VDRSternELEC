@@ -1,7 +1,7 @@
-From b0c3d2db618282a9964e6492a7aed96e7e5f370b Mon Sep 17 00:00:00 2001
+From f80088c41d4286ab486ec636a8ec1d79fd14a1f6 Mon Sep 17 00:00:00 2001
 From: Andreas Baierl <ichgeh@imkreisrum.de>
 Date: Mon, 23 Jan 2023 11:23:28 +0100
-Subject: [PATCH] clean links
+Subject: [PATCH 1/2] clean links
 
 ---
  mp_logos.conf.dist | 3 +++
@@ -23,7 +23,7 @@ index 0b230ed..4d82390 100644
  # die Kanallogos lädt. Verzeichnis ohne abschließendes '/'
  LOGODIR='/usr/local/src/_div/flatpluslogos'  # Logos für VDR-Skin
 diff --git a/mp_logos.sh b/mp_logos.sh
-index 7c24992..81b6b22 100755
+index 7c24992..b61319e 100755
 --- a/mp_logos.sh
 +++ b/mp_logos.sh
 @@ -284,7 +284,9 @@ for line in "${mapping[@]}" ; do

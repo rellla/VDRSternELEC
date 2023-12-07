@@ -25,9 +25,6 @@ easyvdr:EXTRA_EASYVDR
 # permashift plugin/patch
 permashift:EXTRA_PERMASHIFT
 
-# install channel logos
-channellogos:EXTRA_CHANNELLOGOS
-
 # install cefbrowser
 cefbrowser:EXTRA_CEFBROWSER
 

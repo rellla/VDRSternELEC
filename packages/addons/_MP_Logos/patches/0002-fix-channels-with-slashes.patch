@@ -1,0 +1,50 @@
+From c9681315a01f03dafa2ee5bd1a577aec1b5995e5 Mon Sep 17 00:00:00 2001
+From: Andreas Baierl <ichgeh@imkreisrum.de>
+Date: Wed, 6 Dec 2023 14:36:01 +0100
+Subject: [PATCH 2/2] fix channels with slashes
+
+---
+ mp_logos.sh | 18 ++++++++++++++++--
+ 1 file changed, 16 insertions(+), 2 deletions(-)
+
+diff --git a/mp_logos.sh b/mp_logos.sh
+index b61319e..47e0ded 100755
+--- a/mp_logos.sh
++++ b/mp_logos.sh
+@@ -71,17 +71,31 @@ f_process_channellogo() {  # Verlinken der Senderlogos zu den gefundenen Kanäle
+       channel="${channel,,[A-Z]}.${EXT}"  # Nur A-Z in kleinbuchsaben
+     fi
+     if [[ "$LOGO_FILE" -nt "${LOGODIR}/${channel}" ]] ; then
++      DEPTH=0
+       if [[ "$channel" =~ / ]] ; then  # Kanal mit / im Namen
+         CHANNEL_PATH="${channel%/*}"   # Der Teil vor dem lezten /
+         mkdir -p "${LOGODIR}/${CHANNEL_PATH}" || \
+           { f_log ERR "Verzeichnis \"${LOGODIR}/${CHANNEL_PATH}\" konnte nicht erstellt werden!" ; continue ;}
++        if [[ $CHANNEL_PATH =~ / ]] ; then
++          DEPTH=2
++        else
++          DEPTH=1
++        fi
+       fi
+       ((N_LOGO+=1))
+       if [[ "$USE_PLAIN_LOGO" == 'true' ]] ; then
+         f_log INFO "Verlinke neue Datei (${FILE}) mit $channel"
+         # Symlink erstellen (--force überschreibt bereits existierenen Link)
+-        ln -f -s "../logos/$LOGO_NAME" "${LOGODIR}/${channel}" || \
+-          { f_log ERR "Symbolischer Link \"${LOGODIR}/${channel}\" konnte nicht erstellt werden!" ; continue ;}
++        if [[ $DEPTH == "2" ]] ; then
++          ln -f -s "../../../logos/$LOGO_NAME" "${LOGODIR}/${channel}" || \
++            { f_log ERR "Symbolischer Link \"${LOGODIR}/${channel}\" konnte nicht erstellt werden!" ; continue ;}
++        elif [[ $DEPTH == "1" ]] ; then
++          ln -f -s "../../logos/$LOGO_NAME" "${LOGODIR}/${channel}" || \
++            { f_log ERR "Symbolischer Link \"${LOGODIR}/${channel}\" konnte nicht erstellt werden!" ; continue ;}
++        else
++          ln -f -s "../logos/$LOGO_NAME" "${LOGODIR}/${channel}" || \
++            { f_log ERR "Symbolischer Link \"${LOGODIR}/${channel}\" konnte nicht erstellt werden!" ; continue ;}
++        fi
+       else
+         logoname="${LOGO_FILE##*/}"
+         if f_convert_logo "$LOGO_FILE" "$channel" "$logoname" ; then  # Logo konvertieren und verlinken
+-- 
+2.30.2
+
