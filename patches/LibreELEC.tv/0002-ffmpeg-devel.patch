@@ -1,0 +1,60 @@
+From e955a811692f773739e0c1e83c18b0817681c869 Mon Sep 17 00:00:00 2001
+From: Andreas Baierl <ichgeh@imkreisrum.de>
+Date: Sun, 24 Mar 2024 12:09:36 +0100
+Subject: [PATCH 2/2] ffmpeg devel
+
+---
+ packages/multimedia/ffmpeg/package.mk | 38 +++++++++++++++++++++++++++
+ 1 file changed, 38 insertions(+)
+
+diff --git a/packages/multimedia/ffmpeg/package.mk b/packages/multimedia/ffmpeg/package.mk
+index 051527703a..85c584b22c 100644
+--- a/packages/multimedia/ffmpeg/package.mk
++++ b/packages/multimedia/ffmpeg/package.mk
+@@ -239,5 +239,43 @@ configure_target() {
+ }
+ 
+ post_makeinstall_target() {
++  mkdir -p ${INSTALL}/storage/.config/vdrlibs/save
++  mkdir -p ${INSTALL}/storage/.config/vdrlibs/bin
++  mv ${INSTALL}/usr/lib/libavcodec.so.60.3.100 ${INSTALL}/storage/.config/vdrlibs/save
++  ln -s /storage/.config/vdrlibs/save/libavcodec.so.60.3.100 ${INSTALL}/storage/.config/vdrlibs/bin/libavcodec.so.60.3.100
++  ln -s /storage/.config/vdrlibs/bin/libavcodec.so.60.3.100 ${INSTALL}/usr/lib/libavcodec.so.60.3.100
++  mv ${INSTALL}/usr/lib/libavdevice.so.60.1.100 ${INSTALL}/storage/.config/vdrlibs/save
++  ln -s /storage/.config/vdrlibs/save/libavdevice.so.60.1.100 ${INSTALL}/storage/.config/vdrlibs/bin/libavdevice.so.60.1.100
++  ln -s /storage/.config/vdrlibs/bin/libavdevice.so.60.1.100 ${INSTALL}/usr/lib/libavdevice.so.60.1.100
++  mv ${INSTALL}/usr/lib/libavfilter.so.9.3.100 ${INSTALL}/storage/.config/vdrlibs/save
++  ln -s /storage/.config/vdrlibs/save/libavfilter.so.9.3.100 ${INSTALL}/storage/.config/vdrlibs/bin/libavfilter.so.9.3.100
++  ln -s /storage/.config/vdrlibs/bin/libavfilter.so.9.3.100 ${INSTALL}/usr/lib/libavfilter.so.9.3.100
++  mv ${INSTALL}/usr/lib/libavformat.so.60.3.100 ${INSTALL}/storage/.config/vdrlibs/save
++  ln -s /storage/.config/vdrlibs/save/libavformat.so.60.3.100 ${INSTALL}/storage/.config/vdrlibs/bin/libavformat.so.60.3.100
++  ln -s /storage/.config/vdrlibs/bin/libavformat.so.60.3.100 ${INSTALL}/usr/lib/libavformat.so.60.3.100
++  mv ${INSTALL}/usr/lib/libavutil.so.58.2.100 ${INSTALL}/storage/.config/vdrlibs/save
++  ln -s /storage/.config/vdrlibs/save/libavutil.so.58.2.100 ${INSTALL}/storage/.config/vdrlibs/bin/libavutil.so.58.2.100
++  ln -s /storage/.config/vdrlibs/bin/libavutil.so.58.2.100 ${INSTALL}/usr/lib/libavutil.so.58.2.100
++  mv ${INSTALL}/usr/lib/libpostproc.so.57.1.100 ${INSTALL}/storage/.config/vdrlibs/save
++  ln -s /storage/.config/vdrlibs/save/libpostproc.so.57.1.100 ${INSTALL}/storage/.config/vdrlibs/bin/libpostproc.so.57.1.100
++  ln -s /storage/.config/vdrlibs/bin/libpostproc.so.57.1.100 ${INSTALL}/usr/lib/libpostproc.so.57.1.100
++  mv ${INSTALL}/usr/lib/libswresample.so.4.10.100 ${INSTALL}/storage/.config/vdrlibs/save
++  ln -s /storage/.config/vdrlibs/save/libswresample.so.4.10.100 ${INSTALL}/storage/.config/vdrlibs/bin/libswresample.so.4.10.100
++  ln -s /storage/.config/vdrlibs/bin/libswresample.so.4.10.100 ${INSTALL}/usr/lib/libswresample.so.4.10.100
++  mv ${INSTALL}/usr/lib/libswscale.so.7.1.100 ${INSTALL}/storage/.config/vdrlibs/save
++  ln -s /storage/.config/vdrlibs/save/libswscale.so.7.1.100 ${INSTALL}/storage/.config/vdrlibs/bin/libswscale.so.7.1.100
++  ln -s /storage/.config/vdrlibs/bin/libswscale.so.7.1.100 ${INSTALL}/usr/lib/libswscale.so.7.1.100
++  mv ${INSTALL}/usr/bin/ffmpeg ${INSTALL}/storage/.config/vdrlibs/save
++  ln -s /storage/.config/vdrlibs/save/ffmpeg ${INSTALL}/storage/.config/vdrlibs/bin/ffmpeg
++  ln -s /storage/.config/vdrlibs/bin/ffmpeg ${INSTALL}/usr/bin/ffmpeg
++  mv ${INSTALL}/usr/bin/ffprobe ${INSTALL}/storage/.config/vdrlibs/save
++  ln -s /storage/.config/vdrlibs/save/ffprobe ${INSTALL}/storage/.config/vdrlibs/bin/ffprobe
++  ln -s /storage/.config/vdrlibs/bin/ffprobe ${INSTALL}/usr/bin/ffprobe
++
++  # create config.zip
++  mkdir -p ${INSTALL}/usr/local/config
++  cd ${INSTALL}
++  zip -yqrum9 ${INSTALL}/usr/local/config/ffmpeg-sample-config.zip storage
++
+   rm -rf ${INSTALL}/usr/share/ffmpeg/examples
+ }
+-- 
+2.30.2
+
