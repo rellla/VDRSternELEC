@@ -1,0 +1,68 @@
+From 2ba3bde2ffb2edd26c4f8bc99e94a843b75f2abd Mon Sep 17 00:00:00 2001
+From: Andreas Baierl <ichgeh@imkreisrum.de>
+Date: Tue, 7 May 2024 16:18:31 +0200
+Subject: [PATCH 3/6] fix try
+
+---
+ softhddev.c | 22 +++++++++++++---------
+ 1 file changed, 13 insertions(+), 9 deletions(-)
+
+diff --git a/softhddev.c b/softhddev.c
+index a20f1c3..e710646 100644
+--- a/softhddev.c
++++ b/softhddev.c
+@@ -1207,7 +1207,6 @@ int PlayVideo(const uint8_t * data, int size)
+ 					       data[i + n + 9],
+ 					       data[i + n + 10]);
+ 					stream->CodecID = AV_CODEC_ID_MPEG2VIDEO;
+-					goto newstream;
+ 				} else if (data[i + n + 3] == 0x09 && (data[i + n + 4] == 0x10 || data[i + n + 4] == 0xF0 || data[i + n + 10] == 0x64)) {
+ 				// H264 I-Frame
+ 					Debug("video: H264 detected");
+@@ -1224,7 +1223,6 @@ int PlayVideo(const uint8_t * data, int size)
+ 					       data[i + n + 9],
+ 					       data[i + n + 10]);
+ 					stream->CodecID = AV_CODEC_ID_H264;
+-					goto newstream;
+ 				} else if (data[i + n + 3] == 0x46 && (data[i + n + 5] == 0x10 || data[i + n + 5] == 0x50 || data[i + n + 10] == 0x40)) {
+ 				// HEVC I-Frame
+ 					Debug("video: hevc detected");
+@@ -1241,11 +1239,6 @@ int PlayVideo(const uint8_t * data, int size)
+ 					       data[i + n + 9],
+ 					       data[i + n + 10]);
+ 					stream->CodecID = AV_CODEC_ID_HEVC;
+-newstream:
+-					stream->NewStream = 1;
+-					stream->timebase.den = 90000;
+-					stream->timebase.num = 1;
+-					VideoEnqueue(stream, pts, data + i + n, size - i - n);
+ 				} else {
+ 				// Unknown Frame
+ 					Debug2(L_CODEC, "video: unknown startcode detected: 0x%x 0x%x 0x%x 0x%x 0x%x 0x%x 0x%x 0x%x 0x%x 0x%x 0x%x",
+@@ -1260,10 +1253,21 @@ newstream:
+ 					       data[i + n + 8],
+ 					       data[i + n + 9],
+ 					       data[i + n + 10]);
++					return size;
++				}
++				stream->NewStream = 1;
++				stream->timebase.den = 90000;
++				stream->timebase.num = 1;
++			} else { // stream->CodecID != AV_CODEC_ID_NONE)
++				if (stream->CodecID == AV_CODEC_ID_H264 && stream->TrickSpeed && pts != (int64_t)AV_NOPTS_VALUE) {
++					static uint8_t seq_end_h264[] = { 0x00, 0x00, 0x00, 0x01, 0x0A };
++					if ((data[i + n + 9] & 0x1F) == 0x07) {
++						Debug2(L_CODEC, "video: H264_EOS_TRICKSPEED");
++						VideoEnqueue(stream, AV_NOPTS_VALUE, seq_end_h264, sizeof(seq_end_h264));
++					}
+ 				}
+-			} else {
+-				VideoEnqueue(stream, pts, data + i + n, size - i - n);
+ 			}
++			VideoEnqueue(stream, pts, data + i + n, size - i - n);
+ 			return size;
+ 		}
+ 	}
+-- 
+2.39.2
+

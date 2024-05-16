@@ -1,0 +1,115 @@
+From 284b980a0aaf66a5f84d39a1c995c23ac318ed49 Mon Sep 17 00:00:00 2001
+From: Andreas Baierl <ichgeh@imkreisrum.de>
+Date: Tue, 23 Apr 2024 12:03:55 +0200
+Subject: [PATCH 5/6] makefile and debug
+
+---
+ Makefile    |  8 ++++----
+ softhddev.c |  7 ++++++-
+ video_drm.c | 18 +++++++++++++-----
+ 3 files changed, 23 insertions(+), 10 deletions(-)
+
+diff --git a/Makefile b/Makefile
+index a6b3f9f..f7ba74f 100644
+--- a/Makefile
++++ b/Makefile
+@@ -19,13 +19,13 @@ PNG ?= 0
+ GRID ?= 0
+ 
+ CONFIG :=
+-#CONFIG += -DDEBUG 				# enable debug output+functions
++CONFIG += -DDEBUG 				# enable debug output+functions
+ #CONFIG += -DAV_SYNC_DEBUG		# enable debug messages AV_SYNC
+-#CONFIG += -DSOUND_DEBUG		# enable debug messages SOUND
++CONFIG += -DSOUND_DEBUG		# enable debug messages SOUND
+ #CONFIG += -DOSD_DEBUG			# enable debug messages OSD
+ CONFIG += -DDRM_DEBUG			# enable debug messages in drm configuration
+-#CONFIG += -DCODEC_DEBUG		# enable debug messages in codec configuration
+-#CONFIG += -DSTILL_DEBUG		# still picture debug
++CONFIG += -DCODEC_DEBUG		# enable debug messages in codec configuration
++CONFIG += -DSTILL_DEBUG		# still picture debug
+ #CONFIG += -DMEDIA_DEBUG		# media player debug
+ #CONFIG += -DGL_DEBUG			# enable debug messages OpenGL/ES OSD
+ #CONFIG += -DGL_DEBUG_TIME #-DGL_DEBUG_TIME_ALL # enable time measurement debug messages OpenGL/ES OSD
+diff --git a/softhddev.c b/softhddev.c
+index 20f4f1f..b26aacf 100644
+--- a/softhddev.c
++++ b/softhddev.c
+@@ -546,7 +546,12 @@ int PlayAudio(const uint8_t * data, int size, uint8_t id)
+ 	// hard limit buffer full: don't overrun audio buffers on replay
+ 	// stream freezed
+ 	if ((AudioFreeBytes() < AUDIO_MIN_BUFFER_FREE) || (StreamFreezed)){
+-		Debug("PlayAudio: StreamFreezed");
++
++		if (StreamFreezed)
++			Debug("PlayAudio: StreamFreezed");
++		else
++			Debug("PlayAudio: AudioFreeBytes < AUDIO_MIN_BUFFER_FREE");
++
+ 		return 0;
+ 	}
+ 	if (NewAudioStream) {
+diff --git a/video_drm.c b/video_drm.c
+index cf30e47..f0852fb 100644
+--- a/video_drm.c
++++ b/video_drm.c
+@@ -1294,6 +1294,7 @@ closing:
+ 	}
+ 
+ dequeue:
++	static int counter = 0;
+ 	while (!atomic_read(&render->FramesFilled)) {
+ 		if (render->Closing)
+ 			goto closing;
+@@ -1307,21 +1308,27 @@ dequeue:
+ 			buf = &render->buf_black;
+ 			goto page_flip;
+ 		}
+-//		Debug2(L_DRM, "Frame2Display: wating for FramesFilled");
++		if (counter > 50) {
++			counter = 0;
++			Debug2(L_DRM, "Frame2Display: wating for FramesFilled");
++		}
++		counter++;
+ 		usleep(10000);
+ 	}
+ 
+ 	if (render->TrickSpeed) {
+ 		if (render->TrickCounter--) {
+-			Debug2(L_DRM, "Frame2Display: TrickSpeed: skip modeset (%d) (frames %d)", render->TrickCounter, atomic_read(&render->FramesFilled));
++//			Debug2(L_DRM, "Frame2Display: TrickSpeed: skip modeset (%d) (frames %d)", render->TrickCounter, atomic_read(&render->FramesFilled));
+ 
+-			if (!render->lastframe)
++			if (!render->lastframe) {
++				Debug2(L_DRM, "Frame2Display: TrickSpeed: no lastframe");
+ 				goto get_frame;
++			}
+ 
+ 			goto page_flip_osd;
+ 		}
+ 		render->TrickCounter = render->TrickSpeed;
+-		Debug2(L_DRM, "Frame2Display: TrickSpeed: get next frame (%d) (frames %d)", render->TrickCounter, atomic_read(&render->FramesFilled));
++//		Debug2(L_DRM, "Frame2Display: TrickSpeed: get next frame (%d) (frames %d)", render->TrickCounter, atomic_read(&render->FramesFilled));
+ /*
+ 		if (!render->TrickCounter)
+ 			render->TrickCounter = render->TrickSpeed;
+@@ -1378,6 +1385,7 @@ avready:
+ 			usleep(10000);
+ 			if (render->Closing)
+ 				goto closing;
++			Debug("Frame2Display: check AudioVideoReady");
+ 			goto avready;
+ 		}
+ 	}
+@@ -1526,7 +1534,7 @@ page_flip_osd:
+ 
+ 	// return without a commit when we have no frame or osd
+ 	if (!dirty) {
+-		Debug2(L_DRM, "Frame2Display: Nothing to commit");
++//		Debug2(L_DRM, "Frame2Display: Nothing to commit");
+ 		drmModeAtomicFree(ModeReq);
+ 		return 1;
+ 	}
+-- 
+2.39.2
+

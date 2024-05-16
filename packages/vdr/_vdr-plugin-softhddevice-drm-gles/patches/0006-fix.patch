@@ -1,0 +1,157 @@
+From 122d43e63835cadfb2e9badb1341419a887625ad Mon Sep 17 00:00:00 2001
+From: Andreas Baierl <ichgeh@imkreisrum.de>
+Date: Fri, 10 May 2024 13:45:46 +0200
+Subject: [PATCH 6/6] fix
+
+---
+ softhddev.c               | 11 +++++------
+ softhddev.h               |  2 +-
+ softhddevice-drm-gles.cpp |  2 +-
+ video_drm.c               | 20 +++++++++++++++-----
+ 4 files changed, 22 insertions(+), 13 deletions(-)
+
+diff --git a/softhddev.c b/softhddev.c
+index b26aacf..df69716 100644
+--- a/softhddev.c
++++ b/softhddev.c
+@@ -1264,10 +1264,10 @@ int PlayVideo(const uint8_t * data, int size)
+ 				stream->timebase.den = 90000;
+ 				stream->timebase.num = 1;
+ 			} else { // stream->CodecID != AV_CODEC_ID_NONE)
+-				if (stream->CodecID == AV_CODEC_ID_H264 && stream->TrickSpeed && pts != (int64_t)AV_NOPTS_VALUE) {
++				if (stream->CodecID == AV_CODEC_ID_H264 && stream->Render->TrickSpeed && pts != (int64_t)AV_NOPTS_VALUE) {
+ 					static uint8_t seq_end_h264[] = { 0x00, 0x00, 0x00, 0x01, 0x0A };
+ 					if ((data[i + n + 9] & 0x1F) == 0x07) {
+-						Debug2(L_CODEC, "video: H264_EOS_TRICKSPEED, stream->TrickSpeed %d, render->TrickSpeed %d", stream->TrickSpeed, stream->Render->TrickSpeed);
++						Debug2(L_CODEC, "video: H264_EOS_TRICKSPEED, render->TrickSpeed %d", stream->Render->TrickSpeed);
+ 						VideoEnqueue(stream, AV_NOPTS_VALUE, seq_end_h264, sizeof(seq_end_h264));
+ 					}
+ 				}
+@@ -1543,10 +1543,9 @@ int PlayVideoPkts(AVPacket * pkt)
+ **
+ **	@param speed	trick speed
+ */
+-void TrickSpeed(int speed)
++void TrickSpeed(int speed, int forward)
+ {
+-	Debug("TrickSpeed: speed %d", speed);
+-	MyVideoStream->TrickSpeed = speed;
++	Debug("TrickSpeed: speed %d %s", speed, forward ? "forward" : "backward");
+ 	VideoSetTrickSpeed(MyVideoStream->Render, speed);
+ 
+ 	if (StreamFreezed) {
+@@ -1575,7 +1574,7 @@ void Play(void)
+ 	Debug("Play(void)");
+ 	SkipAudio = 0;
+ 	StreamFreezed = 0;
+-	TrickSpeed(0);
++	TrickSpeed(0, 1);
+ 	AudioPlay();
+ 	VideoPlay(MyVideoStream->Render);
+ }
+diff --git a/softhddev.h b/softhddev.h
+index 532ad92..6a865f5 100644
+--- a/softhddev.h
++++ b/softhddev.h
+@@ -68,7 +68,7 @@ extern "C"
+     /// C plugin set play mode
+     extern int SetPlayMode(int);
+     /// C plugin set trick speed
+-    extern void TrickSpeed(int);
++    extern void TrickSpeed(int, int);
+     /// C plugin clears all video and audio data from the device
+     extern void Clear(void);
+     /// C plugin sets the device into play mode
+diff --git a/softhddevice-drm-gles.cpp b/softhddevice-drm-gles.cpp
+index ffef549..74f5a01 100644
+--- a/softhddevice-drm-gles.cpp
++++ b/softhddevice-drm-gles.cpp
+@@ -937,7 +937,7 @@ void cSoftHdDevice::TrickSpeed(int speed, bool forward)
+     Debug("%s: %d %d", __FUNCTION__, speed, forward);
+     Debug("TrickSpeed: speed %d %s",
+ 		speed, forward ? "forward" : "backward");
+-    ::TrickSpeed(speed);
++    ::TrickSpeed(speed, forward);
+ }
+ 
+ /**
+diff --git a/video_drm.c b/video_drm.c
+index f0852fb..d786e49 100644
+--- a/video_drm.c
++++ b/video_drm.c
+@@ -1325,7 +1325,10 @@ dequeue:
+ 				goto get_frame;
+ 			}
+ 
+-			goto page_flip_osd;
++			frame = render->lastframe;
++			Debug2(L_DRM, "Frame2Display: TrickSpeed: get prime for %p (%d)", frame, render->TrickCounter);
++			goto get_prime;
++//			goto page_flip_osd;
+ 		}
+ 		render->TrickCounter = render->TrickSpeed;
+ //		Debug2(L_DRM, "Frame2Display: TrickSpeed: get next frame (%d) (frames %d)", render->TrickCounter, atomic_read(&render->FramesFilled));
+@@ -1354,6 +1357,7 @@ get_frame:
+ 	frame = render->FramesRb[render->FramesRead];
+ 	render->FramesRead = (render->FramesRead + 1) % VIDEO_SURFACES_MAX;
+ 	atomic_dec(&render->FramesFilled);
++get_prime:
+ 	primedata = (AVDRMFrameDescriptor *)frame->data[0];
+ 
+ 	// search or made fd / FB combination
+@@ -1375,8 +1379,12 @@ get_frame:
+ 		}
+ 	}
+ 
+-	// sync begin
+ 	render->pts = frame->pts;
++
++	if (render->TrickSpeed)
++		goto skip_sync;
++
++	// sync begin
+ 	video_pts = frame->pts * 1000 * av_q2d(*render->timebase);
+ 	if(!render->StartCounter && !render->Closing && !render->TrickSpeed) {
+ 		Debug("Frame2Display: start PTS %s", Timestamp2String(video_pts));
+@@ -1443,6 +1451,7 @@ audioclock:
+ 	}
+ 	// sync end
+ 
++skip_sync:
+ 	if (!render->TrickSpeed)
+ 		render->StartCounter++;
+ 
+@@ -1534,7 +1543,7 @@ page_flip_osd:
+ 
+ 	// return without a commit when we have no frame or osd
+ 	if (!dirty) {
+-//		Debug2(L_DRM, "Frame2Display: Nothing to commit");
++		Debug2(L_DRM, "Frame2Display: Nothing to commit");
+ 		drmModeAtomicFree(ModeReq);
+ 		return 1;
+ 	}
+@@ -1552,11 +1561,11 @@ page_flip_osd:
+ 	drmModeAtomicFree(ModeReq);
+ 
+ 	// free the last frame
+-	if (dirty > 1 && render->lastframe) {
++	if (dirty > 1 && render->lastframe && frame != render->lastframe) {
+ //		Debug2(L_DRM, "Frame2Display: free lastframe");
+ 		av_frame_free(&render->lastframe);
+ 	}
+-	if (dirty > 1 && render->act_buf && (render->act_buf->fb_id != render->buf_black.fb_id)) {
++	if (dirty > 1 && frame != render->lastframe && render->act_buf && (render->act_buf->fb_id != render->buf_black.fb_id)) {
+ //		Debug2(L_DRM, "Frame2Display: set lastframe");
+ 		render->lastframe = render->act_buf->frame;
+ 	}
+@@ -2280,6 +2289,7 @@ void VideoSetClosing(VideoRender * render)
+ 		render->Closing = 1;
+ 
+ 		if (render->VideoPaused) {
++			render->TrickSpeed = 0;
+ 			StartVideo(render);
+ 		}
+ 
+-- 
+2.39.2
+

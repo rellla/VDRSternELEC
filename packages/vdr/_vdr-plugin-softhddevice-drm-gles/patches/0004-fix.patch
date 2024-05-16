@@ -1,0 +1,33 @@
+From b32c066741e5da53e33aa9e9c5dd1b8c9f06d360 Mon Sep 17 00:00:00 2001
+From: Andreas Baierl <ichgeh@imkreisrum.de>
+Date: Wed, 8 May 2024 16:44:52 +0200
+Subject: [PATCH 4/6] fix
+
+---
+ softhddev.c | 3 ++-
+ 1 file changed, 2 insertions(+), 1 deletion(-)
+
+diff --git a/softhddev.c b/softhddev.c
+index e710646..20f4f1f 100644
+--- a/softhddev.c
++++ b/softhddev.c
+@@ -1262,7 +1262,7 @@ int PlayVideo(const uint8_t * data, int size)
+ 				if (stream->CodecID == AV_CODEC_ID_H264 && stream->TrickSpeed && pts != (int64_t)AV_NOPTS_VALUE) {
+ 					static uint8_t seq_end_h264[] = { 0x00, 0x00, 0x00, 0x01, 0x0A };
+ 					if ((data[i + n + 9] & 0x1F) == 0x07) {
+-						Debug2(L_CODEC, "video: H264_EOS_TRICKSPEED");
++						Debug2(L_CODEC, "video: H264_EOS_TRICKSPEED, stream->TrickSpeed %d, render->TrickSpeed %d", stream->TrickSpeed, stream->Render->TrickSpeed);
+ 						VideoEnqueue(stream, AV_NOPTS_VALUE, seq_end_h264, sizeof(seq_end_h264));
+ 					}
+ 				}
+@@ -1570,6 +1570,7 @@ void Play(void)
+ 	Debug("Play(void)");
+ 	SkipAudio = 0;
+ 	StreamFreezed = 0;
++	TrickSpeed(0);
+ 	AudioPlay();
+ 	VideoPlay(MyVideoStream->Render);
+ }
+-- 
+2.39.2
+

@@ -197,7 +197,15 @@ jobs:
 
     steps:
       - name: Maximize build space
-        uses: Zabrimus/maximize-build-space@master
+        uses: easimon/maximize-build-space@master
+        with:
+          root-reserve-mb: 512
+          swap-size-mb: 5144
+          remove-dotnet: 'true'
+          remove-android: 'true'
+          remove-haskell: 'true'
+          remove-codeql: 'true'
+          remove-docker-images: 'true'
 
       - name: Download summary
         uses: actions/download-artifact@v4
