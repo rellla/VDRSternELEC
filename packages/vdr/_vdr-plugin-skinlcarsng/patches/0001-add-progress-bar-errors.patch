@@ -1,0 +1,81 @@
+From 4bda6cebed1277d1c217046f28303f60805ee7c3 Mon Sep 17 00:00:00 2001
+From: Andreas Baierl <ichgeh@imkreisrum.de>
+Date: Mon, 23 Sep 2024 16:46:25 +0200
+Subject: [PATCH] add progress bar errors
+
+---
+ displayreplay.c              | 6 +++++-
+ lcarsng.h                    | 1 +
+ themes/lcarsng-Dark.theme    | 1 +
+ themes/lcarsng-Light.theme   | 1 +
+ themes/lcarsng-classic.theme | 1 +
+ 5 files changed, 9 insertions(+), 1 deletion(-)
+
+diff --git a/displayreplay.c b/displayreplay.c
+index a461bcc..78a38b2 100644
+--- a/displayreplay.c
++++ b/displayreplay.c
+@@ -389,7 +389,11 @@ void cLCARSNGDisplayReplay::SetProgress(int Current, int Total)
+ 
+   if ((xp15 - xp03 - x - 5) > 0) {
+      // Draw progressbar
+-     cProgressBar pb(xp15 - xp03 - x - 2 * Margin, pbHeight, Current, Total, marks, Theme.Color(clrReplayProgressSeen), Theme.Color(clrReplayProgressRest), Theme.Color(clrReplayProgressSelected), Theme.Color(clrReplayProgressMark), Theme.Color(clrReplayProgressCurrent));
++#if APIVERSNUM >= 30005
++     cProgressBar pb(xp15 - xp03 - x - 2 * Margin, pbHeight, Current, Total, marks, errors, Theme.Color(clrReplayProgressSeen), Theme.Color(clrReplayProgressRest), Theme.Color(clrReplayProgressSelected), Theme.Color(clrReplayProgressMark), Theme.Color(clrReplayProgressCurrent), Theme.Color(clrReplayProgressError));
++#else
++     cProgressBar pb(xp15 - xp03 - x - 2 * Margin, pbHeight, Current, Total, marks, Theme.Color(clrReplayProgressSeen), Theme.Color(clrReplayProgressRest), Theme.Color(clrReplayProgressSelected), Theme.Color(clrReplayProgressMark), Theme.Color(clrReplayProgressCurrent));
++#endif
+      DrawBitmap(ReplayPixmap, xp03 + Margin, yp07 - lineHeight + Margin, pb);
+   }
+ }
+diff --git a/lcarsng.h b/lcarsng.h
+index bfd68a9..a4524f2 100644
+--- a/lcarsng.h
++++ b/lcarsng.h
+@@ -186,6 +186,7 @@ THEME_CLR(Theme, clrReplayProgressRest,     RgbShade(CLR_WHITE, -0.2));
+ THEME_CLR(Theme, clrReplayProgressSelected, CLR_EXPOSED);
+ THEME_CLR(Theme, clrReplayProgressMark,     CLR_BLACK);
+ THEME_CLR(Theme, clrReplayProgressCurrent,  CLR_EXPOSED);
++THEME_CLR(Theme, clrReplayProgressError,    CLR_BLACK);
+ 
+ // Track display:
+ 
+diff --git a/themes/lcarsng-Dark.theme b/themes/lcarsng-Dark.theme
+index 1b80076..1b1d6ae 100644
+--- a/themes/lcarsng-Dark.theme
++++ b/themes/lcarsng-Dark.theme
+@@ -75,6 +75,7 @@ clrReplayProgressRest = FFCCCCCC
+ clrReplayProgressSelected = FF990000
+ clrReplayProgressMark = FF000000
+ clrReplayProgressCurrent = FF990000
++clrReplayProgressError = FF000000
+ clrTrackFrameFg = FFFFA060
+ clrTrackFrameBg = 99404040
+ clrTrackFrameMg = FF604040
+diff --git a/themes/lcarsng-Light.theme b/themes/lcarsng-Light.theme
+index 1e67528..5012700 100644
+--- a/themes/lcarsng-Light.theme
++++ b/themes/lcarsng-Light.theme
+@@ -75,6 +75,7 @@ clrReplayProgressRest = FFCCCCCC
+ clrReplayProgressSelected = FF990000
+ clrReplayProgressMark = FF000000
+ clrReplayProgressCurrent = FF990000
++clrReplayProgressError = FF000000
+ clrTrackFrameFg = FFFFA060
+ clrTrackFrameBg = 99404040
+ clrTrackFrameMg = FF604040
+diff --git a/themes/lcarsng-classic.theme b/themes/lcarsng-classic.theme
+index 2169b4b..e1fafb3 100644
+--- a/themes/lcarsng-classic.theme
++++ b/themes/lcarsng-classic.theme
+@@ -76,6 +76,7 @@ clrReplayProgressRest = FFCCCCCC
+ clrReplayProgressSelected = FF990000
+ clrReplayProgressMark = FF000000
+ clrReplayProgressCurrent = FF990000
++clrReplayProgressError = FF000000
+ clrTrackFrameFg = FF000000
+ clrTrackFrameBg = FFFFCC66
+ clrTrackFrameMg = FFFFFFFF
+-- 
+2.39.2
+
