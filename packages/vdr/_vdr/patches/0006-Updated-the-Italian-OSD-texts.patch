@@ -1,0 +1,46 @@
+From 83425df0b6136f0488aa61d7999a0e27acf1f1f0 Mon Sep 17 00:00:00 2001
+From: Klaus Schmidinger <vdr@tvdr.de>
+Date: Mon, 16 Sep 2024 09:14:41 +0200
+Subject: [PATCH 06/16] Updated the Italian OSD texts
+
+---
+ HISTORY     | 1 +
+ po/it_IT.po | 6 +++---
+ 2 files changed, 4 insertions(+), 3 deletions(-)
+
+diff --git a/HISTORY b/HISTORY
+index 18f00808..50c7b3db 100644
+--- a/HISTORY
++++ b/HISTORY
+@@ -9996,3 +9996,4 @@ Video Disk Recorder Revision History
+ - Fixed a problem in cSchedule::Sort(), in case hasRunning was true, but there was no event
+   with RunningStatus() >= SI::RunningStatusPausing (reported by Markus Ehrnsperger).
+ - Silenced a compiler warning with gcc 14.1.0 (reported by Winfried Köhler).
++- Updated the Italian OSD texts (thanks to Diego Pierotto).
+diff --git a/po/it_IT.po b/po/it_IT.po
+index 189b417e..87e7501a 100644
+--- a/po/it_IT.po
++++ b/po/it_IT.po
+@@ -12,8 +12,8 @@ msgstr ""
+ "Project-Id-Version: VDR 2.6.0\n"
+ "Report-Msgid-Bugs-To: <vdr-bugs@tvdr.de>\n"
+ "POT-Creation-Date: 2024-07-16 14:13+0200\n"
+-"PO-Revision-Date: 2024-04-02 23:20+0200\n"
+-"Last-Translator: Gringo <vdr-italian@tiscali.it>\n"
++"PO-Revision-Date: 2024-09-14 13:05+0200\n"
++"Last-Translator: Gringo <openpli@tiscali.it>\n"
+ "Language-Team: Italian <vdr@linuxtv.org>\n"
+ "Language: it\n"
+ "MIME-Version: 1.0\n"
+@@ -1537,7 +1537,7 @@ msgid "Up/Dn for new location - OK to move"
+ msgstr "Su/GiÃ¹ per nuova posizione - OK per spostare"
+ 
+ msgid "Primary device has no MPEG decoder, can't attach player!"
+-msgstr ""
++msgstr "Il dispositivo primario non ha un decoder MPEG, impossibile collegare il lettore!"
+ 
+ msgid "Low disk space!"
+ msgstr "Poco spazio su disco!"
+-- 
+2.39.2
+

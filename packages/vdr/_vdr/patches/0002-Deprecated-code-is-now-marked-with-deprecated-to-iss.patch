@@ -1,0 +1,95 @@
+From f006884e57e87cc7b4af68451c0b461a436ea080 Mon Sep 17 00:00:00 2001
+From: Klaus Schmidinger <vdr@tvdr.de>
+Date: Mon, 9 Sep 2024 22:15:59 +0200
+Subject: [PATCH 02/16] Deprecated code is now marked with [[deprecated]] to
+ issue a compile time warning when used
+
+---
+ HISTORY  | 4 +++-
+ epg.h    | 3 ++-
+ filter.h | 4 +++-
+ player.h | 3 ++-
+ 4 files changed, 10 insertions(+), 4 deletions(-)
+
+diff --git a/HISTORY b/HISTORY
+index ac273c57..3a363604 100644
+--- a/HISTORY
++++ b/HISTORY
+@@ -9984,6 +9984,8 @@ Video Disk Recorder Revision History
+   version numbering. Version numbers are simply counted upwards, with each of the three
+   parts ("version", "major", "minor") always being a single digit, and '0' being skipped.
+ 
+-2024-09-09:
++2024-09-10:
+ 
+ - Fix for compilers that don't like non-constant format strings (thanks to Stefan Hofmann).
++- Deprecated code is now marked with [[deprecated]] to issue a compile time warning when
++  used.
+diff --git a/epg.h b/epg.h
+index 09910155..ed6f99f2 100644
+--- a/epg.h
++++ b/epg.h
+@@ -7,7 +7,7 @@
+  * Original version (as used in VDR before 1.3.0) written by
+  * Robert Schneider <Robert.Schneider@web.de> and Rolf Hakenes <hakenes@hippomi.de>.
+  *
+- * $Id: epg.h 5.4 2024/07/15 14:42:22 kls Exp $
++ * $Id: epg.h 5.5 2024/09/09 22:15:59 kls Exp $
+  */
+ 
+ #ifndef __EPG_H
+@@ -191,6 +191,7 @@ public:
+ #define DEPRECATED_SCHEDULE_GET_EVENT 0
+ #endif
+ #if DEPRECATED_SCHEDULE_GET_EVENT
++  [[deprecated("see HISTORY, version 2.5.2")]]
+   const cEvent *GetEvent(tEventID EventID, time_t StartTime = 0) const;
+ #endif
+   const cEvent *GetEventById(tEventID EventID) const;
+diff --git a/filter.h b/filter.h
+index 3478b8a2..7306a17c 100644
+--- a/filter.h
++++ b/filter.h
+@@ -4,7 +4,7 @@
+  * See the main source file 'vdr.c' for copyright information and
+  * how to reach the author.
+  *
+- * $Id: filter.h 5.2 2024/07/15 14:42:22 kls Exp $
++ * $Id: filter.h 5.3 2024/09/09 22:15:59 kls Exp $
+  */
+ 
+ #ifndef __FILTER_H
+@@ -52,7 +52,9 @@ public:
+   bool Complete(void) { return complete; }
+        ///< Returns true if all sections have been processed.
+ #if DEPRECATED_SECTIONSYNCER_SYNC_REPEAT
++  [[deprecated("see HISTORY, version 2.5.2")]]
+   void Repeat(void);
++  [[deprecated("see HISTORY, version 2.5.2")]]
+   bool Sync(uchar Version, int Number, int LastNumber);
+ #endif
+   };
+diff --git a/player.h b/player.h
+index 7dbb5f9e..21b6cb7d 100644
+--- a/player.h
++++ b/player.h
+@@ -4,7 +4,7 @@
+  * See the main source file 'vdr.c' for copyright information and
+  * how to reach the author.
+  *
+- * $Id: player.h 5.2 2024/07/15 14:42:22 kls Exp $
++ * $Id: player.h 5.3 2024/09/09 22:15:59 kls Exp $
+  */
+ 
+ #ifndef __PLAYER_H
+@@ -119,6 +119,7 @@ public:
+ #define DEPRECATED_CCONTROL 0
+ #endif
+ #if DEPRECATED_CCONTROL
++  [[deprecated("see HISTORY, version 2.4.2")]]
+   static cControl *Control(bool Hidden = false);
+          ///< Old version of this function, for backwards compatibility with plugins.
+          ///< Plugins should be changed to use the new version below, which does
+-- 
+2.39.2
+

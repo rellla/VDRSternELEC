@@ -1,0 +1,599 @@
+From 9e523073aa4dd6410d1a3536dfac62667aaab9ea Mon Sep 17 00:00:00 2001
+From: Klaus Schmidinger <vdr@tvdr.de>
+Date: Thu, 19 Sep 2024 09:49:02 +0200
+Subject: [PATCH 12/16] Errors are now shown as diamond shaped markers in the
+ replay progress display of the default skins
+
+---
+ HISTORY       |  7 ++++++-
+ config.h      |  6 +++---
+ dvbplayer.c   | 17 ++++++++++++++++-
+ dvbplayer.h   |  4 +++-
+ menu.c        | 12 +++++++++---
+ menu.h        |  3 ++-
+ player.h      |  4 +++-
+ recorder.c    | 27 ++++++++++++++++++++++++---
+ recording.c   | 14 +++++++++++++-
+ recording.h   |  9 ++++++++-
+ skinclassic.c |  5 +++--
+ skinlcars.c   |  5 +++--
+ skins.c       | 36 +++++++++++++++++++++++++++++++++++-
+ skins.h       | 10 ++++++++--
+ skinsttng.c   |  5 +++--
+ 15 files changed, 139 insertions(+), 25 deletions(-)
+
+diff --git a/HISTORY b/HISTORY
+index 71ddaa40..29f7c405 100644
+--- a/HISTORY
++++ b/HISTORY
+@@ -9984,7 +9984,7 @@ Video Disk Recorder Revision History
+   version numbering. Version numbers are simply counted upwards, with each of the three
+   parts ("version", "major", "minor") always being a single digit, and '0' being skipped.
+ 
+-2024-09-18:
++2024-09-19:
+ 
+ - Fix for compilers that don't like non-constant format strings (thanks to Stefan Hofmann).
+ - Deprecated code is now marked with [[deprecated]] to issue a compile time warning when
+@@ -10002,3 +10002,8 @@ Video Disk Recorder Revision History
+ - Now distinguishing between frames with errors and completely missing frames.
+ - Recording errors are now marked in the index file.
+ - Fixed description of cSkinDisplayReplay::SetRecording().
++- Errors are now shown as diamond shaped markers in the replay progress display of the
++  default skins. Plugin authors can switch to the new constructor of cProgressBar to
++  benefit from this feature. Of course this only works with recordings that have error
++  information stored in their index file.
++  APIVERSNUM is now 30004.
+diff --git a/config.h b/config.h
+index b98c5d06..598e718a 100644
+--- a/config.h
++++ b/config.h
+@@ -4,7 +4,7 @@
+  * See the main source file 'vdr.c' for copyright information and
+  * how to reach the author.
+  *
+- * $Id: config.h 5.20 2024/09/12 12:48:40 kls Exp $
++ * $Id: config.h 5.21 2024/09/19 09:49:02 kls Exp $
+  */
+ 
+ #ifndef __CONFIG_H
+@@ -27,8 +27,8 @@
+ 
+ // The plugin API's version number:
+ 
+-#define APIVERSION      "3"
+-#define APIVERSNUM   30003
++#define APIVERSION      "4"
++#define APIVERSNUM   30004
+ 
+ // When loading plugins, VDR searches files by their APIVERSION, which
+ // is different from VDRVERSION. APIVERSION is a plain number, incremented
+diff --git a/dvbplayer.c b/dvbplayer.c
+index 9caf3071..c36fac70 100644
+--- a/dvbplayer.c
++++ b/dvbplayer.c
+@@ -4,7 +4,7 @@
+  * See the main source file 'vdr.c' for copyright information and
+  * how to reach the author.
+  *
+- * $Id: dvbplayer.c 5.3 2022/12/27 15:57:20 kls Exp $
++ * $Id: dvbplayer.c 5.4 2024/09/19 09:49:02 kls Exp $
+  */
+ 
+ #include "dvbplayer.h"
+@@ -283,6 +283,7 @@ public:
+   void Goto(int Position, bool Still = false);
+   virtual double FramesPerSecond(void) { return framesPerSecond; }
+   virtual void SetAudioTrack(eTrackType Type, const tTrackId *TrackId);
++  virtual const cErrors *GetErrors(void);
+   virtual bool GetIndex(int &Current, int &Total, bool SnapToIFrame = false);
+   virtual bool GetFrameNumber(int &Current, int &Total);
+   virtual bool GetReplayMode(bool &Play, bool &Forward, int &Speed);
+@@ -940,6 +941,13 @@ void cDvbPlayer::SetAudioTrack(eTrackType Type, const tTrackId *TrackId)
+      resyncAfterPause = true;
+ }
+ 
++const cErrors *cDvbPlayer::GetErrors(void)
++{
++  if (index)
++     return index->GetErrors();
++  return NULL;
++}
++
+ bool cDvbPlayer::GetIndex(int &Current, int &Total, bool SnapToIFrame)
+ {
+   if (index) {
+@@ -1047,6 +1055,13 @@ int cDvbPlayerControl::SkipFrames(int Frames)
+   return -1;
+ }
+ 
++const cErrors *cDvbPlayerControl::GetErrors(void)
++{
++  if (player)
++     return player->GetErrors();
++  return NULL;
++}
++
+ bool cDvbPlayerControl::GetIndex(int &Current, int &Total, bool SnapToIFrame)
+ {
+   if (player) {
+diff --git a/dvbplayer.h b/dvbplayer.h
+index 2fe6e4c9..bac5b0c4 100644
+--- a/dvbplayer.h
++++ b/dvbplayer.h
+@@ -4,7 +4,7 @@
+  * See the main source file 'vdr.c' for copyright information and
+  * how to reach the author.
+  *
+- * $Id: dvbplayer.h 4.2 2016/12/22 10:36:50 kls Exp $
++ * $Id: dvbplayer.h 5.1 2024/09/19 09:49:02 kls Exp $
+  */
+ 
+ #ifndef __DVBPLAYER_H
+@@ -47,6 +47,8 @@ public:
+        // The sign of 'Seconds' determines the direction in which to skip.
+        // Use a very large negative value to go all the way back to the
+        // beginning of the recording.
++  const cErrors *GetErrors(void);
++       // Returns the frame indexes of errors in the recording (if any).
+   bool GetIndex(int &Current, int &Total, bool SnapToIFrame = false);
+        // Returns the current and total frame index, optionally snapped to the
+        // nearest I-frame.
+diff --git a/menu.c b/menu.c
+index cd6cd7ae..a5c429e3 100644
+--- a/menu.c
++++ b/menu.c
+@@ -4,7 +4,7 @@
+  * See the main source file 'vdr.c' for copyright information and
+  * how to reach the author.
+  *
+- * $Id: menu.c 5.16 2024/08/30 20:43:26 kls Exp $
++ * $Id: menu.c 5.17 2024/09/19 09:49:02 kls Exp $
+  */
+ 
+ #include "menu.h"
+@@ -5709,6 +5709,7 @@ cReplayControl::cReplayControl(bool PauseLive)
+   displayReplay = NULL;
+   marksModified = false;
+   visible = modeOnly = shown = displayFrames = false;
++  lastErrors = 0;
+   lastCurrent = lastTotal = -1;
+   lastPlay = lastForward = false;
+   lastSpeed = -2; // an invalid value
+@@ -5882,6 +5883,7 @@ bool cReplayControl::ShowProgress(bool Initial)
+      if (!visible) {
+         displayReplay = Skins.Current()->DisplayReplay(modeOnly);
+         displayReplay->SetMarks(&marks);
++        displayReplay->SetErrors(GetErrors());
+         SetNeedsFastResponse(true);
+         visible = true;
+         }
+@@ -5893,7 +5895,9 @@ bool cReplayControl::ShowProgress(bool Initial)
+            }
+         lastCurrent = lastTotal = -1;
+         }
+-     if (Current != lastCurrent || Total != lastTotal) {
++     const cErrors *Errors = GetErrors();
++     int NumErrors = Errors ? Errors->Size() : 0;
++     if (Current != lastCurrent || Total != lastTotal || NumErrors != lastErrors) {
+         if (Setup.ShowRemainingTime || Total != lastTotal) {
+            int Index = Total;
+            if (Setup.ShowRemainingTime)
+@@ -5902,10 +5906,12 @@ bool cReplayControl::ShowProgress(bool Initial)
+            }
+         displayReplay->SetProgress(Current, Total);
+         displayReplay->SetCurrent(IndexToHMSF(Current, displayFrames, FramesPerSecond()));
++        displayReplay->SetErrors(Errors);
+         displayReplay->Flush();
+         lastCurrent = Current;
++        lastTotal = Total;
++        lastErrors = NumErrors;
+         }
+-     lastTotal = Total;
+      ShowMode();
+      updateTimer.Set(PROGRESSTIMEOUT);
+      return true;
+diff --git a/menu.h b/menu.h
+index 949b900c..96c55e62 100644
+--- a/menu.h
++++ b/menu.h
+@@ -4,7 +4,7 @@
+  * See the main source file 'vdr.c' for copyright information and
+  * how to reach the author.
+  *
+- * $Id: menu.h 5.3 2024/08/30 09:55:15 kls Exp $
++ * $Id: menu.h 5.4 2024/09/19 09:49:02 kls Exp $
+  */
+ 
+ #ifndef __MENU_H
+@@ -297,6 +297,7 @@ private:
+   cMarks marks;
+   bool marksModified;
+   bool visible, modeOnly, shown, displayFrames;
++  int lastErrors;
+   int lastCurrent, lastTotal;
+   bool lastPlay, lastForward;
+   int lastSpeed;
+diff --git a/player.h b/player.h
+index 21b6cb7d..a17b6006 100644
+--- a/player.h
++++ b/player.h
+@@ -4,7 +4,7 @@
+  * See the main source file 'vdr.c' for copyright information and
+  * how to reach the author.
+  *
+- * $Id: player.h 5.3 2024/09/09 22:15:59 kls Exp $
++ * $Id: player.h 5.4 2024/09/19 09:49:02 kls Exp $
+  */
+ 
+ #ifndef __PLAYER_H
+@@ -54,6 +54,8 @@ public:
+   bool IsAttached(void) { return device != NULL; }
+   virtual double FramesPerSecond(void) { return DEFAULTFRAMESPERSECOND; }
+        // Returns the number of frames per second of the currently played material.
++  virtual const cErrors *GetErrors(void) { return NULL; }
++       // Returns the frame indexes of errors in the recording (if any).
+   virtual bool GetIndex(int &Current, int &Total, bool SnapToIFrame = false) { return false; }
+        // Returns the current and total frame index, optionally snapped to the
+        // nearest I-frame.
+diff --git a/recorder.c b/recorder.c
+index 0db66d30..0b3fdab1 100644
+--- a/recorder.c
++++ b/recorder.c
+@@ -4,7 +4,7 @@
+  * See the main source file 'vdr.c' for copyright information and
+  * how to reach the author.
+  *
+- * $Id: recorder.c 5.9 2024/09/17 11:30:28 kls Exp $
++ * $Id: recorder.c 5.10 2024/09/19 09:49:02 kls Exp $
+  */
+ 
+ #include "recorder.h"
+@@ -167,6 +167,15 @@ void cRecorder::Action(void)
+ {
+   cTimeMs t(MAXBROKENTIMEOUT);
+   bool InfoWritten = false;
++  bool pendIndependentFrame = false;
++  uint16_t pendNumber = 0;
++  off_t pendFileSize = 0;
++  bool pendErrors = false;
++  bool pendMissing = false;
++  // Check if this is a resumed recording, in which case we definitely missed frames:
++  NextFile();
++  if (fileName->Number() > 1 || oldErrors)
++     frameDetector->SetMissing();
+   while (Running()) {
+         int r;
+         uchar *b = ringBuffer->Get(r);
+@@ -197,8 +206,15 @@ void cRecorder::Action(void)
+                     int PreviousErrors = 0;
+                     int MissingFrames = 0;
+                     if (frameDetector->NewFrame(&PreviousErrors, &MissingFrames)) {
+-                       if (index)
+-                          index->Write(frameDetector->IndependentFrame(), fileName->Number(), fileSize);
++                       if (index) {
++                          if (pendNumber > 0)
++                             index->Write(pendIndependentFrame, pendNumber, pendFileSize, pendErrors, pendMissing);
++                          pendIndependentFrame = frameDetector->IndependentFrame();
++                          pendNumber = fileName->Number();
++                          pendFileSize = fileSize;
++                          pendErrors = PreviousErrors;
++                          pendMissing = MissingFrames;
++                          }
+                        if (PreviousErrors)
+                           errors++;
+                        if (MissingFrames)
+@@ -226,6 +242,9 @@ void cRecorder::Action(void)
+               }
+            }
+         if (t.TimedOut()) {
++           if (pendNumber > 0)
++              index->Write(pendIndependentFrame, pendNumber, pendFileSize, pendErrors, pendMissing);
++           frameDetector->SetMissing();
+            errors += MAXBROKENTIMEOUT / 1000 * frameDetector->FramesPerSecond();
+            HandleErrors(true);
+            esyslog("ERROR: video data stream broken");
+@@ -233,5 +252,7 @@ void cRecorder::Action(void)
+            t.Set(MAXBROKENTIMEOUT);
+            }
+         }
++  if (pendNumber > 0)
++     index->Write(pendIndependentFrame, pendNumber, pendFileSize, pendErrors, pendMissing);
+   HandleErrors(true);
+ }
+diff --git a/recording.c b/recording.c
+index 575023b9..c26b2dbc 100644
+--- a/recording.c
++++ b/recording.c
+@@ -4,7 +4,7 @@
+  * See the main source file 'vdr.c' for copyright information and
+  * how to reach the author.
+  *
+- * $Id: recording.c 5.31 2024/09/18 09:23:07 kls Exp $
++ * $Id: recording.c 5.32 2024/09/19 09:49:02 kls Exp $
+  */
+ 
+ #include "recording.h"
+@@ -2728,6 +2728,7 @@ cIndexFile::cIndexFile(const char *FileName, bool Record, bool IsPesRecording, b
+   f = -1;
+   size = 0;
+   last = -1;
++  lastErrorIndex = last;
+   index = NULL;
+   isPesRecording = IsPesRecording;
+   indexFileGenerator = NULL;
+@@ -2948,6 +2949,17 @@ bool cIndexFile::Get(int Index, uint16_t *FileNumber, off_t *FileOffset, bool *I
+   return false;
+ }
+ 
++const cErrors *cIndexFile::GetErrors(void)
++{
++  for (int Index = lastErrorIndex + 1; Index <= last; Index++) {
++      tIndexTs *p = &index[Index];
++      if (p->errors || p->missing)
++         errors.Append(Index);
++      }
++  lastErrorIndex = last;
++  return &errors;
++}
++
+ int cIndexFile::GetNextIFrame(int Index, bool Forward, uint16_t *FileNumber, off_t *FileOffset, int *Length)
+ {
+   if (CatchUp()) {
+diff --git a/recording.h b/recording.h
+index 59c218da..c58575d1 100644
+--- a/recording.h
++++ b/recording.h
+@@ -4,7 +4,7 @@
+  * See the main source file 'vdr.c' for copyright information and
+  * how to reach the author.
+  *
+- * $Id: recording.h 5.9 2024/09/18 09:23:07 kls Exp $
++ * $Id: recording.h 5.10 2024/09/19 09:49:02 kls Exp $
+  */
+ 
+ #ifndef __RECORDING_H
+@@ -446,6 +446,9 @@ public:
+   cMark *GetNextEnd(const cMark *BeginMark) { return const_cast<cMark *>(static_cast<const cMarks *>(this)->GetNextEnd(BeginMark)); }
+   };
+ 
++class cErrors : public cVector<int> {
++  };
++
+ #define RUC_BEFORERECORDING  "before"
+ #define RUC_STARTRECORDING   "started"
+ #define RUC_AFTERRECORDING   "after"
+@@ -486,9 +489,11 @@ private:
+   int f;
+   cString fileName;
+   int size, last;
++  int lastErrorIndex;
+   tIndexTs *index;
+   bool isPesRecording;
+   cResumeFile resumeFile;
++  cErrors errors;
+   cIndexFileGenerator *indexFileGenerator;
+   cMutex mutex;
+   void ConvertFromPes(tIndexTs *IndexTs, int Count);
+@@ -500,6 +505,8 @@ public:
+   bool Ok(void) { return index != NULL; }
+   bool Write(bool Independent, uint16_t FileNumber, off_t FileOffset, bool Errors = false, bool Missing = false);
+   bool Get(int Index, uint16_t *FileNumber, off_t *FileOffset, bool *Independent = NULL, int *Length = NULL);
++  const cErrors *GetErrors(void);
++       ///< Returns the frame indexes of errors in the recording (if any).
+   int GetNextIFrame(int Index, bool Forward, uint16_t *FileNumber = NULL, off_t *FileOffset = NULL, int *Length = NULL);
+   int GetClosestIFrame(int Index);
+        ///< Returns the index of the I-frame that is closest to the given Index (or Index itself,
+diff --git a/skinclassic.c b/skinclassic.c
+index 1afb5e02..e4d41d47 100644
+--- a/skinclassic.c
++++ b/skinclassic.c
+@@ -4,7 +4,7 @@
+  * See the main source file 'vdr.c' for copyright information and
+  * how to reach the author.
+  *
+- * $Id: skinclassic.c 5.2 2023/12/29 10:48:40 kls Exp $
++ * $Id: skinclassic.c 5.3 2024/09/19 09:49:02 kls Exp $
+  */
+ 
+ #include "skinclassic.h"
+@@ -71,6 +71,7 @@ THEME_CLR(Theme, clrReplayProgressRest,     clrWhite);
+ THEME_CLR(Theme, clrReplayProgressSelected, clrRed);
+ THEME_CLR(Theme, clrReplayProgressMark,     clrBlack);
+ THEME_CLR(Theme, clrReplayProgressCurrent,  clrRed);
++THEME_CLR(Theme, clrReplayProgressError,    clrBlack);
+ 
+ // --- cSkinClassicDisplayChannel --------------------------------------------
+ 
+@@ -534,7 +535,7 @@ void cSkinClassicDisplayReplay::SetMode(bool Play, bool Forward, int Speed)
+ 
+ void cSkinClassicDisplayReplay::SetProgress(int Current, int Total)
+ {
+-  cProgressBar pb(x1 - x0, y2 - y1, Current, Total, marks, Theme.Color(clrReplayProgressSeen), Theme.Color(clrReplayProgressRest), Theme.Color(clrReplayProgressSelected), Theme.Color(clrReplayProgressMark), Theme.Color(clrReplayProgressCurrent));
++  cProgressBar pb(x1 - x0, y2 - y1, Current, Total, marks, errors, Theme.Color(clrReplayProgressSeen), Theme.Color(clrReplayProgressRest), Theme.Color(clrReplayProgressSelected), Theme.Color(clrReplayProgressMark), Theme.Color(clrReplayProgressCurrent), Theme.Color(clrReplayProgressError));
+   osd->DrawBitmap(x0, y1, pb);
+ }
+ 
+diff --git a/skinlcars.c b/skinlcars.c
+index ea52a1aa..f2f287a3 100644
+--- a/skinlcars.c
++++ b/skinlcars.c
+@@ -4,7 +4,7 @@
+  * See the main source file 'vdr.c' for copyright information and
+  * how to reach the author.
+  *
+- * $Id: skinlcars.c 5.5 2024/07/13 15:25:22 kls Exp $
++ * $Id: skinlcars.c 5.6 2024/09/19 09:49:02 kls Exp $
+  */
+ 
+ // "Star Trek: The Next Generation"(R) is a registered trademark of Paramount Pictures,
+@@ -188,6 +188,7 @@ THEME_CLR(Theme, clrReplayProgressRest,     RgbShade(CLR_WHITE, -0.2));
+ THEME_CLR(Theme, clrReplayProgressSelected, CLR_EXPOSED);
+ THEME_CLR(Theme, clrReplayProgressMark,     CLR_BLACK);
+ THEME_CLR(Theme, clrReplayProgressCurrent,  CLR_EXPOSED);
++THEME_CLR(Theme, clrReplayProgressError,    CLR_BLACK);
+ 
+ // Track display:
+ 
+@@ -1928,7 +1929,7 @@ void cSkinLCARSDisplayReplay::SetMode(bool Play, bool Forward, int Speed)
+ 
+ void cSkinLCARSDisplayReplay::SetProgress(int Current, int Total)
+ {
+-  cProgressBar pb(xp13 - xp03, lineHeight, Current, Total, marks, Theme.Color(clrReplayProgressSeen), Theme.Color(clrReplayProgressRest), Theme.Color(clrReplayProgressSelected), Theme.Color(clrReplayProgressMark), Theme.Color(clrReplayProgressCurrent));
++  cProgressBar pb(xp13 - xp03, lineHeight, Current, Total, marks, errors, Theme.Color(clrReplayProgressSeen), Theme.Color(clrReplayProgressRest), Theme.Color(clrReplayProgressSelected), Theme.Color(clrReplayProgressMark), Theme.Color(clrReplayProgressCurrent), Theme.Color(clrReplayProgressError));
+   osd->DrawBitmap(xp03, yp02, pb);
+ }
+ 
+diff --git a/skins.c b/skins.c
+index 75a76dfa..b5668fe4 100644
+--- a/skins.c
++++ b/skins.c
+@@ -4,7 +4,7 @@
+  * See the main source file 'vdr.c' for copyright information and
+  * how to reach the author.
+  *
+- * $Id: skins.c 5.2 2024/07/13 09:12:18 kls Exp $
++ * $Id: skins.c 5.3 2024/09/19 09:49:02 kls Exp $
+  */
+ 
+ #include "skins.h"
+@@ -147,6 +147,11 @@ const cFont *cSkinDisplayMenu::GetTextAreaFont(bool  FixedFont) const
+ // --- cSkinDisplayReplay::cProgressBar --------------------------------------
+ 
+ cSkinDisplayReplay::cProgressBar::cProgressBar(int Width, int Height, int Current, int Total, const cMarks *Marks, tColor ColorSeen, tColor ColorRest, tColor ColorSelected, tColor ColorMark, tColor ColorCurrent)
++:cSkinDisplayReplay::cProgressBar::cProgressBar(Width, Height, Current, Total, Marks, NULL, ColorSeen, ColorRest, ColorSelected, ColorMark, ColorCurrent, clrBlack)
++{
++}
++
++cSkinDisplayReplay::cProgressBar::cProgressBar(int Width, int Height, int Current, int Total, const cMarks *Marks, const cErrors *Errors, tColor ColorSeen, tColor ColorRest, tColor ColorSelected, tColor ColorMark, tColor ColorCurrent, tColor ColorError)
+ :cBitmap(Width, Height, 2)
+ {
+   total = Total;
+@@ -168,6 +173,16 @@ cSkinDisplayReplay::cProgressBar::cProgressBar(int Width, int Height, int Curren
+             Start = !Start;
+             }
+         }
++     if (Errors) {
++        int LastPos = -1;
++        for (int i = 0; i < Errors->Size(); i++) {
++            int p1 = Errors->At(i);
++            if (p1 != LastPos) {
++               Error(Pos(Errors->At(i)), ColorError);
++               LastPos = p1;
++               }
++            }
++        }
+      }
+ }
+ 
+@@ -181,11 +196,25 @@ void cSkinDisplayReplay::cProgressBar::Mark(int x, bool Start, bool Current, tCo
+       }
+ }
+ 
++void cSkinDisplayReplay::cProgressBar::Error(int x, tColor ColorError)
++{
++  const int d = (Height() / 9) & ~0x01; // must be even
++  const int h = Height() / 2;
++  const int e = Height() / 4;
++  DrawRectangle(x, e, x, Height() -e - 1, ColorError);
++  DrawRectangle(x - d, h, x + d, h, ColorError);
++  for (int i = 1; i <= d; i++) {
++      DrawRectangle(x - d + i, h - i, x + d - i, h - i, ColorError);
++      DrawRectangle(x - d + i, h + i, x + d - i, h + i, ColorError);
++      }
++}
++
+ // --- cSkinDisplayReplay ----------------------------------------------------
+ 
+ cSkinDisplayReplay::cSkinDisplayReplay(void)
+ {
+   marks = NULL;
++  errors = NULL;
+ }
+ 
+ void cSkinDisplayReplay::SetRecording(const cRecording *Recording)
+@@ -198,6 +227,11 @@ void cSkinDisplayReplay::SetMarks(const cMarks *Marks)
+   marks = Marks;
+ }
+ 
++void cSkinDisplayReplay::SetErrors(const cErrors *Errors)
++{
++  errors = Errors;
++}
++
+ // --- cSkin -----------------------------------------------------------------
+ 
+ cSkin::cSkin(const char *Name, cTheme *Theme)
+diff --git a/skins.h b/skins.h
+index 164028a5..15c729f2 100644
+--- a/skins.h
++++ b/skins.h
+@@ -4,7 +4,7 @@
+  * See the main source file 'vdr.c' for copyright information and
+  * how to reach the author.
+  *
+- * $Id: skins.h 5.5 2024/09/18 11:06:39 kls Exp $
++ * $Id: skins.h 5.6 2024/09/19 09:49:02 kls Exp $
+  */
+ 
+ #ifndef __SKINS_H
+@@ -311,19 +311,25 @@ class cSkinDisplayReplay : public cSkinDisplay {
+        ///< a recording.
+ protected:
+   const cMarks *marks;
++  const cErrors *errors;
+   class cProgressBar : public cBitmap {
+   protected:
+     int total;
+     int Pos(int p) { return int(int64_t(p) * Width() / total); }
+     void Mark(int x, bool Start, bool Current, tColor ColorMark, tColor ColorCurrent);
++    void Error(int x, tColor ColorError);
+   public:
+-    cProgressBar(int Width, int Height, int Current, int Total, const cMarks *Marks, tColor ColorSeen, tColor ColorRest, tColor ColorSelected, tColor ColorMark, tColor ColorCurrent);
++    cProgressBar(int Width, int Height, int Current, int Total, const cMarks *Marks, tColor ColorSeen, tColor ColorRest, tColor ColorSelected, tColor ColorMark, tColor ColorCurrent); // for backwards compatibility
++    cProgressBar(int Width, int Height, int Current, int Total, const cMarks *Marks, const cErrors *Errors, tColor ColorSeen, tColor ColorRest, tColor ColorSelected, tColor ColorMark, tColor ColorCurrent, tColor ColorError);
+     };
+ public:
+   cSkinDisplayReplay(void);
+   virtual void SetMarks(const cMarks *Marks);
+        ///< Sets the editing marks to Marks, which shall be used to display the
+        ///< progress bar through a cProgressBar object.
++  virtual void SetErrors(const cErrors *Errors);
++       ///< Sets the errors found in the recording to Errors, which shall be used to display the
++       ///< progress bar through a cProgressBar object.
+   virtual void SetRecording(const cRecording *Recording);
+        ///< Sets the recording that is currently being played.
+        ///< The default implementation calls SetTitle() with the title
+diff --git a/skinsttng.c b/skinsttng.c
+index 6c8bd9f9..777c62cc 100644
+--- a/skinsttng.c
++++ b/skinsttng.c
+@@ -4,7 +4,7 @@
+  * See the main source file 'vdr.c' for copyright information and
+  * how to reach the author.
+  *
+- * $Id: skinsttng.c 5.2 2023/12/29 10:48:40 kls Exp $
++ * $Id: skinsttng.c 5.3 2024/09/19 09:49:02 kls Exp $
+  */
+ 
+ // "Star Trek: The Next Generation"(R) is a registered trademark of Paramount Pictures
+@@ -122,6 +122,7 @@ THEME_CLR(Theme, clrReplayProgressRest,     clrWhite);
+ THEME_CLR(Theme, clrReplayProgressSelected, clrRed);
+ THEME_CLR(Theme, clrReplayProgressMark,     clrBlack);
+ THEME_CLR(Theme, clrReplayProgressCurrent,  clrRed);
++THEME_CLR(Theme, clrReplayProgressError,    clrBlack);
+ 
+ // --- cSkinSTTNGDisplayChannel ----------------------------------------------
+ 
+@@ -904,7 +905,7 @@ void cSkinSTTNGDisplayReplay::SetMode(bool Play, bool Forward, int Speed)
+ 
+ void cSkinSTTNGDisplayReplay::SetProgress(int Current, int Total)
+ {
+-  cProgressBar pb(x4 - x3, y4 - y3, Current, Total, marks, Theme.Color(clrReplayProgressSeen), Theme.Color(clrReplayProgressRest), Theme.Color(clrReplayProgressSelected), Theme.Color(clrReplayProgressMark), Theme.Color(clrReplayProgressCurrent));
++  cProgressBar pb(x4 - x3, y4 - y3, Current, Total, marks, errors, Theme.Color(clrReplayProgressSeen), Theme.Color(clrReplayProgressRest), Theme.Color(clrReplayProgressSelected), Theme.Color(clrReplayProgressMark), Theme.Color(clrReplayProgressCurrent), Theme.Color(clrReplayProgressError));
+   osd->DrawBitmap(x3, y3, pb);
+ }
+ 
+-- 
+2.39.2
+

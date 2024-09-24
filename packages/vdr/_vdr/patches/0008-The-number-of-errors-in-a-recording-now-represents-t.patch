@@ -1,0 +1,68 @@
+From 6f6b05ffcbc061793f3c7578cded3928ee1ec0f9 Mon Sep 17 00:00:00 2001
+From: Klaus Schmidinger <vdr@tvdr.de>
+Date: Tue, 17 Sep 2024 09:39:50 +0200
+Subject: [PATCH 08/16] The number of errors in a recording now represents the
+ number of broken frames
+
+---
+ HISTORY    | 1 +
+ recorder.c | 5 +++--
+ recorder.h | 3 ++-
+ 3 files changed, 6 insertions(+), 3 deletions(-)
+
+diff --git a/HISTORY b/HISTORY
+index 775c4d4c..90c72599 100644
+--- a/HISTORY
++++ b/HISTORY
+@@ -9998,3 +9998,4 @@ Video Disk Recorder Revision History
+ - Silenced a compiler warning with gcc 14.1.0 (reported by Winfried Köhler).
+ - Updated the Italian OSD texts (thanks to Diego Pierotto).
+ - Moved error checking from recorder.c to remux.c.
++- The number of errors in a recording now represents the number of broken frames.
+diff --git a/recorder.c b/recorder.c
+index 4c3e960f..5b3f77bf 100644
+--- a/recorder.c
++++ b/recorder.c
+@@ -4,7 +4,7 @@
+  * See the main source file 'vdr.c' for copyright information and
+  * how to reach the author.
+  *
+- * $Id: recorder.c 5.7 2024/09/17 09:28:03 kls Exp $
++ * $Id: recorder.c 5.8 2024/09/17 09:39:50 kls Exp $
+  */
+ 
+ #include "recorder.h"
+@@ -198,7 +198,8 @@ void cRecorder::Action(void)
+                     if (frameDetector->NewFrame(&PreviousErrors)) {
+                        if (index)
+                           index->Write(frameDetector->IndependentFrame(), fileName->Number(), fileSize);
+-                       errors += PreviousErrors;
++                       if (PreviousErrors)
++                          errors++;
+                        }
+                     if (frameDetector->IndependentFrame()) {
+                        recordFile->Write(patPmtGenerator.GetPat(), TS_SIZE);
+diff --git a/recorder.h b/recorder.h
+index b32eb294..a1858635 100644
+--- a/recorder.h
++++ b/recorder.h
+@@ -4,7 +4,7 @@
+  * See the main source file 'vdr.c' for copyright information and
+  * how to reach the author.
+  *
+- * $Id: recorder.h 5.2 2024/09/16 19:56:37 kls Exp $
++ * $Id: recorder.h 5.3 2024/09/17 09:39:50 kls Exp $
+  */
+ 
+ #ifndef __RECORDER_H
+@@ -51,6 +51,7 @@ public:
+   virtual ~cRecorder();
+   int Errors(void) { return oldErrors + errors; };
+        ///< Returns the number of errors that were detected during recording.
++       ///< Each frame that is missing or contains (any number of) errors counts as one error.
+        ///< If this is a resumed recording, this includes errors that occurred
+        ///< in the previous parts.
+   };
+-- 
+2.39.2
+

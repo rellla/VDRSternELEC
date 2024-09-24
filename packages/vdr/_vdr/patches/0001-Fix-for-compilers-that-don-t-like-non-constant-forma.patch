@@ -1,0 +1,76 @@
+From c0a005b3cdd52c06b1e6b8e5210142348438ee6a Mon Sep 17 00:00:00 2001
+From: Klaus Schmidinger <vdr@tvdr.de>
+Date: Mon, 9 Sep 2024 13:39:05 +0200
+Subject: [PATCH 01/16] Fix for compilers that don't like non-constant format
+ strings
+
+---
+ CONTRIBUTORS | 1 +
+ HISTORY      | 4 ++++
+ svdrp.c      | 8 ++++----
+ 3 files changed, 9 insertions(+), 4 deletions(-)
+
+diff --git a/CONTRIBUTORS b/CONTRIBUTORS
+index 0a4555ff..44e92aeb 100644
+--- a/CONTRIBUTORS
++++ b/CONTRIBUTORS
+@@ -3351,6 +3351,7 @@ Mike Hay <mike.hay@linenshorts.com>
+ Stefan Hofmann <stefan.hofmann@t-online.de>
+  for suggesting to implement support for remote controls that only have a combined
+  "Play/Pause" key instead of separate keys for "Play" and "Pause"
++ for a fix for compilers that don't like non-constant format strings
+ 
+ Stefan Blochberger <Stefan.Blochberger@gmx.de>
+  for suggesting to automatically display the progress display whenever replay of a
+diff --git a/HISTORY b/HISTORY
+index 5a3b0a41..ac273c57 100644
+--- a/HISTORY
++++ b/HISTORY
+@@ -9983,3 +9983,7 @@ Video Disk Recorder Revision History
+ - There will be no more distinction between "developer" and "stable" versions regarding
+   version numbering. Version numbers are simply counted upwards, with each of the three
+   parts ("version", "major", "minor") always being a single digit, and '0' being skipped.
++
++2024-09-09:
++
++- Fix for compilers that don't like non-constant format strings (thanks to Stefan Hofmann).
+diff --git a/svdrp.c b/svdrp.c
+index 6f6604af..be40a38b 100644
+--- a/svdrp.c
++++ b/svdrp.c
+@@ -10,7 +10,7 @@
+  * and interact with the Video Disk Recorder - or write a full featured
+  * graphical interface that sits on top of an SVDRP connection.
+  *
+- * $Id: svdrp.c 5.9 2024/08/30 09:55:15 kls Exp $
++ * $Id: svdrp.c 5.10 2024/09/09 13:39:05 kls Exp $
+  */
+ 
+ #include "svdrp.h"
+@@ -1246,7 +1246,7 @@ void cSVDRPServer::CmdAUDI(const char *Option)
+            const tTrackId *TrackId = cDevice::PrimaryDevice()->GetTrack(eTrackType(o));
+            if (TrackId && TrackId->id) {
+               cDevice::PrimaryDevice()->SetCurrentAudioTrack(eTrackType(o));
+-              Reply(250, cString::sprintf("%d %s %s", eTrackType(o), *TrackId->language ? TrackId->language : "---", *TrackId->description ? TrackId->description : "-"));
++              Reply(250, "%d %s %s", eTrackType(o), *TrackId->language ? TrackId->language : "---", *TrackId->description ? TrackId->description : "-");
+               }
+            else
+               Reply(501, "Audio track \"%s\" not available", Option);
+@@ -1265,12 +1265,12 @@ void cSVDRPServer::CmdAUDI(const char *Option)
+          const tTrackId *TrackId = cDevice::PrimaryDevice()->GetTrack(eTrackType(i));
+          if (TrackId && TrackId->id) {
+             if (*s)
+-               Reply(-250, s);
++               Reply(-250, "%s", *s);
+             s = cString::sprintf("%d %s %s%s", eTrackType(i), *TrackId->language ? TrackId->language : "---", i == CurrentAudioTrack ? "*" : "", *TrackId->description ? TrackId->description : "-");
+             }
+          }
+      if (*s)
+-        Reply(250, s);
++        Reply(250, "%s", *s);
+      else
+         Reply(550, "No audio tracks available");
+      }
+-- 
+2.39.2
+

@@ -1,0 +1,66 @@
+From 82b09eaa8e2ca9dd0afa76099b6659f1bec7dbf0 Mon Sep 17 00:00:00 2001
+From: Klaus Schmidinger <vdr@tvdr.de>
+Date: Mon, 16 Sep 2024 09:07:12 +0200
+Subject: [PATCH 05/16] Silenced a compiler warning with gcc 14.1.0
+
+---
+ CONTRIBUTORS | 1 +
+ HISTORY      | 3 ++-
+ remux.c      | 4 ++--
+ 3 files changed, 5 insertions(+), 3 deletions(-)
+
+diff --git a/CONTRIBUTORS b/CONTRIBUTORS
+index 19efad4c..68136503 100644
+--- a/CONTRIBUTORS
++++ b/CONTRIBUTORS
+@@ -2842,6 +2842,7 @@ Winfried K
+  for suggesting to add note about not messing with event ids in EPG handlers
+  for adding a missing initialization of cChannel::nameSourceMode
+  for suggesting to make APIVERSION a simple number, independent from VDRVERSION
++ for reporting a compiler warning with gcc 14.1.0
+ 
+ Hans-Werner Hilse <hilse@web.de>
+  for adding the command line option --userdump to enable core dumps in case VDR
+diff --git a/HISTORY b/HISTORY
+index 889d9eb8..18f00808 100644
+--- a/HISTORY
++++ b/HISTORY
+@@ -9984,7 +9984,7 @@ Video Disk Recorder Revision History
+   version numbering. Version numbers are simply counted upwards, with each of the three
+   parts ("version", "major", "minor") always being a single digit, and '0' being skipped.
+ 
+-2024-09-14:
++2024-09-16:
+ 
+ - Fix for compilers that don't like non-constant format strings (thanks to Stefan Hofmann).
+ - Deprecated code is now marked with [[deprecated]] to issue a compile time warning when
+@@ -9995,3 +9995,4 @@ Video Disk Recorder Revision History
+   APIVERSNUM is now 30003.
+ - Fixed a problem in cSchedule::Sort(), in case hasRunning was true, but there was no event
+   with RunningStatus() >= SI::RunningStatusPausing (reported by Markus Ehrnsperger).
++- Silenced a compiler warning with gcc 14.1.0 (reported by Winfried Köhler).
+diff --git a/remux.c b/remux.c
+index 6c046ab4..ae435668 100644
+--- a/remux.c
++++ b/remux.c
+@@ -4,7 +4,7 @@
+  * See the main source file 'vdr.c' for copyright information and
+  * how to reach the author.
+  *
+-  * $Id: remux.c 5.7 2024/01/23 19:33:45 kls Exp $
++  * $Id: remux.c 5.8 2024/09/16 09:07:12 kls Exp $
+  */
+ 
+ #include "remux.h"
+@@ -1743,7 +1743,7 @@ void cH265Parser::ParseSequenceParameterSet(void)
+   uint8_t sub_layer_profile_present_flag[8];
+   uint8_t sub_layer_level_present_flag[8];
+   GetBits(4);                                 // sps_video_parameter_set_id
+-  int sps_max_sub_layers_minus1 = GetBits(3); // sps_max_sub_layers_minus1
++  int sps_max_sub_layers_minus1 = GetBits(3) & 7; // sps_max_sub_layers_minus1 ("& 7" to silence a compiler warning with gcc 14.1.0)
+   GetBit();                                   // sps_temporal_id_nesting_flag
+   // begin profile_tier_level(1, sps_max_sub_layers_minus1)
+   GetByte();
+-- 
+2.39.2
+

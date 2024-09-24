@@ -1,0 +1,130 @@
+From d70ebfbfe4c466929b224b8e584aa954f9a8a1f5 Mon Sep 17 00:00:00 2001
+From: Andreas Baierl <ichgeh@imkreisrum.de>
+Date: Mon, 23 Sep 2024 16:57:52 +0200
+Subject: [PATCH 16/16] error progress bar fixes
+
+---
+ cutter.c    | 10 +++++++++-
+ recording.c |  2 +-
+ remux.c     |  7 ++++---
+ remux.h     |  2 +-
+ skins.c     |  2 +-
+ 5 files changed, 16 insertions(+), 7 deletions(-)
+
+diff --git a/cutter.c b/cutter.c
+index e61dec6a..496eccbb 100644
+--- a/cutter.c
++++ b/cutter.c
+@@ -302,6 +302,10 @@ cCuttingThread::cCuttingThread(const char *FromFileName, const char *ToFileName,
+         maxVideoFileSize = MEGABYTE(Setup.MaxVideoFileSize);
+         if (isPesRecording && maxVideoFileSize > MEGABYTE(MAXVIDEOFILESIZEPES))
+            maxVideoFileSize = MEGABYTE(MAXVIDEOFILESIZEPES);
++        if (fromIndex->GetErrors()->Size() > 0) {
++           recordingInfo->SetErrors(0);
++           recordingInfo->Write();
++        }
+         Start();
+         }
+      else
+@@ -616,6 +620,9 @@ void cCuttingThread::HandleErrors(bool Force)
+      if (frameErrors > recordingInfo->Errors()) {
+         recordingInfo->SetErrors(frameErrors);
+         recordingInfo->Write();
++        Force = true;
++        }
++     if (Force) {
+         LOCK_RECORDINGS_WRITE;
+         Recordings->UpdateByName(editedRecordingName);
+         }
+@@ -631,6 +638,7 @@ void cCuttingThread::Action(void)
+      if (!fromFile || !toFile)
+         return;
+      int LastEndIndex = -1;
++     HandleErrors(true);
+      while (BeginMark && Running()) {
+            // Suspend cutting if we have severe throughput problems:
+            if (Throttled()) {
+@@ -706,8 +714,8 @@ bool cCutter::Start(void)
+               cRecordingUserCommand::InvokeCommand(RUC_EDITINGRECORDING, editedVersionName, originalVersionName);
+               if (cVideoDirectory::RemoveVideoFile(editedVersionName) && MakeDirs(editedVersionName, true)) {
+                  recordingInfo.Read();
+-                 recordingInfo.SetErrors(0);
+                  recordingInfo.SetFileName(editedVersionName);
++                 recordingInfo.Write();
+                  SetRecordingTimerId(editedVersionName, cString::sprintf("%d@%s", 0, Setup.SVDRPHostName));
+                  cuttingThread = new cCuttingThread(originalVersionName, editedVersionName, &recordingInfo);
+                  return true;
+diff --git a/recording.c b/recording.c
+index 3edb13c4..4f64e676 100644
+--- a/recording.c
++++ b/recording.c
+@@ -2616,7 +2616,7 @@ void cIndexFileGenerator::Action(void)
+               }
+            else if (PatPmtParser.Completed()) {
+               // Step 2 - sync FrameDetector:
+-              int Processed = FrameDetector.Analyze(Data, Length);
++              int Processed = FrameDetector.Analyze(Data, Length, false);
+               if (Processed > 0) {
+                  if (FrameDetector.Synced()) {
+                     // Synced FrameDetector, so rewind for actual processing:
+diff --git a/remux.c b/remux.c
+index 936eab27..79a44cf9 100644
+--- a/remux.c
++++ b/remux.c
+@@ -2164,7 +2164,7 @@ bool cFrameDetector::NewFrame(int *PreviousErrors, int * MissingFrames)
+   return newFrame;
+ }
+ 
+-int cFrameDetector::Analyze(const uchar *Data, int Length)
++int cFrameDetector::Analyze(const uchar *Data, int Length, bool ErrorCheck)
+ {
+   if (!parser)
+      return 0;
+@@ -2196,7 +2196,8 @@ int cFrameDetector::Analyze(const uchar *Data, int Length)
+                        independentFrame = parser->IndependentFrame();
+                        firstIframeSeen |= independentFrame;
+                        if (synced) {
+-                          frameChecker->CheckFrame(Data, n, independentFrame);
++                          if (ErrorCheck)
++                             frameChecker->CheckFrame(Data, n, independentFrame);
+                           if (framesPerPayloadUnit <= 1)
+                              scanning = false;
+                           }
+@@ -2281,7 +2282,7 @@ int cFrameDetector::Analyze(const uchar *Data, int Length)
+            else if (Pid == PATPID && synced && Processed)
+               return Processed; // allow the caller to see any PAT packets
+            }
+-        if (firstIframeSeen)
++        if (firstIframeSeen && ErrorCheck)
+            frameChecker->CheckTs(Data, Handled);
+         Data += Handled;
+         Length -= Handled;
+diff --git a/remux.h b/remux.h
+index e9eca020..258a710e 100644
+--- a/remux.h
++++ b/remux.h
+@@ -559,7 +559,7 @@ public:
+       ///< Sets the Pid and stream Type to detect frames for.
+   void SetMissing(void);
+       ///< Call if this is a resumed recording, which has missing frames.
+-  int Analyze(const uchar *Data, int Length);
++  int Analyze(const uchar *Data, int Length, bool ErrorCheck = true);
+       ///< Analyzes the TS packets pointed to by Data. Length is the number of
+       ///< bytes Data points to, and must be a multiple of TS_SIZE.
+       ///< Returns the number of bytes that have been analyzed.
+diff --git a/skins.c b/skins.c
+index b5668fe4..350dda0f 100644
+--- a/skins.c
++++ b/skins.c
+@@ -152,7 +152,7 @@ cSkinDisplayReplay::cProgressBar::cProgressBar(int Width, int Height, int Curren
+ }
+ 
+ cSkinDisplayReplay::cProgressBar::cProgressBar(int Width, int Height, int Current, int Total, const cMarks *Marks, const cErrors *Errors, tColor ColorSeen, tColor ColorRest, tColor ColorSelected, tColor ColorMark, tColor ColorCurrent, tColor ColorError)
+-:cBitmap(Width, Height, 2)
++:cBitmap(Width, Height, 4)
+ {
+   total = Total;
+   if (total > 0) {
+-- 
+2.39.2
+

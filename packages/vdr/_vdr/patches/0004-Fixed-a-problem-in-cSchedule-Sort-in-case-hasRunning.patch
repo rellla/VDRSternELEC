@@ -1,0 +1,150 @@
+From ec5b1aadabd564dbc358e39931648fc4e476dbbe Mon Sep 17 00:00:00 2001
+From: Klaus Schmidinger <vdr@tvdr.de>
+Date: Sat, 14 Sep 2024 14:17:12 +0200
+Subject: [PATCH 04/16] Fixed a problem in cSchedule::Sort(), in case
+ hasRunning was true, but there was no event with RunningStatus() >=
+ SI::RunningStatusPausing
+
+---
+ CONTRIBUTORS |  2 ++
+ HISTORY      |  4 +++-
+ epg.c        | 33 +++++++++++++--------------------
+ epg.h        |  3 +--
+ 4 files changed, 19 insertions(+), 23 deletions(-)
+
+diff --git a/CONTRIBUTORS b/CONTRIBUTORS
+index dc2a923d..19efad4c 100644
+--- a/CONTRIBUTORS
++++ b/CONTRIBUTORS
+@@ -2581,6 +2581,8 @@ Markus Ehrnsperger <markus.ehrnsperger@googlemail.com>
+  for suggesting to add the lines from 'Fixed a timeout in cDvbDevice while tuning after
+  the frontend has been reopened' to cDvbTuner::ProvidesFrontend()
+  for improving the error message when closing a frontend
++ for reporting a problem in cSchedule::Sort(), in case hasRunning was true, but there
++ was no event with RunningStatus() >= SI::RunningStatusPausing
+ 
+ Werner Färber <w.faerber@gmx.de>
+  for reporting a bug in handling the cPluginManager::Active() result when pressing
+diff --git a/HISTORY b/HISTORY
+index 703c18cc..889d9eb8 100644
+--- a/HISTORY
++++ b/HISTORY
+@@ -9984,7 +9984,7 @@ Video Disk Recorder Revision History
+   version numbering. Version numbers are simply counted upwards, with each of the three
+   parts ("version", "major", "minor") always being a single digit, and '0' being skipped.
+ 
+-2024-09-12:
++2024-09-14:
+ 
+ - Fix for compilers that don't like non-constant format strings (thanks to Stefan Hofmann).
+ - Deprecated code is now marked with [[deprecated]] to issue a compile time warning when
+@@ -9993,3 +9993,5 @@ Video Disk Recorder Revision History
+   VDRVERSION is incremented (originally suggested by Winfried Köhler, with contributions
+   from Lars Hanisch and Manuel Reimer).
+   APIVERSNUM is now 30003.
++- Fixed a problem in cSchedule::Sort(), in case hasRunning was true, but there was no event
++  with RunningStatus() >= SI::RunningStatusPausing (reported by Markus Ehrnsperger).
+diff --git a/epg.c b/epg.c
+index ab4a6e83..6fc75a3f 100644
+--- a/epg.c
++++ b/epg.c
+@@ -7,7 +7,7 @@
+  * Original version (as used in VDR before 1.3.0) written by
+  * Robert Schneider <Robert.Schneider@web.de> and Rolf Hakenes <hakenes@hippomi.de>.
+  *
+- * $Id: epg.c 5.9 2024/06/21 06:27:20 kls Exp $
++ * $Id: epg.c 5.10 2024/09/14 14:17:12 kls Exp $
+  */
+ 
+ #include "epg.h"
+@@ -928,7 +928,6 @@ cSchedule::cSchedule(tChannelID ChannelID)
+   channelID = ChannelID;
+   events.SetUseGarbageCollector();
+   numTimers = 0;
+-  hasRunning = false;
+   modified = 0;
+   onActualTp = false;
+   presentSeen = 0;
+@@ -1068,7 +1067,6 @@ const cEvent *cSchedule::GetEventAround(time_t Time) const
+ 
+ void cSchedule::SetRunningStatus(cEvent *Event, int RunningStatus, const cChannel *Channel)
+ {
+-  hasRunning = false;
+   for (cEvent *p = events.First(); p; p = events.Next(p)) {
+       if (p == Event) {
+          if (p->RunningStatus() > SI::RunningStatusNotRunning || RunningStatus > SI::RunningStatusNotRunning) {
+@@ -1078,24 +1076,19 @@ void cSchedule::SetRunningStatus(cEvent *Event, int RunningStatus, const cChanne
+          }
+       else if (RunningStatus >= SI::RunningStatusPausing && p->StartTime() < Event->StartTime())
+          p->SetRunningStatus(SI::RunningStatusNotRunning, Channel);
+-      if (p->RunningStatus() >= SI::RunningStatusPausing)
+-         hasRunning = true;
+       }
+   SetPresentSeen();
+ }
+ 
+ void cSchedule::ClrRunningStatus(cChannel *Channel)
+ {
+-  if (hasRunning) {
+-     for (cEvent *p = events.First(); p; p = events.Next(p)) {
+-         if (p->RunningStatus() >= SI::RunningStatusPausing) {
+-            p->SetRunningStatus(SI::RunningStatusNotRunning, Channel);
+-            hasRunning = false;
+-            SetModified();
+-            break;
+-            }
++  for (cEvent *p = events.First(); p; p = events.Next(p)) {
++      if (p->RunningStatus() >= SI::RunningStatusPausing) {
++         p->SetRunningStatus(SI::RunningStatusNotRunning, Channel);
++         SetModified();
++         break;
+          }
+-     }
++      }
+ }
+ 
+ void cSchedule::ResetVersions(void)
+@@ -1108,13 +1101,13 @@ void cSchedule::Sort(void)
+ {
+   events.Sort();
+   // Make sure there are no RunningStatusUndefined before the currently running event:
+-  if (hasRunning) {
+-     for (cEvent *p = events.First(); p; p = events.Next(p)) {
+-         if (p->RunningStatus() >= SI::RunningStatusPausing)
+-            break;
+-         p->SetRunningStatus(SI::RunningStatusNotRunning);
++  for (cEvent *p = events.First(); p; p = events.Next(p)) {
++      if (p->RunningStatus() >= SI::RunningStatusPausing) {
++         for (p = events.Prev(p); p; p = events.Prev(p))
++             p->SetRunningStatus(SI::RunningStatusNotRunning);
++         break;
+          }
+-     }
++      }
+   SetModified();
+ }
+ 
+diff --git a/epg.h b/epg.h
+index ed6f99f2..96bb31b0 100644
+--- a/epg.h
++++ b/epg.h
+@@ -7,7 +7,7 @@
+  * Original version (as used in VDR before 1.3.0) written by
+  * Robert Schneider <Robert.Schneider@web.de> and Rolf Hakenes <hakenes@hippomi.de>.
+  *
+- * $Id: epg.h 5.5 2024/09/09 22:15:59 kls Exp $
++ * $Id: epg.h 5.6 2024/09/14 14:17:12 kls Exp $
+  */
+ 
+ #ifndef __EPG_H
+@@ -157,7 +157,6 @@ private:
+   cHash<cEvent> eventsHashID;
+   cHash<cEvent> eventsHashStartTime;
+   mutable u_int16_t numTimers;// The number of timers that use this schedule
+-  bool hasRunning;
+   bool onActualTp;
+   int modified;
+   time_t presentSeen;
+-- 
+2.39.2
+

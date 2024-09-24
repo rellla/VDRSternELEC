@@ -1,0 +1,97 @@
+From f786510ba22ceeee9e37572f0c10e7e2235014af Mon Sep 17 00:00:00 2001
+From: Klaus Schmidinger <vdr@tvdr.de>
+Date: Thu, 12 Sep 2024 12:48:40 +0200
+Subject: [PATCH 03/16] Made APIVERSION independent from VDRVERSION to avoid
+ irritation in case only VDRVERSION is incremented
+
+---
+ CONTRIBUTORS |  3 +++
+ HISTORY      |  6 +++++-
+ config.h     | 16 +++++++++-------
+ 3 files changed, 17 insertions(+), 8 deletions(-)
+
+diff --git a/CONTRIBUTORS b/CONTRIBUTORS
+index 44e92aeb..dc2a923d 100644
+--- a/CONTRIBUTORS
++++ b/CONTRIBUTORS
+@@ -2839,6 +2839,7 @@ Winfried K
+  for adding missing rounding when dividing frequencies in processing the NIT
+  for suggesting to add note about not messing with event ids in EPG handlers
+  for adding a missing initialization of cChannel::nameSourceMode
++ for suggesting to make APIVERSION a simple number, independent from VDRVERSION
+ 
+ Hans-Werner Hilse <hilse@web.de>
+  for adding the command line option --userdump to enable core dumps in case VDR
+@@ -3009,6 +3010,7 @@ Manuel Reimer <Manuel.Reimer@gmx.de>
+  number is given
+  for reporting that LSTE doesn't work after PUTE in case a channel didn't already
+  have EPG data
++ for suggesting to make APIVERSION a simple number, independent from VDRVERSION
+ 
+ Rene van den Braken <rene@vandenbraken.name>
+  for reporting a bug in writing the PCR pid into the PMT in
+@@ -3062,6 +3064,7 @@ Lars Hanisch <dvb@flensrocker.de>
+  for fixing a typo in the description of cTimers::GetTimersRead()
+  for suggesting to use dynamic buffering in handling CA descriptors to avoid a
+  possible buffer overflow
++ for suggesting to make APIVERSION a simple number, independent from VDRVERSION
+ 
+ Alex Lasnier <alex@fepg.org>
+  for adding tuning support for ATSC devices
+diff --git a/HISTORY b/HISTORY
+index 3a363604..703c18cc 100644
+--- a/HISTORY
++++ b/HISTORY
+@@ -9984,8 +9984,12 @@ Video Disk Recorder Revision History
+   version numbering. Version numbers are simply counted upwards, with each of the three
+   parts ("version", "major", "minor") always being a single digit, and '0' being skipped.
+ 
+-2024-09-10:
++2024-09-12:
+ 
+ - Fix for compilers that don't like non-constant format strings (thanks to Stefan Hofmann).
+ - Deprecated code is now marked with [[deprecated]] to issue a compile time warning when
+   used.
++- Made APIVERSION independent from VDRVERSION to avoid irritation in case only
++  VDRVERSION is incremented (originally suggested by Winfried Köhler, with contributions
++  from Lars Hanisch and Manuel Reimer).
++  APIVERSNUM is now 30003.
+diff --git a/config.h b/config.h
+index 4f692895..b98c5d06 100644
+--- a/config.h
++++ b/config.h
+@@ -4,7 +4,7 @@
+  * See the main source file 'vdr.c' for copyright information and
+  * how to reach the author.
+  *
+- * $Id: config.h 5.19 2024/09/09 10:58:55 kls Exp $
++ * $Id: config.h 5.20 2024/09/12 12:48:40 kls Exp $
+  */
+ 
+ #ifndef __CONFIG_H
+@@ -27,14 +27,16 @@
+ 
+ // The plugin API's version number:
+ 
+-#define APIVERSION  "2.6.9"
+-#define APIVERSNUM   20609  // Version * 10000 + Major * 100 + Minor
++#define APIVERSION      "3"
++#define APIVERSNUM   30003
+ 
+-// When loading plugins, VDR searches them by their APIVERSION, which
+-// may be smaller than VDRVERSION in case there have been no changes to
+-// VDR header files since the last APIVERSION. This allows compiled
++// When loading plugins, VDR searches files by their APIVERSION, which
++// is different from VDRVERSION. APIVERSION is a plain number, incremented
++// only when there are changes to the plugin API. This allows compiled
+ // plugins to work with newer versions of the core VDR as long as no
+-// VDR header files have changed.
++// interfaces have changed. APIVERSNUM begins with "300.." for backwards
++// compatibility and can be used in #if preprocessor statements to handle
++// version dependent code.
+ 
+ #define MAXPRIORITY       99
+ #define MINPRIORITY       (-MAXPRIORITY)
+-- 
+2.39.2
+

@@ -1,0 +1,148 @@
+From 5cd25df60ca0a879d9d310ad5c2be696a5e0d1e3 Mon Sep 17 00:00:00 2001
+From: Klaus Schmidinger <vdr@tvdr.de>
+Date: Wed, 18 Sep 2024 09:23:07 +0200
+Subject: [PATCH 10/16] Recording errors are now marked in the index file
+
+---
+ HISTORY     |  1 +
+ recording.c | 14 +++++++++-----
+ recording.h |  4 ++--
+ remux.c     |  8 +++++++-
+ remux.h     |  4 +++-
+ 5 files changed, 22 insertions(+), 9 deletions(-)
+
+diff --git a/HISTORY b/HISTORY
+index ee61b8ea..39729efe 100644
+--- a/HISTORY
++++ b/HISTORY
+@@ -10000,3 +10000,4 @@ Video Disk Recorder Revision History
+ - Moved error checking from recorder.c to remux.c.
+ - The number of errors in a recording now represents the number of broken frames.
+ - Now distinguishing between frames with errors and completely missing frames.
++- Recording errors are now marked in the index file.
+diff --git a/recording.c b/recording.c
+index e3f52fbe..575023b9 100644
+--- a/recording.c
++++ b/recording.c
+@@ -4,7 +4,7 @@
+  * See the main source file 'vdr.c' for copyright information and
+  * how to reach the author.
+  *
+- * $Id: recording.c 5.30 2024/09/01 20:43:40 kls Exp $
++ * $Id: recording.c 5.31 2024/09/18 09:23:07 kls Exp $
+  */
+ 
+ #include "recording.h"
+@@ -2702,13 +2702,17 @@ struct __attribute__((packed)) tIndexPes {
+ 
+ struct __attribute__((packed)) tIndexTs {
+   uint64_t offset:40; // up to 1TB per file (not using off_t here - must definitely be exactly 64 bit!)
+-  int reserved:7;     // reserved for future use
++  int reserved:5;     // reserved for future use
++  int errors:1;       // 1=this frame contains errors
++  int missing:1;      // 1=there are frames missing after this one
+   int independent:1;  // marks frames that can be displayed by themselves (for trick modes)
+   uint16_t number:16; // up to 64K files per recording
+-  tIndexTs(off_t Offset, bool Independent, uint16_t Number)
++  tIndexTs(off_t Offset, bool Independent, uint16_t Number, bool Errors, bool Missing)
+   {
+     offset = Offset;
+     reserved = 0;
++    errors = Errors;
++    missing = Missing;
+     independent = Independent;
+     number = Number;
+   }
+@@ -2901,10 +2905,10 @@ bool cIndexFile::CatchUp(int Index)
+   return index != NULL;
+ }
+ 
+-bool cIndexFile::Write(bool Independent, uint16_t FileNumber, off_t FileOffset)
++bool cIndexFile::Write(bool Independent, uint16_t FileNumber, off_t FileOffset, bool Errors, bool Missing)
+ {
+   if (f >= 0) {
+-     tIndexTs i(FileOffset, Independent, FileNumber);
++     tIndexTs i(FileOffset, Independent, FileNumber, Errors, Missing);
+      if (isPesRecording)
+         ConvertToPes(&i, 1);
+      if (safe_write(f, &i, sizeof(i)) < 0) {
+diff --git a/recording.h b/recording.h
+index e974fff3..59c218da 100644
+--- a/recording.h
++++ b/recording.h
+@@ -4,7 +4,7 @@
+  * See the main source file 'vdr.c' for copyright information and
+  * how to reach the author.
+  *
+- * $Id: recording.h 5.8 2024/06/13 09:31:11 kls Exp $
++ * $Id: recording.h 5.9 2024/09/18 09:23:07 kls Exp $
+  */
+ 
+ #ifndef __RECORDING_H
+@@ -498,7 +498,7 @@ public:
+   cIndexFile(const char *FileName, bool Record, bool IsPesRecording = false, bool PauseLive = false, bool Update = false);
+   ~cIndexFile();
+   bool Ok(void) { return index != NULL; }
+-  bool Write(bool Independent, uint16_t FileNumber, off_t FileOffset);
++  bool Write(bool Independent, uint16_t FileNumber, off_t FileOffset, bool Errors = false, bool Missing = false);
+   bool Get(int Index, uint16_t *FileNumber, off_t *FileOffset, bool *Independent = NULL, int *Length = NULL);
+   int GetNextIFrame(int Index, bool Forward, uint16_t *FileNumber = NULL, off_t *FileOffset = NULL, int *Length = NULL);
+   int GetClosestIFrame(int Index);
+diff --git a/remux.c b/remux.c
+index e400acc4..6d9cf0cd 100644
+--- a/remux.c
++++ b/remux.c
+@@ -4,7 +4,7 @@
+  * See the main source file 'vdr.c' for copyright information and
+  * how to reach the author.
+  *
+- * $Id: remux.c 5.10 2024/09/17 11:30:28 kls Exp $
++ * $Id: remux.c 5.11 2024/09/18 09:23:07 kls Exp $
+  */
+ 
+ #include "remux.h"
+@@ -2011,6 +2011,7 @@ private:
+   void Report(const char *Message, int NumErrors = 1);
+ public:
+   cFrameChecker(void);
++  void SetMissing(void) { missingFrames++; }
+   void SetFrameDelta(int FrameDelta) { frameDelta = FrameDelta; }
+   void CheckTs(const uchar *Data, int Length);
+   void CheckFrame(const uchar *Data, int Length);
+@@ -2147,6 +2148,11 @@ void cFrameDetector::SetPid(int Pid, int Type)
+      esyslog("ERROR: unknown stream type %d (PID %d) in frame detector", type, pid);
+ }
+ 
++void cFrameDetector::SetMissing(void)
++{
++  frameChecker->SetMissing();
++}
++
+ bool cFrameDetector::NewFrame(int *PreviousErrors, int * MissingFrames)
+ {
+   if (newFrame) {
+diff --git a/remux.h b/remux.h
+index cfc27910..e9eca020 100644
+--- a/remux.h
++++ b/remux.h
+@@ -4,7 +4,7 @@
+  * See the main source file 'vdr.c' for copyright information and
+  * how to reach the author.
+  *
+- * $Id: remux.h 5.5 2024/09/17 11:30:28 kls Exp $
++ * $Id: remux.h 5.6 2024/09/18 09:23:07 kls Exp $
+  */
+ 
+ #ifndef __REMUX_H
+@@ -557,6 +557,8 @@ public:
+   ~cFrameDetector();
+   void SetPid(int Pid, int Type);
+       ///< Sets the Pid and stream Type to detect frames for.
++  void SetMissing(void);
++      ///< Call if this is a resumed recording, which has missing frames.
+   int Analyze(const uchar *Data, int Length);
+       ///< Analyzes the TS packets pointed to by Data. Length is the number of
+       ///< bytes Data points to, and must be a multiple of TS_SIZE.
+-- 
+2.39.2
+
