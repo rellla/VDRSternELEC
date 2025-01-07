@@ -17,30 +17,30 @@ index 051527703a..85c584b22c 100644
  post_makeinstall_target() {
 +  mkdir -p ${INSTALL}/storage/.config/vdrlibs/save
 +  mkdir -p ${INSTALL}/storage/.config/vdrlibs/bin
-+  mv ${INSTALL}/usr/lib/libavcodec.so.60.3.100 ${INSTALL}/storage/.config/vdrlibs/save
-+  ln -s /storage/.config/vdrlibs/save/libavcodec.so.60.3.100 ${INSTALL}/storage/.config/vdrlibs/bin/libavcodec.so.60.3.100
-+  ln -s /storage/.config/vdrlibs/bin/libavcodec.so.60.3.100 ${INSTALL}/usr/lib/libavcodec.so.60.3.100
-+  mv ${INSTALL}/usr/lib/libavdevice.so.60.1.100 ${INSTALL}/storage/.config/vdrlibs/save
-+  ln -s /storage/.config/vdrlibs/save/libavdevice.so.60.1.100 ${INSTALL}/storage/.config/vdrlibs/bin/libavdevice.so.60.1.100
-+  ln -s /storage/.config/vdrlibs/bin/libavdevice.so.60.1.100 ${INSTALL}/usr/lib/libavdevice.so.60.1.100
-+  mv ${INSTALL}/usr/lib/libavfilter.so.9.3.100 ${INSTALL}/storage/.config/vdrlibs/save
-+  ln -s /storage/.config/vdrlibs/save/libavfilter.so.9.3.100 ${INSTALL}/storage/.config/vdrlibs/bin/libavfilter.so.9.3.100
-+  ln -s /storage/.config/vdrlibs/bin/libavfilter.so.9.3.100 ${INSTALL}/usr/lib/libavfilter.so.9.3.100
-+  mv ${INSTALL}/usr/lib/libavformat.so.60.3.100 ${INSTALL}/storage/.config/vdrlibs/save
-+  ln -s /storage/.config/vdrlibs/save/libavformat.so.60.3.100 ${INSTALL}/storage/.config/vdrlibs/bin/libavformat.so.60.3.100
-+  ln -s /storage/.config/vdrlibs/bin/libavformat.so.60.3.100 ${INSTALL}/usr/lib/libavformat.so.60.3.100
-+  mv ${INSTALL}/usr/lib/libavutil.so.58.2.100 ${INSTALL}/storage/.config/vdrlibs/save
-+  ln -s /storage/.config/vdrlibs/save/libavutil.so.58.2.100 ${INSTALL}/storage/.config/vdrlibs/bin/libavutil.so.58.2.100
-+  ln -s /storage/.config/vdrlibs/bin/libavutil.so.58.2.100 ${INSTALL}/usr/lib/libavutil.so.58.2.100
-+  mv ${INSTALL}/usr/lib/libpostproc.so.57.1.100 ${INSTALL}/storage/.config/vdrlibs/save
-+  ln -s /storage/.config/vdrlibs/save/libpostproc.so.57.1.100 ${INSTALL}/storage/.config/vdrlibs/bin/libpostproc.so.57.1.100
-+  ln -s /storage/.config/vdrlibs/bin/libpostproc.so.57.1.100 ${INSTALL}/usr/lib/libpostproc.so.57.1.100
-+  mv ${INSTALL}/usr/lib/libswresample.so.4.10.100 ${INSTALL}/storage/.config/vdrlibs/save
-+  ln -s /storage/.config/vdrlibs/save/libswresample.so.4.10.100 ${INSTALL}/storage/.config/vdrlibs/bin/libswresample.so.4.10.100
-+  ln -s /storage/.config/vdrlibs/bin/libswresample.so.4.10.100 ${INSTALL}/usr/lib/libswresample.so.4.10.100
-+  mv ${INSTALL}/usr/lib/libswscale.so.7.1.100 ${INSTALL}/storage/.config/vdrlibs/save
-+  ln -s /storage/.config/vdrlibs/save/libswscale.so.7.1.100 ${INSTALL}/storage/.config/vdrlibs/bin/libswscale.so.7.1.100
-+  ln -s /storage/.config/vdrlibs/bin/libswscale.so.7.1.100 ${INSTALL}/usr/lib/libswscale.so.7.1.100
++  mv ${INSTALL}/usr/lib/libavcodec.so.61.19.100 ${INSTALL}/storage/.config/vdrlibs/save
++  ln -s /storage/.config/vdrlibs/save/libavcodec.so.61.19.100 ${INSTALL}/storage/.config/vdrlibs/bin/libavcodec.so.61.19.100
++  ln -s /storage/.config/vdrlibs/bin/libavcodec.so.61.19.100 ${INSTALL}/usr/lib/libavcodec.so.61.19.100
++  mv ${INSTALL}/usr/lib/libavdevice.so.61.3.100 ${INSTALL}/storage/.config/vdrlibs/save
++  ln -s /storage/.config/vdrlibs/save/libavdevice.so.61.3.100 ${INSTALL}/storage/.config/vdrlibs/bin/libavdevice.so.61.3.100
++  ln -s /storage/.config/vdrlibs/bin/libavdevice.so.61.3.100 ${INSTALL}/usr/lib/libavdevice.so.61.3.100
++  mv ${INSTALL}/usr/lib/libavfilter.so.10.4.100 ${INSTALL}/storage/.config/vdrlibs/save
++  ln -s /storage/.config/vdrlibs/save/libavfilter.so.10.4.100 ${INSTALL}/storage/.config/vdrlibs/bin/libavfilter.so.10.4.100
++  ln -s /storage/.config/vdrlibs/bin/libavfilter.so.10.4.100 ${INSTALL}/usr/lib/libavfilter.so.10.4.100
++  mv ${INSTALL}/usr/lib/libavformat.so.61.7.100 ${INSTALL}/storage/.config/vdrlibs/save
++  ln -s /storage/.config/vdrlibs/save/libavformat.so.61.7.100 ${INSTALL}/storage/.config/vdrlibs/bin/libavformat.so.61.7.100
++  ln -s /storage/.config/vdrlibs/bin/libavformat.so.61.7.100 ${INSTALL}/usr/lib/libavformat.so.61.7.100
++  mv ${INSTALL}/usr/lib/libavutil.so.59.39.100 ${INSTALL}/storage/.config/vdrlibs/save
++  ln -s /storage/.config/vdrlibs/save/libavutil.so.59.39.100 ${INSTALL}/storage/.config/vdrlibs/bin/libavutil.so.59.39.100
++  ln -s /storage/.config/vdrlibs/bin/libavutil.so.59.39.100 ${INSTALL}/usr/lib/libavutil.so.59.39.100
++  mv ${INSTALL}/usr/lib/libpostproc.so.58.3.100 ${INSTALL}/storage/.config/vdrlibs/save
++  ln -s /storage/.config/vdrlibs/save/libpostproc.so.58.3.100 ${INSTALL}/storage/.config/vdrlibs/bin/libpostproc.so.58.3.100
++  ln -s /storage/.config/vdrlibs/bin/libpostproc.so.58.3.100 ${INSTALL}/usr/lib/libpostproc.so.58.3.100
++  mv ${INSTALL}/usr/lib/libswresample.so.5.3.100 ${INSTALL}/storage/.config/vdrlibs/save
++  ln -s /storage/.config/vdrlibs/save/libswresample.so.5.3.100 ${INSTALL}/storage/.config/vdrlibs/bin/libswresample.so.5.3.100
++  ln -s /storage/.config/vdrlibs/bin/libswresample.so.5.3.100 ${INSTALL}/usr/lib/libswresample.so.5.3.100
++  mv ${INSTALL}/usr/lib/libswscale.so.8.3.100 ${INSTALL}/storage/.config/vdrlibs/save
++  ln -s /storage/.config/vdrlibs/save/libswscale.so.8.3.100 ${INSTALL}/storage/.config/vdrlibs/bin/libswscale.so.8.3.100
++  ln -s /storage/.config/vdrlibs/bin/libswscale.so.8.3.100 ${INSTALL}/usr/lib/libswscale.so.8.3.100
 +  mv ${INSTALL}/usr/bin/ffmpeg ${INSTALL}/storage/.config/vdrlibs/save
 +  ln -s /storage/.config/vdrlibs/save/ffmpeg ${INSTALL}/storage/.config/vdrlibs/bin/ffmpeg
 +  ln -s /storage/.config/vdrlibs/bin/ffmpeg ${INSTALL}/usr/bin/ffmpeg
