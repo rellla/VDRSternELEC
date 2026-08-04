@@ -1,6 +1,7 @@
 [submodule "LibreELEC.tv"]
 	path = LibreELEC.tv
-	url = https://github.com/LibreELEC/LibreELEC.tv
+	url = https://github.com/chewitt/LibreELEC.tv
+	branch = amlogic
 	ignore = dirty
 [submodule "CoreELEC"]
 	path = CoreELEC
