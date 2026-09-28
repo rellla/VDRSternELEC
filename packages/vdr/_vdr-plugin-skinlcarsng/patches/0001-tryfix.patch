@@ -1,0 +1,51 @@
+From 998c10924107693ac3dc05707f8d4e49797b64d6 Mon Sep 17 00:00:00 2001
+From: Andreas Baierl <ichgeh@imkreisrum.de>
+Date: Sat, 6 Jun 2026 17:08:30 +0200
+Subject: [PATCH] tryfix
+
+---
+ displaychannel.c | 9 ++++++---
+ tools.c          | 6 ++++--
+ 2 files changed, 10 insertions(+), 5 deletions(-)
+
+diff --git a/displaychannel.c b/displaychannel.c
+index c97debd..5ee779e 100644
+--- a/displaychannel.c
++++ b/displaychannel.c
+@@ -794,10 +794,13 @@ void cLCARSNGDisplayChannel::Flush(void)
+            Total = present->Duration();
+            }
+         DrawSeen(Current, Total);
+-        DrawTrack(osd, xc14 + Margin, yc15 + Margin, xc18 - textBorder - 2 * Margin, yc16 - 2 * Margin,  Theme.Color(clrTrackName), frameColorBg, (zoom) ? smlFont : osdFont, &lastTrackId);
++        DrawTrack(osd, xc14 + Margin, yc15 + Margin, xc18 - textBorder - 2 * Margin, yc16 - 2 * Margin, Theme.Color(clrTrackName), frameColorBg, (zoom) ? smlFont : osdFont, &lastTrackId);
+         int x = leftIcons - SymbolSpacing;
+-        DrawScreenResolution(osd, xc19 + Margin, yc15 + Margin, x - xc19 - 2 * Margin, yc16 - yc15 - 2 * Margin, Theme.Color(clrChannelSymbolOn), frameColorBr, (zoom) ? smlFont : osdFont, &oldResolution);
+-	DrawEventRec(present, following);
++//        esyslog ("skinlcarsng: DrawScreenResolution x1 %d y1 %d x2 %d y2 %d, font %s resolution %s",
++//                  xc19 + Margin, yc15 + Margin, x - 2 * Margin, yc16 - 2 * Margin, (zoom) ? smlFont->FontName() : osdFont->FontName(), oldResolution);
++        DrawScreenResolution(osd, xc19 + Margin, yc15 + Margin, x - 2 * Margin, yc16 - 2 * Margin,
++                             Theme.Color(clrChannelSymbolOn), frameColorBr, (zoom) ? smlFont : osdFont, &oldResolution);
++        DrawEventRec(present, following);
+         DrawBlinkingRec();
+         }
+      }
+diff --git a/tools.c b/tools.c
+index d5e7ad4..897f025 100644
+--- a/tools.c
++++ b/tools.c
+@@ -793,8 +793,10 @@ void DrawScreenResolution(cOsd *osd, int x0, int y0, int x1, int y1, tColor colo
+ 
+   // Draw video format
+   if (!(strcmp(resolution, *oldResolution) == 0)) {
+-     esyslog ("skinlcarsng: %s %s %d %s\n", __FILE__, __func__,  __LINE__, *resolution);
+-     esyslog ("skinlcarsng: %s %s %d %i %i\n", __FILE__, __func__,  __LINE__, x0, x1);
++//     esyslog ("skinlcarsng: %s %s %d %s\n", __FILE__, __func__,  __LINE__, *resolution);
++//     esyslog ("skinlcarsng: %s %s %d %i %i\n", __FILE__, __func__,  __LINE__, x0, x1);
++     esyslog ("skinlcarsng: %s %s\n", __func__, *resolution);
++     esyslog ("skinlcarsng: %s x0 %i y0 %i x1 %i y1 %i w %i h %i\n", __func__, x0, y0, x1, y1, x1 - x0, y1 - y0);
+      osd->DrawText(x0, y0, cString::sprintf("%s", *resolution), colorfg, colorbg, font, x1 - x0, y1 - y0, taCenter | taRight | taBorder);
+      *oldResolution = *resolution;
+      }
+-- 
+2.47.3
+
