@@ -131,15 +131,15 @@ index e3c9634817..38541ea675 100644
 +evdev:input:b0005v0508p0110*
 + KEYBOARD_KEY_c0041=enter
 diff --git a/packages/sysutils/systemd/package.mk b/packages/sysutils/systemd/package.mk
-index 11ab2aed72..adae57ef3b 100644
+index 1ffc673ceb..adae57ef3b 100644
 --- a/packages/sysutils/systemd/package.mk
 +++ b/packages/sysutils/systemd/package.mk
 @@ -3,9 +3,9 @@
  # Copyright (C) 2018-present Team LibreELEC (https://libreelec.tv)
  
  PKG_NAME="systemd"
--PKG_VERSION="261.3"
--PKG_SHA256="3f8d3d3969af7214bda600930e14c6a24135eb3dce1ba7f1b980b74e6dc15b72"
+-PKG_VERSION="262"
+-PKG_SHA256="6aa77506c0644aa67f940a48e3d3a7368601f787e4f249139516d353f107bcab"
 -PKG_LICENSE="LGPL-2.1-or-later"
 +PKG_VERSION="259.5"
 +PKG_SHA256="80ed55a8a69c4bd1fb12a36659303372b37baf9ee224ef4f032db4b748be0f76"
@@ -165,7 +165,15 @@ index 11ab2aed72..adae57ef3b 100644
    safe_remove ${INSTALL}/etc/systemd/system
    safe_remove ${INSTALL}/etc/xdg
    safe_remove ${INSTALL}/etc/X11
-@@ -132,6 +135,7 @@ post_makeinstall_target() {
+@@ -122,7 +125,6 @@ post_makeinstall_target() {
+   safe_remove ${INSTALL}/usr/lib/systemd/user
+   safe_remove ${INSTALL}/usr/lib/tmpfiles.d/etc.conf
+   safe_remove ${INSTALL}/usr/lib/tmpfiles.d/home.conf
+-  safe_remove ${INSTALL}/usr/lib/tmpfiles.d/root.conf
+   safe_remove ${INSTALL}/usr/share/factory
+ 
+   # remove Network adapter renaming rule, this is confusing
+@@ -133,6 +135,7 @@ post_makeinstall_target() {
  
    if [ "${LOCAL_LOGIN}" = "no" ]; then
      # remove getty units, we dont want a console
@@ -173,146 +181,189 @@ index 11ab2aed72..adae57ef3b 100644
      safe_remove ${INSTALL}/usr/lib/systemd/system/console-getty.service
      safe_remove ${INSTALL}/usr/lib/systemd/system/container-getty@.service
      safe_remove ${INSTALL}/usr/lib/systemd/system/getty.target
-diff --git a/packages/sysutils/systemd/patches/0001-move-etc-systemd-system-to-storage-.config-system.d.patch b/packages/sysutils/systemd/patches/systemd-0001-move-etc-systemd-system-to-storage-.config-system.d.patch
-similarity index 51%
-rename from packages/sysutils/systemd/patches/0001-move-etc-systemd-system-to-storage-.config-system.d.patch
-rename to packages/sysutils/systemd/patches/systemd-0001-move-etc-systemd-system-to-storage-.config-system.d.patch
-index ed54be4921..cd0dda1517 100644
---- a/packages/sysutils/systemd/patches/0001-move-etc-systemd-system-to-storage-.config-system.d.patch
+diff --git a/packages/sysutils/systemd/patches/systemd-0001-move-etc-systemd-system-to-storage-.config-system.d.patch b/packages/sysutils/systemd/patches/systemd-0001-move-etc-systemd-system-to-storage-.config-system.d.patch
+new file mode 100644
+index 0000000000..cd0dda1517
+--- /dev/null
 +++ b/packages/sysutils/systemd/patches/systemd-0001-move-etc-systemd-system-to-storage-.config-system.d.patch
-@@ -1,22 +1,19 @@
--From 43aba5ffffc6d35ed97db035c5818c76652b06de Mon Sep 17 00:00:00 2001
--From: Matthias Reichl <hias@horus.com>
--Date: Mon, 28 Sep 2020 23:55:13 +0200
--Subject: [PATCH] move /etc/systemd/system to /storage/.config/system.d
+@@ -0,0 +1,19 @@
 +commit 43aba5ffffc6d35ed97db035c5818c76652b06de
 +Author: Matthias Reichl <hias@horus.com>
 +Date:   Mon Sep 28 23:55:13 2020 +0200
 +
 +    move /etc/systemd/system to /storage/.config/system.d
- 
-----
- diff --git a/meson.build b/meson.build
--index e9c64b098e..e810e6c3a7 100644
++
++diff --git a/meson.build b/meson.build
 +index dbbddb68e2..4592cd1094 100644
- --- a/meson.build
- +++ b/meson.build
--@@ -298,7 +298,7 @@ conf.set_quoted('SYSTEMD_USERWORK_PATH',                      libexecdir / 'syst
-- conf.set_quoted('SYSTEMD_MOUNTWORK_PATH',                     libexecdir / 'systemd-mountwork')
-- conf.set_quoted('SYSTEMD_NSRESOURCEWORK_PATH',                libexecdir / 'systemd-nsresourcework')
++--- a/meson.build
+++++ b/meson.build
 +@@ -253,7 +253,7 @@
 + conf.set_quoted('SYSTEMD_UPDATE_HELPER_PATH',                 libexecdir / 'systemd-update-helper')
 + conf.set_quoted('SYSTEMD_USERWORK_PATH',                      libexecdir / 'systemd-userwork')
-  conf.set_quoted('SYSTEMD_VERITYSETUP_PATH',                   libexecdir / 'systemd-veritysetup')
- -conf.set_quoted('SYSTEM_CONFIG_UNIT_DIR',                     pkgsysconfdir / 'system')
- +conf.set_quoted('SYSTEM_CONFIG_UNIT_DIR',                     '/storage/.config/system.d')
-  conf.set_quoted('SYSTEM_DATA_UNIT_DIR',                       systemunitdir)
-  conf.set_quoted('SYSTEM_ENV_GENERATOR_DIR',                   systemenvgeneratordir)
-  conf.set_quoted('SYSTEM_GENERATOR_DIR',                       systemgeneratordir)
---- 
--2.53.0
--
-diff --git a/packages/sysutils/systemd/patches/0002-move-hwdb.bin-to-run.patch b/packages/sysutils/systemd/patches/systemd-0002-move-hwdb.bin-to-run.patch
-similarity index 70%
-rename from packages/sysutils/systemd/patches/0002-move-hwdb.bin-to-run.patch
-rename to packages/sysutils/systemd/patches/systemd-0002-move-hwdb.bin-to-run.patch
-index f4128b7683..ac11b21fd3 100644
---- a/packages/sysutils/systemd/patches/0002-move-hwdb.bin-to-run.patch
++ conf.set_quoted('SYSTEMD_VERITYSETUP_PATH',                   libexecdir / 'systemd-veritysetup')
++-conf.set_quoted('SYSTEM_CONFIG_UNIT_DIR',                     pkgsysconfdir / 'system')
+++conf.set_quoted('SYSTEM_CONFIG_UNIT_DIR',                     '/storage/.config/system.d')
++ conf.set_quoted('SYSTEM_DATA_UNIT_DIR',                       systemunitdir)
++ conf.set_quoted('SYSTEM_ENV_GENERATOR_DIR',                   systemenvgeneratordir)
++ conf.set_quoted('SYSTEM_GENERATOR_DIR',                       systemgeneratordir)
+diff --git a/packages/sysutils/systemd/patches/systemd-0002-move-hwdb.bin-to-run.patch b/packages/sysutils/systemd/patches/systemd-0002-move-hwdb.bin-to-run.patch
+new file mode 100644
+index 0000000000..ac11b21fd3
+--- /dev/null
 +++ b/packages/sysutils/systemd/patches/systemd-0002-move-hwdb.bin-to-run.patch
-@@ -10,27 +10,28 @@ Subject: [PATCH] move hwdb.bin to /run
-  3 files changed, 3 insertions(+), 3 deletions(-)
- 
- diff --git a/src/libsystemd/sd-hwdb/hwdb-internal.h b/src/libsystemd/sd-hwdb/hwdb-internal.h
--index 72b2f777c8..2d8e2fbb16 100644
+@@ -0,0 +1,53 @@
++From dd8a6a2af24e2d24fcc5cb9b114f8da05a69bdd0 Mon Sep 17 00:00:00 2001
++From: Rudi Heitbaum <rudi@heitbaum.com>
++Date: Fri, 7 Jul 2023 11:44:05 +0000
++Subject: [PATCH] move hwdb.bin to /run
++
++---
++ src/libsystemd/sd-hwdb/hwdb-internal.h | 2 +-
++ src/shared/hwdb-util.c                 | 2 +-
++ units/systemd-hwdb-update.service.in   | 2 +-
++ 3 files changed, 3 insertions(+), 3 deletions(-)
++
++diff --git a/src/libsystemd/sd-hwdb/hwdb-internal.h b/src/libsystemd/sd-hwdb/hwdb-internal.h
 +index 5302679a62..4afdd6e306 100644
- --- a/src/libsystemd/sd-hwdb/hwdb-internal.h
- +++ b/src/libsystemd/sd-hwdb/hwdb-internal.h
--@@ -83,6 +83,6 @@ struct trie_value_entry2_f {
++--- a/src/libsystemd/sd-hwdb/hwdb-internal.h
+++++ b/src/libsystemd/sd-hwdb/hwdb-internal.h
 +@@ -84,7 +84,7 @@ struct trie_value_entry2_f {
-  
-- #define HWDB_BIN_PATHS                          \
++ 
 + #define hwdb_bin_paths                          \
-          "/etc/systemd/hwdb/hwdb.bin\0"          \
- -        "/etc/udev/hwdb.bin\0"                  \
- +        "/run/hwdb.bin\0"                       \
-          "/usr/lib/systemd/hwdb/hwdb.bin\0"      \
++         "/etc/systemd/hwdb/hwdb.bin\0"          \
++-        "/etc/udev/hwdb.bin\0"                  \
+++        "/run/hwdb.bin\0"                       \
++         "/usr/lib/systemd/hwdb/hwdb.bin\0"      \
 +         _CONF_PATHS_SPLIT_USR_NULSTR("systemd/hwdb/hwdb.bin") \
-          UDEVLIBEXECDIR "/hwdb.bin\0"
- diff --git a/src/shared/hwdb-util.c b/src/shared/hwdb-util.c
--index f6415694e1..6a37caeb39 100644
++         UDEVLIBEXECDIR "/hwdb.bin\0"
++diff --git a/src/shared/hwdb-util.c b/src/shared/hwdb-util.c
 +index 12621b7f89..552b1dc008 100644
- --- a/src/shared/hwdb-util.c
- +++ b/src/shared/hwdb-util.c
--@@ -599,7 +599,7 @@ int hwdb_update(const char *root, const char *hwdb_bin_dir, bool strict, bool co
--                 path_simplify(root_abs);
--         }
++--- a/src/shared/hwdb-util.c
+++++ b/src/shared/hwdb-util.c
 +@@ -587,7 +587,7 @@ int hwdb_update(const char *root, const char *hwdb_bin_dir, bool strict, bool co
 +          * source. If true, then hwdb.bin will be created without the information. systemd-hwdb command
 +          * should set the argument false, and 'udevadm hwdb' command should set it true. */
-  
---        hwdb_bin = path_join(root_abs, hwdb_bin_dir ?: "/etc/udev", "hwdb.bin");
--+        hwdb_bin = path_join(root_abs, hwdb_bin_dir ?: "/run", "hwdb.bin");
++ 
 +-        hwdb_bin = path_join(root, hwdb_bin_dir ?: "/etc/udev", "hwdb.bin");
 ++        hwdb_bin = path_join(root, hwdb_bin_dir ?: "/run", "hwdb.bin");
-          if (!hwdb_bin)
-                  return -ENOMEM;
-  
-@@ -48,5 +49,5 @@ index 4ba36d1fc6..4848ae9661 100644
-  
-  DefaultDependencies=no
- -- 
--2.53.0
++         if (!hwdb_bin)
++                 return -ENOMEM;
++ 
++diff --git a/units/systemd-hwdb-update.service.in b/units/systemd-hwdb-update.service.in
++index 4ba36d1fc6..4848ae9661 100644
++--- a/units/systemd-hwdb-update.service.in
+++++ b/units/systemd-hwdb-update.service.in
++@@ -13,7 +13,7 @@ Documentation=man:hwdb(7) man:systemd-hwdb(8)
++ 
++ ConditionNeedsUpdate=/etc
++ ConditionPathExists=|!{{UDEVLIBEXECDIR}}/hwdb.bin
++-ConditionPathExists=|/etc/udev/hwdb.bin
+++ConditionPathExists=|/run/hwdb.bin
++ ConditionDirectoryNotEmpty=|/etc/udev/hwdb.d/
++ 
++ DefaultDependencies=no
++-- 
 +2.34.1
- 
-diff --git a/packages/sysutils/systemd/patches/0003-remove-nonexistant-dependency.patch b/packages/sysutils/systemd/patches/systemd-0003-remove-nonexistant-dependency.patch
-similarity index 100%
-rename from packages/sysutils/systemd/patches/0003-remove-nonexistant-dependency.patch
-rename to packages/sysutils/systemd/patches/systemd-0003-remove-nonexistant-dependency.patch
-diff --git a/packages/sysutils/systemd/patches/0200-persist-persistent-timer-stamps.patch b/packages/sysutils/systemd/patches/systemd-0200-persist-persistent-timer-stamps.patch
-similarity index 90%
-rename from packages/sysutils/systemd/patches/0200-persist-persistent-timer-stamps.patch
-rename to packages/sysutils/systemd/patches/systemd-0200-persist-persistent-timer-stamps.patch
-index c916469902..89b071645f 100644
---- a/packages/sysutils/systemd/patches/0200-persist-persistent-timer-stamps.patch
++
+diff --git a/packages/sysutils/systemd/patches/systemd-0003-remove-nonexistant-dependency.patch b/packages/sysutils/systemd/patches/systemd-0003-remove-nonexistant-dependency.patch
+new file mode 100644
+index 0000000000..43f31b28ea
+--- /dev/null
++++ b/packages/sysutils/systemd/patches/systemd-0003-remove-nonexistant-dependency.patch
+@@ -0,0 +1,24 @@
++From 382709612ae03d6f81049ac72ac2dabd7613763d Mon Sep 17 00:00:00 2001
++From: Stefan Saraev <stefan@saraev.ca>
++Date: Wed, 18 Feb 2015 18:23:47 +0200
++Subject: [PATCH 7/8] remove nonexistant dependency
++
++---
++ units/graphical.target |    1 -
++ 1 file changed, 1 deletion(-)
++
++diff --git a/units/graphical.target b/units/graphical.target
++index 87be97e..b01b46d 100644
++--- a/units/graphical.target
+++++ b/units/graphical.target
++@@ -11,7 +11,6 @@
++ Description=Graphical Interface
++ Documentation=man:systemd.special(7)
++ Requires=multi-user.target
++-Wants=display-manager.service
++ Conflicts=rescue.service rescue.target
++ After=multi-user.target rescue.service rescue.target display-manager.service
++ AllowIsolate=yes
++-- 
++1.7.10.4
++
+diff --git a/packages/sysutils/systemd/patches/systemd-0200-persist-persistent-timer-stamps.patch b/packages/sysutils/systemd/patches/systemd-0200-persist-persistent-timer-stamps.patch
+new file mode 100644
+index 0000000000..89b071645f
+--- /dev/null
 +++ b/packages/sysutils/systemd/patches/systemd-0200-persist-persistent-timer-stamps.patch
-@@ -8,10 +8,10 @@ Subject: [PATCH] timers: use a persistent filesystem for persistent timers
-  1 file changed, 2 insertions(+), 2 deletions(-)
- 
- diff --git a/src/core/timer.c b/src/core/timer.c
--index 510d8e1..41f41dd 100644
+@@ -0,0 +1,30 @@
++From c1bcb16c35724404d30fab53017b757c886e9ab7 Mon Sep 17 00:00:00 2001
++From: MilhouseVH <milhouseVH.github@nmacleod.com>
++Date: Mon, 8 Jan 2018 13:46:51 +0000
++Subject: [PATCH] timers: use a persistent filesystem for persistent timers
++
++---
++ src/core/timer.c | 4 ++--
++ 1 file changed, 2 insertions(+), 2 deletions(-)
++
++diff --git a/src/core/timer.c b/src/core/timer.c
 +index 03935ee..bfd5c02 100644
- --- a/src/core/timer.c
- +++ b/src/core/timer.c
--@@ -139,11 +139,11 @@ static int timer_setup_persistent(Timer *t) {
++--- a/src/core/timer.c
+++++ b/src/core/timer.c
 +@@ -138,11 +138,11 @@ static int timer_setup_persistent(Timer *t) {
-  
-          if (MANAGER_IS_SYSTEM(UNIT(t)->manager)) {
-  
-@@ -26,5 +26,5 @@ index 510d8e1..41f41dd 100644
-                  const char *e;
-  
- -- 
--2.53.0
++ 
++         if (MANAGER_IS_SYSTEM(UNIT(t)->manager)) {
++ 
++-                r = unit_add_mounts_for(UNIT(t), "/var/lib/systemd/timers", UNIT_DEPENDENCY_FILE, UNIT_MOUNT_REQUIRES);
+++                r = unit_add_mounts_for(UNIT(t), "/storage/.cache/systemd/timers", UNIT_DEPENDENCY_FILE, UNIT_MOUNT_REQUIRES);
++                 if (r < 0)
++                         return r;
++ 
++-                stamp_path = strjoin("/var/lib/systemd/timers/stamp-", UNIT(t)->id);
+++                stamp_path = strjoin("/storage/.cache/systemd/timers/stamp-", UNIT(t)->id);
++         } else {
++                 const char *e;
++ 
++-- 
 +2.14.1
- 
-diff --git a/packages/sysutils/systemd/patches/0300-config-env-unhide-cursor.patch b/packages/sysutils/systemd/patches/systemd-0300-config-env-unhide-cursor.patch
-similarity index 88%
-rename from packages/sysutils/systemd/patches/0300-config-env-unhide-cursor.patch
-rename to packages/sysutils/systemd/patches/systemd-0300-config-env-unhide-cursor.patch
-index 34a11d3e6b..17da76545a 100644
---- a/packages/sysutils/systemd/patches/0300-config-env-unhide-cursor.patch
++
+diff --git a/packages/sysutils/systemd/patches/systemd-0300-config-env-unhide-cursor.patch b/packages/sysutils/systemd/patches/systemd-0300-config-env-unhide-cursor.patch
+new file mode 100644
+index 0000000000..17da76545a
+--- /dev/null
 +++ b/packages/sysutils/systemd/patches/systemd-0300-config-env-unhide-cursor.patch
-@@ -11,8 +11,8 @@ diff --git a/units/debug-shell.service.in b/units/debug-shell.service.in
- index 1127e68..4c3e971 100644
- --- a/units/debug-shell.service.in
- +++ b/units/debug-shell.service.in
--@@ -16,8 +16,8 @@ ConditionPathExists={{DEBUGTTY}}
-- After=systemd-vconsole-setup.service
+@@ -0,0 +1,27 @@
++From 49285dae6756b22bc6881c04939f7c43c35b5506 Mon Sep 17 00:00:00 2001
++From: MilhouseVH <milhouseVH.github@nmacleod.com>
++Date: Sat, 29 Jun 2019 00:26:41 +0100
++Subject: [PATCH] debug-shell: configure environment, unhide cursor
++
++---
++ units/debug-shell.service.in | 4 ++--
++ 1 file changed, 2 insertions(+), 2 deletions(-)
++
++diff --git a/units/debug-shell.service.in b/units/debug-shell.service.in
++index 1127e68..4c3e971 100644
++--- a/units/debug-shell.service.in
+++++ b/units/debug-shell.service.in
 +@@ -15,8 +15,8 @@ IgnoreOnIsolate=yes
 + ConditionPathExists={{DEBUGTTY}}
-  
-  [Service]
- -Environment=TERM=linux
++ 
++ [Service]
++-Environment=TERM=linux
++-ExecStart={{SUSHELL}}
+++Environment=ENV=/etc/profile
+++ExecStart=/bin/sh -c 'echo -en "\033[?25h"; exec /bin/sh'
++ Restart=always
++ RestartSec=0
++ StandardInput=tty
++-- 
++2.14.1
++
 diff --git a/packages/sysutils/systemd/profile.d/90-systemd.conf b/packages/sysutils/systemd/profile.d/90-systemd.conf
 index 6cf1e4ec0e..51962119f4 100644
 --- a/packages/sysutils/systemd/profile.d/90-systemd.conf
@@ -369,3 +420,6 @@ index 1e2f69e1aa..07d11f550b 100644
  
  d    /run/libreelec       0755 root root - -
  d    /run/libreelec/debug 0755 root root - -
+-- 
+2.47.3
+
