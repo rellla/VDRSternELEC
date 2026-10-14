@@ -1,0 +1,67 @@
+From def50468c44219b58ce00b6041cf6ca632c387ff Mon Sep 17 00:00:00 2001
+From: kamel5 <vdr.kamel5 (at) gmx (dot) net>
+Date: Mon, 8 Jun 2026 12:11:48 +0200
+Subject: [PATCH] Refactor tool.*
+
+---
+ tools.c | 20 +-------------------
+ tools.h |  5 +++--
+ 2 files changed, 4 insertions(+), 21 deletions(-)
+
+diff --git a/tools.c b/tools.c
+index 504681d..1db936e 100644
+--- a/tools.c
++++ b/tools.c
+@@ -8,7 +8,7 @@
+ #include <vector>
+ #include <vdr/skins.h>
+ #include "lcarsng.h"
+-#include "tools.h"
++//#include "tools.h"
+ #include "config.h"
+ 
+ // --- Helper functions ------------------------------------------------------
+@@ -256,24 +256,6 @@ void DrawDevicePosition(cOsd *Osd, cPixmap *Pixmap, const cPositioner *Positione
+ }
+ #endif
+ 
+-void PixmapSetLayer(cPixmap *Pixmap, int Layer)
+-{
+-  if (Pixmap)
+-     Pixmap->SetLayer(Layer);
+-}
+-
+-void PixmapSetAlpha(cPixmap *Pixmap, int Alpha)
+-{
+-  if (Pixmap)
+-     Pixmap->SetAlpha(Alpha);
+-}
+-
+-void PixmapFill(cPixmap *Pixmap, tColor Color)
+-{
+-  if (Pixmap)
+-     Pixmap->Fill(Color);
+-}
+-
+ void DrawBitmap(cPixmap *Pixmap, int x, int y, const cBitmap &Bitmap, tColor ColorFg, tColor ColorBg, bool Overlay)
+ {
+   if (Pixmap)
+diff --git a/tools.h b/tools.h
+index eeaea56..f4721e4 100644
+--- a/tools.h
++++ b/tools.h
+@@ -31,8 +31,9 @@ cPixmap *DrawPoster(DrawPoster_t dP);
+ bool DrawDeviceData(cOsd *Osd, cPixmap *Pixmap, const cDevice *Device, int x0, int y0, int x1, int y1, int &xs, const cFont *TinyFont, cString &LastDeviceType, cCamSlot *&LastCamSlot, bool Initial);
+ void DrawDeviceSignal(cOsd *Osd, cPixmap *Pixmap, const cDevice *Device, int x0, int y0, int x1, int y1, int &LastSignalStrength, int &LastSignalQuality, bool Initial);
+ void DrawDevicePosition(cOsd *Osd, cPixmap *Pixmap, const cPositioner *Positioner, int x0, int y0, int x1, int y1, int &LastCurrent);
+-void PixmapSetAlpha(cPixmap *Pixmap, int Alpha);
+-void PixmapFill(cPixmap *Pixmap, tColor Color);
++inline void PixmapSetLayer(cPixmap *Pixmap, int Layer) { if (Pixmap) Pixmap->SetLayer(Layer); };
++inline void PixmapSetAlpha(cPixmap *Pixmap, int Alpha) { if (Pixmap) Pixmap->SetAlpha(Alpha); };
++inline void PixmapFill(cPixmap *Pixmap, tColor Color)  { if (Pixmap) Pixmap->Fill(Color); };
+ void DrawBitmap(cPixmap *Pixmap, int x, int y, const cBitmap &Bitmap, tColor ColorFg = 0, tColor ColorBg = 0, bool Overlay = false);
+ void DrawText(cPixmap *Pixmap, int x, int y, const char *s, tColor ColorFg, tColor ColorBg, const cFont *Font, int Width = 0, int Height = 0, int Alignment = taDefault);
+ void DrawRectangle(cPixmap *Pixmap, int x1, int y1, int x2, int y2, tColor Color);
+-- 
+2.47.3
+

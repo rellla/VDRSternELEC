@@ -1,0 +1,36 @@
+From efb686a59de4a18b2b7ca88baabec716451dd055 Mon Sep 17 00:00:00 2001
+From: Andreas Baierl <ichgeh@imkreisrum.de>
+Date: Tue, 17 Nov 2026 23:42:16 +0100
+Subject: [PATCH] fix displayreplay: take the frame rate from the player
+ without a recording
+
+Without a recording (e.g. the mediaplayer of an output plugin), the times were
+calculated with the default frame rate. So they were doubled for a 50 fps
+file.
+---
+ displayreplay.c | 9 +++++++++
+ 1 file changed, 9 insertions(+)
+
+diff --git a/displayreplay.c b/displayreplay.c
+index ba816a3..c6d5913 100644
+--- a/displayreplay.c
++++ b/displayreplay.c
+@@ -35,6 +35,15 @@ cLCARSNGDisplayReplay::cLCARSNGDisplayReplay(bool ModeOnly) : cThread("LCARS Dis
+   isRecording = false;
+   timshiftMode = false;
+   fps = DEFAULTFRAMESPERSECOND;
++  {
++#if APIVERSNUM > 20402
++     cMutexLock ControlMutexLock;
++     if (cControl *Control = cControl::Control(ControlMutexLock, true))
++#else
++     if (cControl *Control = cControl::Control(true))
++#endif
++        fps = Control->FramesPerSecond();
++  }
+   framesTotal = 0;
+   pbinit = true;
+   volumeBox = nullptr;
+-- 
+2.47.3
+

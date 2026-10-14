@@ -1,0 +1,27 @@
+From 1796c92c53fa760ca7191694ec6b29ffc2169c11 Mon Sep 17 00:00:00 2001
+From: kamel5 <vdr.kamel5 (at) gmx (dot) net>
+Date: Sun, 7 Jun 2026 13:10:58 +0200
+Subject: [PATCH] Fix length for text in DrawScreenResolution() and DrawTrack()
+
+---
+ displayreplay.c | 4 ++--
+ 1 file changed, 2 insertions(+), 2 deletions(-)
+
+diff --git a/displayreplay.c b/displayreplay.c
+index af2ba72..0312477 100644
+--- a/displayreplay.c
++++ b/displayreplay.c
+@@ -512,8 +512,8 @@ void cLCARSNGDisplayReplay::Flush(void)
+   if (!modeOnly) {
+      DrawBlinkingRec();
+      DrawDate(ReplayPixmap, xp14, yp00, xp16, yp01, Theme.Color(clrDateFg), Theme.Color(clrDateBg), osdFont, &lastDate);
+-     DrawTrack(ReplayPixmap, xp10 + Margin, yp11 + Margin, xp11 - textBorder - Margin, yp12 - Margin, Theme.Color(clrTrackName), frameColorBg, (zoom) ? smlFont : osdFont, &lastTrackId);
+-     DrawScreenResolution(ReplayPixmap, xp12 + Margin, yp11 + Margin, leftIcons - SymbolSpacing - Margin, yp12 - Margin, Theme.Color(clrChannelSymbolOn), frameColorBg, (zoom) ? smlFont : osdFont, resolution, &oldResolution);
++     DrawTrack(ReplayPixmap, xp10 + Margin, yp11 + Margin, xp11 - textBorder - 2 * Margin, yp12 - 2 * Margin, Theme.Color(clrTrackName), frameColorBg, (zoom) ? smlFont : osdFont, &lastTrackId);
++     DrawScreenResolution(ReplayPixmap, xp12 + Margin, yp11 + Margin, leftIcons - SymbolSpacing - 2 * Margin, yp12 - 2 * Margin, Theme.Color(clrChannelSymbolOn), frameColorBg, (zoom) ? smlFont : osdFont, resolution, &oldResolution);
+      }
+   DrawVolume();
+ #ifdef DRAWGRID
+-- 
+2.47.3
+

@@ -1,0 +1,85 @@
+From 1b47976c72ea7e4680095cc343b82c473a52e111 Mon Sep 17 00:00:00 2001
+From: kamel5 <vdr.kamel5 (at) gmx (dot) net>
+Date: Sun, 7 Jun 2026 14:20:57 +0200
+Subject: [PATCH] Add Alignment to DrawDate()
+
+---
+ displaychannel.c | 2 +-
+ displayreplay.c  | 2 +-
+ tools.c          | 8 ++++----
+ tools.h          | 4 ++--
+ 4 files changed, 8 insertions(+), 8 deletions(-)
+
+diff --git a/displaychannel.c b/displaychannel.c
+index f1fe855..bb82310 100644
+--- a/displaychannel.c
++++ b/displaychannel.c
+@@ -781,7 +781,7 @@ void cLCARSNGDisplayChannel::Flush(void)
+ {
+   if (withInfo) {
+      if (!message) {
+-        DrawDate(osd, xc21 + Margin, yc00 + Margin, xc22 - textBorder - 2 * Margin, yc01 - 2 * Margin, Theme.Color(clrDateFg), Theme.Color(clrDateBg), osdFont, &lastDate);
++        DrawDate(osd, xc21 + Margin, yc00 + Margin, xc22 - textBorder - 2 * Margin, yc01 - 2 * Margin, Theme.Color(clrDateFg), Theme.Color(clrDateBg), osdFont, &lastDate, taCenter | taRight | taBorder);
+         DrawDevice();
+         DrawSignal();
+         DrawTimer();
+diff --git a/displayreplay.c b/displayreplay.c
+index 79fde11..c8c31b7 100644
+--- a/displayreplay.c
++++ b/displayreplay.c
+@@ -511,7 +511,7 @@ void cLCARSNGDisplayReplay::Flush(void)
+ {
+   if (!modeOnly) {
+      DrawBlinkingRec();
+-     DrawDate(ReplayPixmap, xp14, yp00, xp16, yp01, Theme.Color(clrDateFg), Theme.Color(clrDateBg), osdFont, &lastDate);
++     DrawDate(ReplayPixmap, xp14, yp00, xp16, yp01, Theme.Color(clrDateFg), Theme.Color(clrDateBg), osdFont, &lastDate, taCenter | taRight | taBorder);
+      DrawTrack(nullptr, ReplayPixmap, xp10 + Margin, yp11 + Margin, xp11 - textBorder - 2 * Margin, yp12 - 2 * Margin, Theme.Color(clrTrackName), frameColorBg, (zoom) ? smlFont : osdFont, &lastTrackId, taCenter | taLeft | taBorder);
+      DrawScreenResolution(nullptr, ReplayPixmap, xp12 + Margin, yp11 + Margin, leftIcons - SymbolSpacing - 2 * Margin, yp12 - 2 * Margin, Theme.Color(clrChannelSymbolOn), frameColorBg, (zoom) ? smlFont : osdFont, resolution, &oldResolution, taCenter | taRight | taBorder);
+      }
+diff --git a/tools.c b/tools.c
+index 23fd553..e0fad9d 100644
+--- a/tools.c
++++ b/tools.c
+@@ -744,20 +744,20 @@ int GetLiveBuffer(void) {
+   return -1;
+ }
+ 
+-void DrawDate(cOsd *osd, int x0, int y0, int x1, int y1, tColor colorfg, tColor colorbg, const cFont *font, cString *lastDate)
++void DrawDate(cOsd *osd, int x0, int y0, int x1, int y1, tColor colorfg, tColor colorbg, const cFont *font, cString *lastDate, int Alignment)
+ {
+   cString s = DayDateTime();
+   if (!**lastDate || strcmp(s, *lastDate)) {
+-     osd->DrawText(x0, y0, s, colorfg, colorbg, font, x1 - x0, y1 - y0, taCenter | taRight | taBorder);
++     osd->DrawText(x0, y0, s, colorfg, colorbg, font, x1 - x0, y1 - y0, Alignment);
+      *lastDate = s;
+      }
+ }
+ 
+-void DrawDate(cPixmap *pixmap, int x0, int y0, int x1, int y1, tColor colorfg, tColor colorbg, const cFont *font, cString *lastDate)
++void DrawDate(cPixmap *pixmap, int x0, int y0, int x1, int y1, tColor colorfg, tColor colorbg, const cFont *font, cString *lastDate, int Alignment)
+ {
+   cString s = DayDateTime();
+   if (!**lastDate || strcmp(s, *lastDate)) {
+-     pixmap->DrawText(cPoint(x0, y0), s, colorfg, colorbg, font, x1 - x0, y1 - y0, taCenter | taRight | taBorder);
++     pixmap->DrawText(cPoint(x0, y0), s, colorfg, colorbg, font, x1 - x0, y1 - y0, Alignment);
+      *lastDate = s;
+      }
+ }
+diff --git a/tools.h b/tools.h
+index 9d2dc1b..19a4091 100644
+--- a/tools.h
++++ b/tools.h
+@@ -51,8 +51,8 @@ cString GetScreenResolutionIcon(void);
+ cPlugin *GetScraperPlugin(void);
+ int GetLiveBuffer(void);
+ 
+-void DrawDate(cOsd *osd, int x0, int y0, int x1, int y1, tColor colorfg, tColor colorbg, const cFont *font, cString *lastDate);
+-void DrawDate(cPixmap *pixmap, int x0, int y0, int x1, int y1, tColor colorfg, tColor colorbg, const cFont *font, cString *lastDate);
++void DrawDate(cOsd *osd, int x0, int y0, int x1, int y1, tColor colorfg, tColor colorbg, const cFont *font, cString *lastDate, int Alignment = taDefault);
++void DrawDate(cPixmap *pixmap, int x0, int y0, int x1, int y1, tColor colorfg, tColor colorbg, const cFont *font, cString *lastDate, int Alignment = taDefault);
+ void DrawTrack(cOsd *osd, cPixmap *pixmap, int x0, int y0, int x1, int y1, tColor colorfg, tColor colorbg, const cFont *font, tTrackId *lastTrackId, int Alignment = taDefault);
+ void DrawScreenResolution(cOsd *osd, cPixmap *pixmap, int x0, int y0, int x1, int y1, tColor colorfg, tColor colorbg, const cFont *font, cString resolution, cString *oldResolution, int Alignment = taDefault);
+ 
+-- 
+2.47.3
+

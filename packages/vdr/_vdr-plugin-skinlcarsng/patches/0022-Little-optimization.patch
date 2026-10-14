@@ -1,0 +1,32 @@
+From 1bab726d858d58eded25e75721a1bc807e78dd55 Mon Sep 17 00:00:00 2001
+From: kamel5 <vdr.kamel5 (at) gmx (dot) net>
+Date: Thu, 19 Nov 2026 10:36:08 +0100
+Subject: [PATCH] Little optimization
+
+---
+ setup.c | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/setup.c b/setup.c
+index 723fd03..9ca3d86 100644
+--- a/setup.c
++++ b/setup.c
+@@ -32,6 +32,7 @@ cLCARSNGSetup::cLCARSNGSetup() {
+   spacer = "   ";
+ 
+   Set();
++  SetHelp(nullptr, nullptr, nullptr, nullptr);
+ }
+ 
+ void cLCARSNGSetup::Set(void) {
+@@ -114,7 +115,6 @@ void cLCARSNGSetup::Set(void) {
+ 
+   SetCurrent(Get(currentItem));
+   Display();
+-  SetHelp(nullptr, nullptr, nullptr, nullptr);
+ }
+ 
+ eOSState cLCARSNGSetup::ProcessKey(eKeys Key)
+-- 
+2.47.3
+

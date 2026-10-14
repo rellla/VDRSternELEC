@@ -1,0 +1,124 @@
+From 17f9f85603a8293f39648a95e480a38e989d0852 Mon Sep 17 00:00:00 2001
+From: kamel5 <vdr.kamel5 (at) gmx (dot) net>
+Date: Sun, 7 Jun 2026 15:02:00 +0200
+Subject: [PATCH] Merge  DrawDevicePosition(cOsd *osd) and 
+ DrawDevicePosition(cPixmap *pixmap)
+
+---
+ displaychannel.c |  2 +-
+ tools.c          | 61 ++++++++++++++----------------------------------
+ tools.h          |  3 +--
+ 3 files changed, 19 insertions(+), 47 deletions(-)
+
+diff --git a/displaychannel.c b/displaychannel.c
+index a1a277a..021a1e2 100644
+--- a/displaychannel.c
++++ b/displaychannel.c
+@@ -652,7 +652,7 @@ void cLCARSNGDisplayChannel::SetPositioner(const cPositioner *Positioner)
+   if (Positioner) {
+      int y0 = yc01 - (yc01 - yc00) / 2 + Gap / 2;
+      int y1 = yc01 + ShowSeenExtent;
+-     DrawDevicePosition(osd, Positioner, xc06, y0, xc20, y1, lastCurrentPosition);
++     DrawDevicePosition(osd, nullptr, Positioner, xc06, y0, xc20, y1, lastCurrentPosition);
+      }
+   else {
+      lastCurrentPosition = -1;
+diff --git a/tools.c b/tools.c
+index dffe9d0..ae7a450 100644
+--- a/tools.c
++++ b/tools.c
+@@ -250,7 +250,7 @@ void DrawDeviceSignal(cOsd *Osd, const cDevice *Device, int x0, int y0, int x1,
+ }
+ 
+ #if APIVERSNUM > 20101
+-void DrawDevicePosition(cOsd *Osd, const cPositioner *Positioner, int x0, int y0, int x1, int y1, int &LastCurrent)
++void DrawDevicePosition(cOsd *Osd, cPixmap *Pixmap, const cPositioner *Positioner, int x0, int y0, int x1, int y1, int &LastCurrent)
+ {
+   int HorizonLeft = Positioner->HorizonLongitude(cPositioner::pdLeft);
+   int HorizonRight = Positioner->HorizonLongitude(cPositioner::pdRight);
+@@ -278,52 +278,25 @@ void DrawDevicePosition(cOsd *Osd, const cPositioner *Positioner, int x0, int y0
+      ColorRange = Theme.Color(clrChannelFrameBg);
+      ColorMove = Theme.Color(clrDeviceBg);
+      }
+-  Osd->DrawRectangle(x0, y0, x1 - 1, y1 - 1, Theme.Color(clrBackground));
+-  Osd->DrawEllipse(l - d, y0, l, y1 - 1, ColorRange, 7);
+-  Osd->DrawRectangle(l, y0, r, y1 - 1, ColorRange);
+-  Osd->DrawEllipse(r, y0, r + d, y1 - 1, ColorRange, 5);
+-  Osd->DrawEllipse(c - d, y0, c, y1 - 1, ColorMove, 7);
+-  Osd->DrawRectangle(c, y0, t, y1 - 1, ColorMove);
+-  Osd->DrawEllipse(t, y0, t + d, y1 - 1, ColorMove, 5);
+-  LastCurrent = c;
+-}
+-
+-void DrawDevicePosition(cPixmap *Pixmap, const cPositioner *Positioner, int x0, int y0, int x1, int y1, int &LastCurrent)
+-{
+-  int HorizonLeft = Positioner->HorizonLongitude(cPositioner::pdLeft);
+-  int HorizonRight = Positioner->HorizonLongitude(cPositioner::pdRight);
+-  int HardLimitLeft = cPositioner::NormalizeAngle(HorizonLeft - Positioner->HardLimitLongitude(cPositioner::pdLeft));
+-  int HardLimitRight = cPositioner::NormalizeAngle(Positioner->HardLimitLongitude(cPositioner::pdRight) - HorizonRight);
+-  int HorizonDelta = cPositioner::NormalizeAngle(HorizonLeft - HorizonRight);
+-  int Current = cPositioner::NormalizeAngle(HorizonLeft - Positioner->CurrentLongitude());
+-  int Target = cPositioner::NormalizeAngle(HorizonLeft - Positioner->TargetLongitude());
+-  int d = (y1 - y0) / 2;
+-  int w = x1 - x0 - 2 * d;
+-  int l = max(x0 + d, x0 + d + w * HardLimitLeft / HorizonDelta);
+-  int r = min(x1 - d, x1 - d - w * HardLimitRight / HorizonDelta) - 1;
+-  int c = constrain(x0 + d + w * Current / HorizonDelta, l, r);
+-  int t = constrain(x0 + d + w * Target / HorizonDelta, l, r);
+-  if (c == LastCurrent)
+-     return;
+-  if (c > t)
+-     swap(c, t);
+-  tColor ColorRange, ColorMove;
+-  if (TwoColors) {
+-     ColorRange = Theme.Color(clrChannelFrameBg);
+-     ColorMove = Theme.Color(clrBackground);
++  if (Pixmap) {
++     Pixmap->DrawRectangle(cRect(x0, y0, x1 - x0, y1 - y0), Theme.Color(clrBackground));
++     //todo
++     Pixmap->DrawEllipse(cRect(l - d, y0, l, y1 - 1), ColorRange, 7);
++     Pixmap->DrawRectangle(cRect(l, y0, r, y1 - 1), ColorRange);
++     Pixmap->DrawEllipse(cRect(r, y0, r + d, y1 - 1), ColorRange, 5);
++     Pixmap->DrawEllipse(cRect(c - d, y0, c, y1 - 1), ColorMove, 7);
++     Pixmap->DrawRectangle(cRect(c, y0, t, y1 - 1), ColorMove);
++     Pixmap->DrawEllipse(cRect(t, y0, t + d, y1 - 1), ColorMove, 5);
+      }
+   else {
+-     ColorRange = Theme.Color(clrChannelFrameBg);
+-     ColorMove = Theme.Color(clrDeviceBg);
++     Osd->DrawRectangle(x0, y0, x1 - 1, y1 - 1, Theme.Color(clrBackground));
++     Osd->DrawEllipse(l - d, y0, l, y1 - 1, ColorRange, 7);
++     Osd->DrawRectangle(l, y0, r, y1 - 1, ColorRange);
++     Osd->DrawEllipse(r, y0, r + d, y1 - 1, ColorRange, 5);
++     Osd->DrawEllipse(c - d, y0, c, y1 - 1, ColorMove, 7);
++     Osd->DrawRectangle(c, y0, t, y1 - 1, ColorMove);
++     Osd->DrawEllipse(t, y0, t + d, y1 - 1, ColorMove, 5);
+      }
+-  Pixmap->DrawRectangle(cRect(x0, y0, x1 - x0, y1 - y0), Theme.Color(clrBackground));
+-  //todo
+-  Pixmap->DrawEllipse(cRect(l - d, y0, l, y1 - 1), ColorRange, 7);
+-  Pixmap->DrawRectangle(cRect(l, y0, r, y1 - 1), ColorRange);
+-  Pixmap->DrawEllipse(cRect(r, y0, r + d, y1 - 1), ColorRange, 5);
+-  Pixmap->DrawEllipse(cRect(c - d, y0, c, y1 - 1), ColorMove, 7);
+-  Pixmap->DrawRectangle(cRect(c, y0, t, y1 - 1), ColorMove);
+-  Pixmap->DrawEllipse(cRect(t, y0, t + d, y1 - 1), ColorMove, 5);
+   LastCurrent = c;
+ }
+ #endif
+diff --git a/tools.h b/tools.h
+index 821851b..a58ded4 100644
+--- a/tools.h
++++ b/tools.h
+@@ -32,8 +32,7 @@ bool DrawDeviceData(cPixmap *Pixmap, const cDevice *Device, int x, int y, int w,
+ bool DrawDeviceData(cOsd *Osd, const cDevice *Device, int x0, int y0, int x1, int y1, int &xs, const cFont *TinyFont, cString &LastDeviceType, cCamSlot *&LastCamSlot, bool Initial);
+ void DrawDeviceSignal(cPixmap *Pixmap, const cDevice *Device, int x, int y, int w, int h, int &LastSignalStrength, int &LastSignalQuality, bool Initial);
+ void DrawDeviceSignal(cOsd *Osd, const cDevice *Device, int x0, int y0, int x1, int y1, int &LastSignalStrength, int &LastSignalQuality, bool Initial);
+-void DrawDevicePosition(cPixmap *Pixmap, const cPositioner *Positioner, int x0, int y0, int x1, int y1, int &LastCurrent);
+-void DrawDevicePosition(cOsd *Osd, const cPositioner *Positioner, int x0, int y0, int x1, int y1, int &LastCurrent);
++void DrawDevicePosition(cOsd *Osd, cPixmap *Pixmap, const cPositioner *Positioner, int x0, int y0, int x1, int y1, int &LastCurrent);
+ void PixmapSetAlpha(cPixmap *Pixmap, int Alpha);
+ void PixmapFill(cPixmap *Pixmap, tColor Color);
+ void DrawBitmap(cPixmap *Pixmap, int x, int y, const cBitmap &Bitmap, tColor ColorFg = 0, tColor ColorBg = 0, bool Overlay = false);
+-- 
+2.47.3
+

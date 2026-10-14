@@ -1,0 +1,46 @@
+From 202a28fab92f8fdf567350cd1800a2d98ac8ed99 Mon Sep 17 00:00:00 2001
+From: kamel5 <vdr.kamel5 (at) gmx (dot) net>
+Date: Mon, 8 Jun 2026 12:34:35 +0200
+Subject: [PATCH] Version 0.5.5
+
+---
+ HISTORY       | 10 ++++++++++
+ skinlcarsng.c |  2 +-
+ 2 files changed, 11 insertions(+), 1 deletion(-)
+
+diff --git a/HISTORY b/HISTORY
+index a14c744..ec9a8c9 100644
+--- a/HISTORY
++++ b/HISTORY
+@@ -1,5 +1,15 @@
+ VDR Plugin 'skinlcarsng' Revision History
+ ---------------------------------------
++Version 0.5.5
++- Fix false coordinates for DrawScreenResolution() (thx to @rell at vdr-portal.de)
++- Simplify DrawTrack() in tools.c
++- Update color for DrawScreenResolution() and DrawTrack()
++- Fix length for text in DrawScreenResolution() and DrawTrack()
++- Some refactoring
++- Cleanup
++- Replace NULL with nullptr
++- Fix Width and Height of Date in displaychannel.c
++
+ Version 0.5.4
+ - Update Locking
+ - Update drawDescription for faster scrolling in menus
+diff --git a/skinlcarsng.c b/skinlcarsng.c
+index 675d1fb..4d56bc3 100644
+--- a/skinlcarsng.c
++++ b/skinlcarsng.c
+@@ -9,7 +9,7 @@
+ #error "VDR-1.7.34 API version or greater is required!"
+ #endif
+ 
+-static const char *VERSION        = "0.5.4";
++static const char *VERSION        = "0.5.5";
+ static const char *DESCRIPTION    = "skin lcarsng";
+ 
+ class cPluginLCARSNG : public cPlugin {
+-- 
+2.47.3
+

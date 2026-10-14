@@ -1,0 +1,92 @@
+From 5854fad0f48295a2f06ad18d2d37c63420eba18f Mon Sep 17 00:00:00 2001
+From: kamel5 <vdr.kamel5 (at) gmx (dot) net>
+Date: Sun, 7 Jun 2026 13:48:18 +0200
+Subject: [PATCH] Add Alignment to DrawScreenResolution()
+
+---
+ displaychannel.c | 2 +-
+ displayreplay.c  | 2 +-
+ tools.c          | 8 ++++----
+ tools.h          | 4 ++--
+ 4 files changed, 8 insertions(+), 8 deletions(-)
+
+diff --git a/displaychannel.c b/displaychannel.c
+index b4683c5..ae5f797 100644
+--- a/displaychannel.c
++++ b/displaychannel.c
+@@ -796,7 +796,7 @@ void cLCARSNGDisplayChannel::Flush(void)
+         DrawSeen(Current, Total);
+         DrawTrack(osd, nullptr, xc14 + Margin, yc15 + Margin, xc18 - textBorder - 2 * Margin, yc16 - 2 * Margin,  Theme.Color(clrTrackName), frameColorBg, (zoom) ? smlFont : osdFont, &lastTrackId, taCenter | taRight | taBorder);
+         int x = leftIcons - SymbolSpacing;
+-        DrawScreenResolution(osd, xc19 + Margin, yc15 + Margin, x - 2 * Margin, yc16 - 2 * Margin, Theme.Color(clrChannelSymbolOn), frameColorBg, (zoom) ? smlFont : osdFont, &oldResolution);
++        DrawScreenResolution(osd, xc19 + Margin, yc15 + Margin, x - 2 * Margin, yc16 - 2 * Margin, Theme.Color(clrChannelSymbolOn), frameColorBg, (zoom) ? smlFont : osdFont, &oldResolution, taCenter | taRight | taBorder);
+ 	DrawEventRec(present, following);
+         DrawBlinkingRec();
+         }
+diff --git a/displayreplay.c b/displayreplay.c
+index 3a4ca6c..3db0b7b 100644
+--- a/displayreplay.c
++++ b/displayreplay.c
+@@ -513,7 +513,7 @@ void cLCARSNGDisplayReplay::Flush(void)
+      DrawBlinkingRec();
+      DrawDate(ReplayPixmap, xp14, yp00, xp16, yp01, Theme.Color(clrDateFg), Theme.Color(clrDateBg), osdFont, &lastDate);
+      DrawTrack(nullptr, ReplayPixmap, xp10 + Margin, yp11 + Margin, xp11 - textBorder - 2 * Margin, yp12 - 2 * Margin, Theme.Color(clrTrackName), frameColorBg, (zoom) ? smlFont : osdFont, &lastTrackId, taCenter | taLeft | taBorder);
+-     DrawScreenResolution(ReplayPixmap, xp12 + Margin, yp11 + Margin, leftIcons - SymbolSpacing - 2 * Margin, yp12 - 2 * Margin, Theme.Color(clrChannelSymbolOn), frameColorBg, (zoom) ? smlFont : osdFont, resolution, &oldResolution);
++     DrawScreenResolution(ReplayPixmap, xp12 + Margin, yp11 + Margin, leftIcons - SymbolSpacing - 2 * Margin, yp12 - 2 * Margin, Theme.Color(clrChannelSymbolOn), frameColorBg, (zoom) ? smlFont : osdFont, resolution, &oldResolution, taCenter | taRight | taBorder);
+      }
+   DrawVolume();
+ #ifdef DRAWGRID
+diff --git a/tools.c b/tools.c
+index b96b0c7..8463797 100644
+--- a/tools.c
++++ b/tools.c
+@@ -775,7 +775,7 @@ void DrawTrack(cOsd *osd, cPixmap *pixmap, int x0, int y0, int x1, int y1, tColo
+      }
+ }
+ 
+-void DrawScreenResolution(cOsd *osd, int x0, int y0, int x1, int y1, tColor colorfg, tColor colorbg, const cFont *font, cString *oldResolution)
++void DrawScreenResolution(cOsd *osd, int x0, int y0, int x1, int y1, tColor colorfg, tColor colorbg, const cFont *font, cString *oldResolution, int Alignment)
+ {
+   cString resolution = GetScreenResolutionIcon();
+ 
+@@ -783,19 +783,19 @@ void DrawScreenResolution(cOsd *osd, int x0, int y0, int x1, int y1, tColor colo
+   if (!(strcmp(resolution, *oldResolution) == 0)) {
+      esyslog ("skinlcarsng: %s %s %d %s\n", __FILE__, __func__,  __LINE__, *resolution);
+      esyslog ("skinlcarsng: %s %s %d %i %i\n", __FILE__, __func__,  __LINE__, x0, x1);
+-     osd->DrawText(x0, y0, cString::sprintf("%s", *resolution), colorfg, colorbg, font, x1 - x0, y1 - y0, taCenter | taRight | taBorder);
++     osd->DrawText(x0, y0, cString::sprintf("%s", *resolution), colorfg, colorbg, font, x1 - x0, y1 - y0, Alignment);
+      *oldResolution = *resolution;
+      }
+ }
+ 
+-void DrawScreenResolution(cPixmap *pixmap, int x0, int y0, int x1, int y1, tColor colorfg, tColor colorbg, const cFont *font, cString resolution, cString *oldResolution)
++void DrawScreenResolution(cPixmap *pixmap, int x0, int y0, int x1, int y1, tColor colorfg, tColor colorbg, const cFont *font, cString resolution, cString *oldResolution, int Alignment)
+ {
+   if (isempty(resolution))
+      resolution = GetScreenResolutionIcon();
+ 
+   // Draw video format
+   if (!(strcmp(resolution, *oldResolution) == 0)) {
+-     pixmap->DrawText(cPoint(x0, y0), cString::sprintf("%s", *resolution), colorfg, colorbg, font, x1 - x0, y1 - y0, taCenter | taRight | taBorder);
++     pixmap->DrawText(cPoint(x0, y0), cString::sprintf("%s", *resolution), colorfg, colorbg, font, x1 - x0, y1 - y0, Alignment);
+      *oldResolution = *resolution;
+      }
+ }
+diff --git a/tools.h b/tools.h
+index 3c35142..38665ff 100644
+--- a/tools.h
++++ b/tools.h
+@@ -54,8 +54,8 @@ int GetLiveBuffer(void);
+ void DrawDate(cOsd *osd, int x0, int y0, int x1, int y1, tColor colorfg, tColor colorbg, const cFont *font, cString *lastDate);
+ void DrawDate(cPixmap *pixmap, int x0, int y0, int x1, int y1, tColor colorfg, tColor colorbg, const cFont *font, cString *lastDate);
+ void DrawTrack(cOsd *osd, cPixmap *pixmap, int x0, int y0, int x1, int y1, tColor colorfg, tColor colorbg, const cFont *font, tTrackId *lastTrackId, int Alignment = taDefault);
+-void DrawScreenResolution(cOsd *osd, int x0, int y0, int x1, int y1, tColor colorfg, tColor colorbg, const cFont *font, cString *oldResolution);
+-void DrawScreenResolution(cPixmap *pixmap, int x0, int y0, int x1, int y1, tColor colorfg, tColor colorbg, const cFont *font, cString resolution, cString *oldResolution);
++void DrawScreenResolution(cOsd *osd, int x0, int y0, int x1, int y1, tColor colorfg, tColor colorbg, const cFont *font, cString *oldResolution, int Alignment = taDefault);
++void DrawScreenResolution(cPixmap *pixmap, int x0, int y0, int x1, int y1, tColor colorfg, tColor colorbg, const cFont *font, cString resolution, cString *oldResolution, int Alignment = taDefault);
+ 
+ std::string StrToLowerCase(std::string str);
+ 
+-- 
+2.47.3
+
