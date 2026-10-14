@@ -1,0 +1,87 @@
+From a03c17f4603448b17fd398fafa05152fcc500715 Mon Sep 17 00:00:00 2001
+From: kamel5 <vdr.kamel5 (at) gmx (dot) net>
+Date: Sun, 7 Jun 2026 13:32:12 +0200
+Subject: [PATCH] Merge DrawTrack(cOsd *osd) and DrawTrack(cPixmap *pixmap)
+
+---
+ displaychannel.c |  2 +-
+ displayreplay.c  |  2 +-
+ tools.c          | 17 +++++------------
+ tools.h          |  3 +--
+ 4 files changed, 8 insertions(+), 16 deletions(-)
+
+diff --git a/displaychannel.c b/displaychannel.c
+index f8f1bd2..b4683c5 100644
+--- a/displaychannel.c
++++ b/displaychannel.c
+@@ -794,7 +794,7 @@ void cLCARSNGDisplayChannel::Flush(void)
+            Total = present->Duration();
+            }
+         DrawSeen(Current, Total);
+-        DrawTrack(osd, xc14 + Margin, yc15 + Margin, xc18 - textBorder - 2 * Margin, yc16 - 2 * Margin,  Theme.Color(clrTrackName), frameColorBg, (zoom) ? smlFont : osdFont, &lastTrackId, taCenter | taRight | taBorder);
++        DrawTrack(osd, nullptr, xc14 + Margin, yc15 + Margin, xc18 - textBorder - 2 * Margin, yc16 - 2 * Margin,  Theme.Color(clrTrackName), frameColorBg, (zoom) ? smlFont : osdFont, &lastTrackId, taCenter | taRight | taBorder);
+         int x = leftIcons - SymbolSpacing;
+         DrawScreenResolution(osd, xc19 + Margin, yc15 + Margin, x - 2 * Margin, yc16 - 2 * Margin, Theme.Color(clrChannelSymbolOn), frameColorBg, (zoom) ? smlFont : osdFont, &oldResolution);
+ 	DrawEventRec(present, following);
+diff --git a/displayreplay.c b/displayreplay.c
+index 3a129bf..3a4ca6c 100644
+--- a/displayreplay.c
++++ b/displayreplay.c
+@@ -512,7 +512,7 @@ void cLCARSNGDisplayReplay::Flush(void)
+   if (!modeOnly) {
+      DrawBlinkingRec();
+      DrawDate(ReplayPixmap, xp14, yp00, xp16, yp01, Theme.Color(clrDateFg), Theme.Color(clrDateBg), osdFont, &lastDate);
+-     DrawTrack(ReplayPixmap, xp10 + Margin, yp11 + Margin, xp11 - textBorder - 2 * Margin, yp12 - 2 * Margin, Theme.Color(clrTrackName), frameColorBg, (zoom) ? smlFont : osdFont, &lastTrackId, taCenter | taLeft | taBorder);
++     DrawTrack(nullptr, ReplayPixmap, xp10 + Margin, yp11 + Margin, xp11 - textBorder - 2 * Margin, yp12 - 2 * Margin, Theme.Color(clrTrackName), frameColorBg, (zoom) ? smlFont : osdFont, &lastTrackId, taCenter | taLeft | taBorder);
+      DrawScreenResolution(ReplayPixmap, xp12 + Margin, yp11 + Margin, leftIcons - SymbolSpacing - 2 * Margin, yp12 - 2 * Margin, Theme.Color(clrChannelSymbolOn), frameColorBg, (zoom) ? smlFont : osdFont, resolution, &oldResolution);
+      }
+   DrawVolume();
+diff --git a/tools.c b/tools.c
+index 848832e..b96b0c7 100644
+--- a/tools.c
++++ b/tools.c
+@@ -762,22 +762,15 @@ void DrawDate(cPixmap *pixmap, int x0, int y0, int x1, int y1, tColor colorfg, t
+      }
+ }
+ 
+-void DrawTrack(cOsd *osd, int x0, int y0, int x1, int y1, tColor colorfg, tColor colorbg, const cFont *font, tTrackId *lastTrackId, int Alignment)
++void DrawTrack(cOsd *osd, cPixmap *pixmap, int x0, int y0, int x1, int y1, tColor colorfg, tColor colorbg, const cFont *font, tTrackId *lastTrackId, int Alignment)
+ {
+   cDevice *Device = cDevice::PrimaryDevice();
+   const tTrackId *Track = Device->GetTrack(Device->GetCurrentAudioTrack());
+   if (Track ? strcmp(lastTrackId->description, Track->description) : *lastTrackId->description) {
+-     osd->DrawText(x0, y0, Track ? Track->description : "", colorfg, colorbg, font, x1 - x0, y1 - y0, Alignment);
+-     strn0cpy(lastTrackId->description, Track ? Track->description : "", sizeof(lastTrackId->description));
+-     }
+-}
+-
+-void DrawTrack(cPixmap *pixmap, int x0, int y0, int x1, int y1, tColor colorfg, tColor colorbg, const cFont *font, tTrackId *lastTrackId, int Alignment)
+-{
+-  cDevice *Device = cDevice::PrimaryDevice();
+-  const tTrackId *Track = Device->GetTrack(Device->GetCurrentAudioTrack());
+-  if (Track ? strcmp(lastTrackId->description, Track->description) : *lastTrackId->description) {
+-     pixmap->DrawText(cPoint(x0, y0), Track ? Track->description : "", colorfg, colorbg, font, x1 - x0, y1 - y0, Alignment);
++     if (pixmap)
++        pixmap->DrawText(cPoint(x0, y0), Track ? Track->description : "", colorfg, colorbg, font, x1 - x0, y1 - y0, Alignment);
++     else
++        osd->DrawText(x0, y0, Track ? Track->description : "", colorfg, colorbg, font, x1 - x0, y1 - y0, Alignment);
+      strn0cpy(lastTrackId->description, Track ? Track->description : "", sizeof(lastTrackId->description));
+      }
+ }
+diff --git a/tools.h b/tools.h
+index 98234f0..3c35142 100644
+--- a/tools.h
++++ b/tools.h
+@@ -53,8 +53,7 @@ int GetLiveBuffer(void);
+ 
+ void DrawDate(cOsd *osd, int x0, int y0, int x1, int y1, tColor colorfg, tColor colorbg, const cFont *font, cString *lastDate);
+ void DrawDate(cPixmap *pixmap, int x0, int y0, int x1, int y1, tColor colorfg, tColor colorbg, const cFont *font, cString *lastDate);
+-void DrawTrack(cOsd *osd, int x0, int y0, int x1, int y1, tColor colorfg, tColor colorbg, const cFont *font, tTrackId *lastTrackId, int Alignment = taDefault);
+-void DrawTrack(cPixmap *pixmap, int x0, int y0, int x1, int y1, tColor colorfg, tColor colorbg, const cFont *font, tTrackId *lastTrackId, int Alignment = taDefault);
++void DrawTrack(cOsd *osd, cPixmap *pixmap, int x0, int y0, int x1, int y1, tColor colorfg, tColor colorbg, const cFont *font, tTrackId *lastTrackId, int Alignment = taDefault);
+ void DrawScreenResolution(cOsd *osd, int x0, int y0, int x1, int y1, tColor colorfg, tColor colorbg, const cFont *font, cString *oldResolution);
+ void DrawScreenResolution(cPixmap *pixmap, int x0, int y0, int x1, int y1, tColor colorfg, tColor colorbg, const cFont *font, cString resolution, cString *oldResolution);
+ 
+-- 
+2.47.3
+

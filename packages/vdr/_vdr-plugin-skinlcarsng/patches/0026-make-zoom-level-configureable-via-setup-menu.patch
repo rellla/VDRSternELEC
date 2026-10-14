@@ -1,0 +1,129 @@
+From 332f02cbc191e9e3e64cd2ef2aeedf30a068c1fb Mon Sep 17 00:00:00 2001
+From: Andreas Baierl <ichgeh@imkreisrum.de>
+Date: Tue, 13 Oct 2026 20:39:06 +0200
+Subject: [PATCH] make zoom level configureable via setup menu
+
+---
+ config.c      |  2 ++
+ config.h      |  1 +
+ displaymenu.c | 26 ++++++++++++++++----------
+ setup.c       |  7 +++++++
+ setup.h       |  1 +
+ 5 files changed, 27 insertions(+), 10 deletions(-)
+
+diff --git a/config.c b/config.c
+index 717376a..ea0ad4b 100644
+--- a/config.c
++++ b/config.c
+@@ -59,6 +59,7 @@ cLCARSNGConfig::cLCARSNGConfig(void)
+   mcFolderScaled = efullscreen;
+   mcCamScaled = efullscreen;
+   mcDefaultScaled = efullscreen;
++  displZoomLevel = 0;
+   displayGrid = 0;
+ }
+ 
+@@ -105,6 +106,7 @@ bool cLCARSNGConfig::SetupParse(const char *Name, const char *Value)
+ //  else if (!strcasecmp(Name, "FolderMenue"))        mcFolderScaled     = atoi(Value);
+ //  else if (!strcasecmp(Name, "CamMenue"))           mcCamScaled        = atoi(Value);
+   else if (!strcasecmp(Name, "DefaultMenue"))       mcDefaultScaled    = atoi(Value);
++  else if (!strcasecmp(Name, "DisplZoomLevel"))     displZoomLevel     = atoi(Value);
+   else if (!strcasecmp(Name, "DisplayGrid"))        displayGrid        = atoi(Value);
+   else
+      return false;
+diff --git a/config.h b/config.h
+index 88df16c..1595310 100644
+--- a/config.h
++++ b/config.h
+@@ -65,6 +65,7 @@ public:
+   int mcFolderScaled;
+   int mcCamScaled;
+   int mcDefaultScaled;
++  int displZoomLevel;
+   int displayGrid;
+   bool SetupParse(const char *Name, const char *Value);
+   cLCARSNGConfig(void);
+diff --git a/displaymenu.c b/displaymenu.c
+index fdbbac4..b5c5f71 100644
+--- a/displaymenu.c
++++ b/displaymenu.c
+@@ -86,17 +86,23 @@ cLCARSNGDisplayMenu::cLCARSNGDisplayMenu(void)
+   int r = lineHeight;
+   xd07 = xa09 - Gap;
+   xd00 = xd07 - Gap - 16 * r;
+-  if ((float)(xd07 - xd00) / (float)xa09 > 0.52) {
+-     dsyslog ("skinlcarsng: Zoomfactor = 3");
+-     zoom = 3;
+-     }
+-  else if ((float)(xd07 - xd00) / (float)xa09 > 0.4) {
+-     dsyslog ("skinlcarsng: Zoomfactor = 2");
+-     zoom = 2;
++
++  if (Config.displZoomLevel == 0) {
++     if ((float)(xd07 - xd00) / (float)xa09 > 0.52) {
++        dsyslog ("skinlcarsng: Zoomfactor = 3");
++        zoom = 3;
++        }
++     else if ((float)(xd07 - xd00) / (float)xa09 > 0.4) {
++        dsyslog ("skinlcarsng: Zoomfactor = 2");
++        zoom = 2;
++        }
++     else if ((float)(xd07 - xd00) / (float)xa09 > 0.33) {
++        dsyslog ("skinlcarsng: Zoomfactor = 1");
++        zoom = 1;
++        }
+      }
+-  else if ((float)(xd07 - xd00) / (float)xa09 > 0.33) {
+-     dsyslog ("skinlcarsng: Zoomfactor = 1");
+-     zoom = 1;
++  else {
++     zoom = Config.displZoomLevel;
+      }
+ 
+   cLCARSNGDisplayMenu::SetCoordinateY(yt10);
+diff --git a/setup.c b/setup.c
+index 19da7bb..7334bf6 100644
+--- a/setup.c
++++ b/setup.c
+@@ -29,6 +29,11 @@ cLCARSNGSetup::cLCARSNGSetup() {
+   replayCutted[1] = tr("uncutted and cutted");
+   replayCutted[2] = tr("cutted");
+ 
++  zoomLevel[0] = tr("Auto");
++  zoomLevel[1] = tr("Zoom Level 1");
++  zoomLevel[2] = tr("Zoom Level 2");
++  zoomLevel[3] = tr("Zoom Level 3");
++
+   spacer = "   ";
+ 
+   Set();
+@@ -104,6 +109,7 @@ void cLCARSNGSetup::Set(void) {
+ //     Add(new cMenuEditStraItem(cString::sprintf("%s%s", *spacer, tr("Folder menue")),                               &tmpConfig.mcFolderScaled));
+ //     Add(new cMenuEditStraItem(cString::sprintf("%s%s", *spacer, tr("Cam menue")),                                  &tmpConfig.mcCamScaled));
+      Add(new cMenuEditStraItem(cString::sprintf("%s%s", *spacer, tr("Default view")),                               &tmpConfig.mcDefaultScaled, 4, menuView));            
++     Add(new cMenuEditStraItem(cString::sprintf("%s%s", *spacer, tr("Zoom level")),                                 &tmpConfig.displZoomLevel, 4, zoomLevel));
+      }
+ 
+ #ifdef DRAWGRID
+@@ -191,5 +197,6 @@ void cLCARSNGSetup::Store(void) {
+ //  SetupStore("FolderMenue",        Config.mcFolderScaled);
+ //  SetupStore("CamMenue",           Config.mcCamScaled);
+   SetupStore("DefaultMenue",       Config.mcDefaultScaled);
++  SetupStore("DisplZoomLevel",     Config.displZoomLevel);
+   SetupStore("DisplayGrid",        Config.displayGrid);
+ }
+diff --git a/setup.h b/setup.h
+index fbc7f82..d0534e9 100644
+--- a/setup.h
++++ b/setup.h
+@@ -8,6 +8,7 @@ private:
+   const char *infoChannel[3];
+   const char *replayEnd[2];
+   const char *replayCutted[3];
++  const char *zoomLevel[4];
+   int oldcategorie = 0;
+   int categorie = 0;
+ protected:
+-- 
+2.47.3
+

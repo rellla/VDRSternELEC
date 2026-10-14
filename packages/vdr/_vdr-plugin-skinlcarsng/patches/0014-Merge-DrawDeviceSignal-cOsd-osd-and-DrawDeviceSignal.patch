@@ -1,0 +1,137 @@
+From 7f64228384fea85056442448f2863fbaf9d9f467 Mon Sep 17 00:00:00 2001
+From: kamel5 <vdr.kamel5 (at) gmx (dot) net>
+Date: Sun, 7 Jun 2026 17:48:12 +0200
+Subject: [PATCH] Merge  DrawDeviceSignal(cOsd *osd) and 
+ DrawDeviceSignal(cPixmap *pixmap)
+
+---
+ displaychannel.c |  2 +-
+ displaymenu.c    |  2 +-
+ tools.c          | 59 ++++++++++++++----------------------------------
+ tools.h          |  3 +--
+ 4 files changed, 20 insertions(+), 46 deletions(-)
+
+diff --git a/displaychannel.c b/displaychannel.c
+index 6300e29..a1ec7fc 100644
+--- a/displaychannel.c
++++ b/displaychannel.c
+@@ -354,7 +354,7 @@ void cLCARSNGDisplayChannel::DrawSignal(void)
+ {
+   time_t Now = time(NULL);
+   if (Now != lastSignalDisplay) {
+-     DrawDeviceSignal(osd, cDevice::ActualDevice(), xs + lineHeight / 2, yc15, xc09, yc16, lastSignalStrength, lastSignalQuality, initial);
++     DrawDeviceSignal(osd, nullptr, cDevice::ActualDevice(), xs + lineHeight / 2, yc15, xc09, yc16, lastSignalStrength, lastSignalQuality, initial);
+      lastSignalDisplay = Now;
+      }
+ }
+diff --git a/displaymenu.c b/displaymenu.c
+index 744ead1..1d42ba5 100644
+--- a/displaymenu.c
++++ b/displaymenu.c
+@@ -1068,7 +1068,7 @@ void cLCARSNGDisplayMenu::DrawSignals(void)
+          if (const cDevice *Device = cDevice::GetDevice(i)) {
+             if (Device->NumProvidedSystems()) {
+                if (int y = deviceOffset[i])
+-                  DrawDeviceSignal(osd, Device, xs + lineHeight / 2, y, xs11, y + lineHeight, lastSignalStrength[i], lastSignalQuality[i], initial);
++                  DrawDeviceSignal(osd, nullptr, Device, xs + lineHeight / 2, y, xs11, y + lineHeight, lastSignalStrength[i], lastSignalQuality[i], initial);
+                }
+             }
+          }
+diff --git a/tools.c b/tools.c
+index 7f14a98..42166d4 100644
+--- a/tools.c
++++ b/tools.c
+@@ -156,44 +156,7 @@ bool DrawDeviceData(cOsd *Osd, cPixmap *Pixmap, const cDevice *Device, int x0, i
+   return false;
+ }
+ 
+-void DrawDeviceSignal(cPixmap *Pixmap, const cDevice *Device, int x, int y, int w, int h, int &LastSignalStrength, int &LastSignalQuality, bool Initial)
+-{
+-  if (!Pixmap)
+-     return;
+-
+-  int SignalStrength = Device->SignalStrength();
+-  int SignalQuality = Device->SignalQuality();
+-  int d = max(h / 10, 1);
+-  int x00 = x + d;
+-  int x01 = w - d;
+-  int H = (h - 3 * d) / 2;
+-  int y00 = y + d;
+-  int y03 = y + h - d;
+-  int y02 = y03 - H;
+-  tColor ColorSignalValue, ColorSignalRest;
+-  if (TwoColors) {
+-     ColorSignalValue = Theme.Color(clrBackground);
+-     ColorSignalRest = Theme.Color(clrMenuFrameBg);
+-     }
+-  else {
+-     ColorSignalValue = Theme.Color(clrSignalValue);
+-     ColorSignalRest = Theme.Color(clrSignalRest);
+-     }
+-  if (SignalStrength >= 0 && (Initial || SignalStrength != LastSignalStrength)) {
+-     int s = SignalStrength * w / 100;
+-     Pixmap->DrawRectangle(cRect(x00, y00, s - d, H), ColorSignalValue);
+-     Pixmap->DrawRectangle(cRect(x00 + s, y00, x01 - s - d, H), ColorSignalRest);
+-     LastSignalStrength = SignalStrength;
+-     }
+-  if (SignalQuality >= 0 && (Initial || SignalQuality != LastSignalQuality)) {
+-     int q = SignalQuality * w / 100;
+-     Pixmap->DrawRectangle(cRect(x00, y02, q - d, H), ColorSignalValue);
+-     Pixmap->DrawRectangle(cRect(x00 + q, y02, x01 - q - d, H), ColorSignalRest);
+-     LastSignalQuality = SignalQuality;
+-     }
+-}
+-
+-void DrawDeviceSignal(cOsd *Osd, const cDevice *Device, int x0, int y0, int x1, int y1, int &LastSignalStrength, int &LastSignalQuality, bool Initial)
++void DrawDeviceSignal(cOsd *Osd, cPixmap *Pixmap, const cDevice *Device, int x0, int y0, int x1, int y1, int &LastSignalStrength, int &LastSignalQuality, bool Initial)
+ {
+   int SignalStrength = Device->SignalStrength();
+   int SignalQuality = Device->SignalQuality();
+@@ -217,14 +180,26 @@ void DrawDeviceSignal(cOsd *Osd, const cDevice *Device, int x0, int y0, int x1,
+      }
+   if (SignalStrength >= 0 && (Initial || SignalStrength != LastSignalStrength)) {
+      int s = SignalStrength * w / 100;
+-     Osd->DrawRectangle(x00, y00, x00 + s - 1, y01 - 1, ColorSignalValue);
+-     Osd->DrawRectangle(x00 + s, y00, x01 - 1, y01 - 1, ColorSignalRest);
++     if (Pixmap) {
++        Pixmap->DrawRectangle(cRect(x00, y00, s - d, h), ColorSignalValue);
++        Pixmap->DrawRectangle(cRect(x00 + s, y00, w - s - d, h), ColorSignalRest);
++        }
++     else {
++        Osd->DrawRectangle(x00, y00, x00 + s - 1, y01 - 1, ColorSignalValue);
++        Osd->DrawRectangle(x00 + s, y00, x01 - 1, y01 - 1, ColorSignalRest);
++        }
+      LastSignalStrength = SignalStrength;
+      }
+   if (SignalQuality >= 0 && (Initial || SignalQuality != LastSignalQuality)) {
+      int q = SignalQuality * w / 100;
+-     Osd->DrawRectangle(x00, y02, x00 + q - 1, y03 - 1, ColorSignalValue);
+-     Osd->DrawRectangle(x00 + q, y02, x01 - 1, y03 - 1, ColorSignalRest);
++     if (Pixmap) {
++        Pixmap->DrawRectangle(cRect(x00, y02, q - d, h), ColorSignalValue);
++        Pixmap->DrawRectangle(cRect(x00 + q, y02, w - q - d, h), ColorSignalRest);
++        }
++     else {
++        Osd->DrawRectangle(x00, y02, x00 + q - 1, y03 - 1, ColorSignalValue);
++        Osd->DrawRectangle(x00 + q, y02, x01 - 1, y03 - 1, ColorSignalRest);
++        }
+      LastSignalQuality = SignalQuality;
+      }
+ }
+diff --git a/tools.h b/tools.h
+index ba359a8..beca5b3 100644
+--- a/tools.h
++++ b/tools.h
+@@ -29,8 +29,7 @@ cOsd *CreateOsd(int Left, int Top, int x0, int y0, int x1, int y1);
+ cPixmap *CreatePixmap(cOsd *osd, cString Name = "", int Layer = 0, const cRect &ViewPort = cRect::Null, const cRect &DrawPort = cRect::Null);
+ cPixmap *DrawPoster(DrawPoster_t dP);
+ bool DrawDeviceData(cOsd *Osd, cPixmap *Pixmap, const cDevice *Device, int x0, int y0, int x1, int y1, int &xs, const cFont *TinyFont, cString &LastDeviceType, cCamSlot *&LastCamSlot, bool Initial);
+-void DrawDeviceSignal(cPixmap *Pixmap, const cDevice *Device, int x, int y, int w, int h, int &LastSignalStrength, int &LastSignalQuality, bool Initial);
+-void DrawDeviceSignal(cOsd *Osd, const cDevice *Device, int x0, int y0, int x1, int y1, int &LastSignalStrength, int &LastSignalQuality, bool Initial);
++void DrawDeviceSignal(cOsd *Osd, cPixmap *Pixmap, const cDevice *Device, int x0, int y0, int x1, int y1, int &LastSignalStrength, int &LastSignalQuality, bool Initial);
+ void DrawDevicePosition(cOsd *Osd, cPixmap *Pixmap, const cPositioner *Positioner, int x0, int y0, int x1, int y1, int &LastCurrent);
+ void PixmapSetAlpha(cPixmap *Pixmap, int Alpha);
+ void PixmapFill(cPixmap *Pixmap, tColor Color);
+-- 
+2.47.3
+

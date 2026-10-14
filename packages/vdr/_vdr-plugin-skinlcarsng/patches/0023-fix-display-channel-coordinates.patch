@@ -1,0 +1,28 @@
+From 61050b4e05e739e823f68a6be34a8670ff2bac2a Mon Sep 17 00:00:00 2001
+From: Andreas Baierl <ichgeh@imkreisrum.de>
+Date: Sat, 6 Jun 2026 17:08:30 +0200
+Subject: [PATCH] fix display channel coordinates
+
+---
+ displaychannel.c | 4 ++--
+ 1 file changed, 2 insertions(+), 2 deletions(-)
+
+diff --git a/displaychannel.c b/displaychannel.c
+index e9b2e71..88f8f8a 100644
+--- a/displaychannel.c
++++ b/displaychannel.c
+@@ -794,9 +794,9 @@ void cLCARSNGDisplayChannel::Flush(void)
+            Total = present->Duration();
+            }
+         DrawSeen(Current, Total);
+-        DrawTrack(osd, nullptr, xc14 + Margin, yc15 + Margin, xc18 - textBorder - 2 * Margin, yc16 - 2 * Margin,  Theme.Color(clrTrackName), frameColorBg, (zoom) ? smlFont : osdFont, &lastTrackId, taCenter | taRight | taBorder);
++        DrawTrack(osd, nullptr, xc14 + Margin, yc15 + Margin, xc18 - textBorder - Margin, yc16 - Margin,  Theme.Color(clrTrackName), frameColorBg, (zoom) ? smlFont : osdFont, &lastTrackId, taCenter | taRight | taBorder);
+         int x = leftIcons - SymbolSpacing;
+-        DrawScreenResolution(osd, nullptr, xc19 + Margin, yc15 + Margin, x - 2 * Margin, yc16 - 2 * Margin, Theme.Color(clrChannelSymbolOn), frameColorBg, (zoom) ? smlFont : osdFont, "", &oldResolution, taCenter | taRight | taBorder);
++        DrawScreenResolution(osd, nullptr, xc19 + Margin, yc15 + Margin, x - Margin, yc16 - Margin, Theme.Color(clrChannelSymbolOn), frameColorBg, (zoom) ? smlFont : osdFont, "", &oldResolution, taCenter | taRight | taBorder);
+ 	DrawEventRec(present, following);
+         DrawBlinkingRec();
+         }
+-- 
+2.47.3
+

@@ -1,0 +1,25 @@
+From 09c53f0ab389cc2bb1e2625a6eb08f22f3ed2f33 Mon Sep 17 00:00:00 2001
+From: kamel5 <vdr.kamel5 (at) gmx (dot) net>
+Date: Sun, 7 Jun 2026 14:04:22 +0200
+Subject: [PATCH] Cleanup
+
+---
+ tools.c | 2 --
+ 1 file changed, 2 deletions(-)
+
+diff --git a/tools.c b/tools.c
+index 8463797..61dbe65 100644
+--- a/tools.c
++++ b/tools.c
+@@ -781,8 +781,6 @@ void DrawScreenResolution(cOsd *osd, int x0, int y0, int x1, int y1, tColor colo
+ 
+   // Draw video format
+   if (!(strcmp(resolution, *oldResolution) == 0)) {
+-     esyslog ("skinlcarsng: %s %s %d %s\n", __FILE__, __func__,  __LINE__, *resolution);
+-     esyslog ("skinlcarsng: %s %s %d %i %i\n", __FILE__, __func__,  __LINE__, x0, x1);
+      osd->DrawText(x0, y0, cString::sprintf("%s", *resolution), colorfg, colorbg, font, x1 - x0, y1 - y0, Alignment);
+      *oldResolution = *resolution;
+      }
+-- 
+2.47.3
+

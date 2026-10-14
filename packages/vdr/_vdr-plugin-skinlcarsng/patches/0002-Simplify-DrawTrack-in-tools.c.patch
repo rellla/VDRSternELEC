@@ -1,0 +1,30 @@
+From b8b965d0a613bc34dde12f4f18556ab62fab12b5 Mon Sep 17 00:00:00 2001
+From: kamel5 <vdr.kamel5 (at) gmx (dot) net>
+Date: Sun, 7 Jun 2026 13:05:03 +0200
+Subject: [PATCH] Simplify DrawTrack() in tools.c
+
+---
+ tools.c | 7 +------
+ 1 file changed, 1 insertion(+), 6 deletions(-)
+
+diff --git a/tools.c b/tools.c
+index d5e7ad4..d197135 100644
+--- a/tools.c
++++ b/tools.c
+@@ -777,12 +777,7 @@ void DrawTrack(cPixmap *pixmap, int x0, int y0, int x1, int y1, tColor colorfg,
+   cDevice *Device = cDevice::PrimaryDevice();
+   const tTrackId *Track = Device->GetTrack(Device->GetCurrentAudioTrack());
+   if (Track ? strcmp(lastTrackId->description, Track->description) : *lastTrackId->description) {
+-     int lineHeight = font->Height();
+-     int textBorder = lineHeight * TEXT_ALIGN_BORDER / 100;
+-     const char *text = Track ? Track->description : "";
+-     int w = font->Width(text) + 2 * textBorder;
+-     pixmap->DrawRectangle(cRect(x0, y0, x1 - x0, y1 - y0), Theme.Color(clrBackground));
+-     pixmap->DrawText(cPoint(x0, y0), Track ? Track->description : "", colorfg, colorbg, font, w, y1 - y0, taLeft | taBorder);
++     pixmap->DrawText(cPoint(x0, y0), Track ? Track->description : "", colorfg, colorbg, font, x1 - x0, y1 - y0, taLeft | taBorder);
+      strn0cpy(lastTrackId->description, Track ? Track->description : "", sizeof(lastTrackId->description));
+      }
+ }
+-- 
+2.47.3
+

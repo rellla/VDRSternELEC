@@ -1,0 +1,579 @@
+From 579ebdbd32da5bf7b7d8b7f0e04f4e7e845918f4 Mon Sep 17 00:00:00 2001
+From: kamel5 <vdr.kamel5 (at) gmx (dot) net>
+Date: Sun, 7 Jun 2026 18:52:15 +0200
+Subject: [PATCH] Merge DrawEllipseOutline(cOsd *osd) and
+ DrawEllipseOutline(cPixmap *pixmap)
+
+---
+ displaychannel.c |  52 ++++++++--------
+ displaymenu.c    |  38 ++++++------
+ displayreplay.c  |  12 ++--
+ displaytracks.c  |  14 ++---
+ messagebox.c     |   4 +-
+ tools.c          | 153 ++++++++++++++++++++++-------------------------
+ tools.h          |   3 +-
+ 7 files changed, 134 insertions(+), 142 deletions(-)
+
+diff --git a/displaychannel.c b/displaychannel.c
+index 1beb659..80f9bc0 100644
+--- a/displaychannel.c
++++ b/displaychannel.c
+@@ -186,53 +186,53 @@ cLCARSNGDisplayChannel::cLCARSNGDisplayChannel(bool WithInfo) : cThread("LCARS D
+      DrawRectangleOutline(osd, nullptr, xc00, yc01, xc02 - 1, yc06 - 1, frameColorBr, frameColorBg, 13);
+      DrawRectangleOutline(osd, nullptr, xc02, yc00, xc05 - 1, yc01 - 1, frameColorBr, frameColorBg, 14);
+      osd->DrawRectangle(xc00, yc00, xc01 - 1, yc04 - 1, clrTransparent);
+-     DrawEllipseOutline(osd, xc00, yc00, xc01 - 1, yc04 - 1, frameColorBr, frameColorBg, 2);
+-     DrawEllipseOutline(osd, xc02, yc01, xc03 - 1, yc03 - 1, frameColorBr, frameColorBg, -2);
++     DrawEllipseOutline(osd, nullptr, xc00, yc00, xc01 - 1, yc04 - 1, frameColorBr, frameColorBg, 2);
++     DrawEllipseOutline(osd, nullptr, xc02, yc01, xc03 - 1, yc03 - 1, frameColorBr, frameColorBg, -2);
+      // Lower Elbow:
+      DrawRectangleOutline(osd, nullptr, xc00, yc10, xc02 - 1, yc15 - 1, frameColorBr, frameColorBg, 7);
+      DrawRectangleOutline(osd, nullptr, xc00, yc15, xc02 - 1, yc16 - 1, frameColorBr, frameColorBg, 8);
+      DrawRectangleOutline(osd, nullptr, xc02, yc15, xc05 - 1, yc16 - 1, frameColorBr, frameColorBg, 14);
+      osd->DrawRectangle(xc00, yc13, xc01 - 1, yc16 - 1, clrTransparent);
+-     DrawEllipseOutline(osd, xc00, yc13, xc01 - 1, yc16 - 1, frameColorBr, frameColorBg, 3);
+-     DrawEllipseOutline(osd, xc02, yc14, xc03 - 1, yc15 - 1, frameColorBr, frameColorBg, -3);
++     DrawEllipseOutline(osd, nullptr, xc00, yc13, xc01 - 1, yc16 - 1, frameColorBr, frameColorBg, 3);
++     DrawEllipseOutline(osd, nullptr, xc02, yc14, xc03 - 1, yc15 - 1, frameColorBr, frameColorBg, -3);
+      // Status area:
+      DrawRectangleOutline(osd, nullptr, xc14, yc15, xc18 - 1, yc16 - 1, frameColorBr, frameColorBg, 15);
+      DrawRectangleOutline(osd, nullptr, xc23, yc15, xc23 + lineHeight / 2 + Margin - 1, yc16 - 1, frameColorBr, frameColorBg, 11);
+      osd->DrawRectangle(xc23 + lineHeight / 2 + Margin, yc15 + lineHeight / 2, xc24 - 1, yc16 - 1, clrTransparent);
+-     DrawEllipseOutline(osd, xc23 + lineHeight / 2 + Margin, yc15, xc24 - 1, yc16 - 1, frameColorBr,frameColorBg,  5);
++     DrawEllipseOutline(osd, nullptr, xc23 + lineHeight / 2 + Margin, yc15, xc24 - 1, yc16 - 1, frameColorBr,frameColorBg,  5);
+      // Status area tail middle:
+      if (!Config.swapTimers) {
+         // Middle left middle
+         DrawRectangleOutline(osd, nullptr, xc11 - lineHeight / 2, yc08 - Margin, xc11 - 1, yc09 - 1, frameColorBr, frameColorBg, 13);
+         DrawRectangleOutline(osd, nullptr, xc10, yc07, xc11 - lineHeight / 2 - 1, yc08 - 1, frameColorBr, frameColorBg, 9);
+         osd->DrawRectangle(xc10 + Margin, yc07, xc11 - lineHeight / 2 - 1, yc07 + lineHeight / 2 - 1, Theme.Color(clrBackground));
+-        DrawEllipseOutline(osd, xc10 + Margin, yc07, xc11 - 1, yc08 - Margin - 1, frameColorBr, frameColorBg, 1);
+-        DrawEllipseOutline(osd, xc10 + Margin, yc08 - 1, xc11 - lineHeight / 2 - 1, yc08 + lineHeight / 2 - 1, frameColorBr, frameColorBg, -1);
++        DrawEllipseOutline(osd, nullptr, xc10 + Margin, yc07, xc11 - 1, yc08 - Margin - 1, frameColorBr, frameColorBg, 1);
++        DrawEllipseOutline(osd, nullptr, xc10 + Margin, yc08 - 1, xc11 - lineHeight / 2 - 1, yc08 + lineHeight / 2 - 1, frameColorBr, frameColorBg, -1);
+         // Middle left bottom
+         DrawRectangleOutline(osd, nullptr, xc11 - lineHeight / 2, yc10, xc11 - 1, yc15 + Margin - 1, frameColorBr, frameColorBg, 7);
+         DrawRectangleOutline(osd, nullptr, xc10, yc15, xc11 - lineHeight / 2 - 1, yc16 - 1, frameColorBr, frameColorBg, 3);
+         osd->DrawRectangle(xc10 + Margin, yc15 + lineHeight / 2, xc11 - lineHeight / 2 - 1, yc16 - 1, Theme.Color(clrBackground));
+-        DrawEllipseOutline(osd, xc10 + Margin, yc15 + Margin, xc11 - 1, yc16 - 1, frameColorBr, frameColorBg, 4);
+-        DrawEllipseOutline(osd, xc10, yc15 - lineHeight / 2, xc11 - lineHeight / 2 - 1, yc15, frameColorBr, frameColorBg, -4);
++        DrawEllipseOutline(osd, nullptr, xc10 + Margin, yc15 + Margin, xc11 - 1, yc16 - 1, frameColorBr, frameColorBg, 4);
++        DrawEllipseOutline(osd, nullptr, xc10, yc15 - lineHeight / 2, xc11 - lineHeight / 2 - 1, yc15, frameColorBr, frameColorBg, -4);
+         //Middle right top
+         DrawRectangleOutline(osd, nullptr, xc12, yc02 + lineHeight + Margin, xc12 + lineHeight / 2 - 1, yc06 - 1, frameColorBr, frameColorBg, 13);
+         DrawRectangleOutline(osd, nullptr, xc13 - lineHeight / 2, yc02, xc13 - 1, yc05 - 1, frameColorBr, frameColorBg, 12);
+         osd->DrawRectangle(xc13 - lineHeight / 2, yc02, xc13 - Margin - 1, yc02 + lineHeight / 2 - 1, Theme.Color(clrBackground));
+-        DrawEllipseOutline(osd, xc12, yc02, xc13 - Margin - 1, yc05 - Margin - 1, frameColorBr, frameColorBg, 2);
+-        DrawEllipseOutline(osd, xc12 + lineHeight / 2, yc05 - 1, xc13 - Margin - 1, yc05 + lineHeight / 2 - 1, frameColorBr, frameColorBg, -2);
++        DrawEllipseOutline(osd, nullptr, xc12, yc02, xc13 - Margin - 1, yc05 - Margin - 1, frameColorBr, frameColorBg, 2);
++        DrawEllipseOutline(osd, nullptr, xc12 + lineHeight / 2, yc05 - 1, xc13 - Margin - 1, yc05 + lineHeight / 2 - 1, frameColorBr, frameColorBg, -2);
+         // Middle right middle
+         DrawRectangleOutline(osd, nullptr, xc12, yc07, xc12 + lineHeight / 2 - 1, yc09 - 1, frameColorBr, frameColorBg, 15);
+         DrawRectangleOutline(osd, nullptr, xc13 - lineHeight / 2, yc07, xc13 - 1, yc08 - 1, frameColorBr, frameColorBg, 12);
+         osd->DrawRectangle(xc13 - lineHeight / 2, yc07, xc13 - Margin - 1, yc07 + lineHeight / 2 - 1, Theme.Color(clrBackground));
+-        DrawEllipseOutline(osd, xc12, yc07, xc13 - Margin - 1, yc08 - Margin - 1, frameColorBr, frameColorBg, 2);
+-        DrawEllipseOutline(osd, xc12 + lineHeight / 2, yc08 - 1, xc13 - Margin - 1, yc08 + lineHeight / 2 - 1, frameColorBr, frameColorBg, -2);
++        DrawEllipseOutline(osd, nullptr, xc12, yc07, xc13 - Margin - 1, yc08 - Margin - 1, frameColorBr, frameColorBg, 2);
++        DrawEllipseOutline(osd, nullptr, xc12 + lineHeight / 2, yc08 - 1, xc13 - Margin - 1, yc08 + lineHeight / 2 - 1, frameColorBr, frameColorBg, -2);
+         osd->DrawRectangle(xc12 + Margin, yc07 + Margin, xc12 + lineHeight / 2 - 1 - Margin, yc09 - 1 - Margin, frameColorBg);
+         // Middle right bottom
+         DrawRectangleOutline(osd, nullptr, xc12, yc10, xc12 + lineHeight / 2 - 1, yc15 + Margin - 1, frameColorBr, frameColorBg, 7);
+         DrawRectangleOutline(osd, nullptr, xc12 + lineHeight / 2, yc15, xc13 - 1, yc16 - 1, frameColorBr, frameColorBg, 6);
+         osd->DrawRectangle(xc12 + lineHeight / 2, yc15 + lineHeight / 2, xc13 - Margin - 1, yc16 - 1, Theme.Color(clrBackground));
+-        DrawEllipseOutline(osd, xc12, yc15 + Margin, xc13 - Margin - 1, yc16 - 1, frameColorBr, frameColorBg, 3);
+-        DrawEllipseOutline(osd, xc12 + lineHeight / 2, yc15 - lineHeight / 2, xc13 - Margin - 1, yc15 - 1, frameColorBr, frameColorBg, -3);
++        DrawEllipseOutline(osd, nullptr, xc12, yc15 + Margin, xc13 - Margin - 1, yc16 - 1, frameColorBr, frameColorBg, 3);
++        DrawEllipseOutline(osd, nullptr, xc12 + lineHeight / 2, yc15 - lineHeight / 2, xc13 - Margin - 1, yc15 - 1, frameColorBr, frameColorBg, -3);
+         // Middle
+         DrawRectangleOutline(osd, nullptr, xc14, yc02, xc15 - 1, yc05 - 1, frameColorBr, frameColorBg, 15); // "Event time 1"
+         DrawRectangleOutline(osd, nullptr, xc14, yc07, xc15 - 1, yc08 - 1, frameColorBr, frameColorBg, 15); // "Event time 2"
+@@ -241,25 +241,25 @@ cLCARSNGDisplayChannel::cLCARSNGDisplayChannel(bool WithInfo) : cThread("LCARS D
+         // Top Right:
+         DrawRectangleOutline(osd, nullptr, xc23, yc00, xc23 + lineHeight / 2 + Margin - 1, yc01 - 1, frameColorBr, frameColorBg, 11);
+         osd->DrawRectangle(xc23 + lineHeight / 2 + Margin, yc00, xc24 - 1, yc00 + lineHeight / 2 - 1, clrTransparent);
+-        DrawEllipseOutline(osd, xc23 + lineHeight / 2 + Margin, yc00, xc24 - 1, yc01 - 1, frameColorBr, frameColorBg, 5);
++        DrawEllipseOutline(osd, nullptr, xc23 + lineHeight / 2 + Margin, yc00, xc24 - 1, yc01 - 1, frameColorBr, frameColorBg, 5);
+         }
+      else {
+         // Middle right top, Timer title
+         int ytt1 = yc02 + lineHeight / 3;
+         int ytt2 = yc05 + lineHeight / 3;
+-        DrawEllipseOutline(osd, xc12, ytt1, xc13 - lineHeight / 2 - 1, ytt2 - 1, frameColorBr, frameColorBg, 7);
++        DrawEllipseOutline(osd, nullptr, xc12, ytt1, xc13 - lineHeight / 2 - 1, ytt2 - 1, frameColorBr, frameColorBg, 7);
+         DrawRectangleOutline(osd, nullptr, xc12 + lineHeight / 2, ytt1, xc13 - 1, ytt2 - 1, frameColorBr, frameColorBg, 14);
+         DrawRectangleOutline(osd, nullptr, xc14, ytt1, xc15 - 1, ytt2 - 1, frameColorBr, frameColorBg, 15);
+         DrawRectangleOutline(osd, nullptr, xc15 + Gap, ytt1, xc22 - 1, ytt2 - 1, frameColorBr, frameColorBg, 15);
+         DrawRectangleOutline(osd, nullptr, xc23, ytt1, xc23 + lineHeight / 2 - 1, ytt2 - 1, frameColorBr, frameColorBg, 11);
+-        DrawEllipseOutline(osd, xc23 + lineHeight / 2, ytt1, xc24 - 1, ytt2 - 1, frameColorBr, frameColorBg, 5);
++        DrawEllipseOutline(osd, nullptr, xc23 + lineHeight / 2, ytt1, xc24 - 1, ytt2 - 1, frameColorBr, frameColorBg, 5);
+         osd->DrawText(xc14 + Margin, ytt1 + Margin, "Timer", frameColorFg, frameColorBg, osdFont, xc15 - xc14 - 1 - 2 * Margin, ytt2 - ytt1 - 1 - 2 * Margin, taRight | taBorder);
+         // Bottom middle
+         DrawRectangleOutline(osd, nullptr, xc10, yc15, xc13 - 1, yc16 - 1, frameColorBr, frameColorBg, 15);
+         // Top Right:
+         DrawRectangleOutline(osd, nullptr, xc23, yc00, xc23 + lineHeight / 2 + Margin - 1, yc01 - 1, Theme.Color(clrDateBg), Theme.Color(clrDateBg), 11);
+         osd->DrawRectangle(xc23 + lineHeight / 2 + Margin, yc00, xc24 - 1, yc00 + lineHeight / 2 - 1, clrTransparent);
+-        DrawEllipseOutline(osd, xc23 + lineHeight / 2 + Margin, yc00, xc24 - 1, yc01 - 1, Theme.Color(clrDateBg), Theme.Color(clrDateBg), 5);
++        DrawEllipseOutline(osd, nullptr, xc23 + lineHeight / 2 + Margin, yc00, xc24 - 1, yc01 - 1, Theme.Color(clrDateBg), Theme.Color(clrDateBg), 5);
+         }
+      }
+   else {
+@@ -474,7 +474,7 @@ void cLCARSNGDisplayChannel::DrawTimer(void)
+                     recColorBg = Theme.Color(clrChannelSymbolRecBg);
+                     recColorBr = Theme.Color(clrChannelSymbolRecBg);
+                  }
+-                 DrawEllipseOutline(osd, xc12, y - yrel, xc12 + smlLineHeight / 2 - 1, y + smlLineHeight + yrel - 1, recColorBr, recColorBg, 7);
++                 DrawEllipseOutline(osd, nullptr, xc12, y - yrel, xc12 + smlLineHeight / 2 - 1, y + smlLineHeight + yrel - 1, recColorBr, recColorBg, 7);
+                  DrawRectangleOutline(osd, nullptr, xc12 + smlLineHeight / 2, y - yrel, xc13 - 1,  y + smlLineHeight + yrel - 1, recColorBr, recColorBg, 14);
+                  DrawRectangleOutline(osd, nullptr, xc14, y - yrel, xc15 - 1,  y + smlLineHeight + yrel - 1, recColorBr, recColorBg, 15);
+                  osd->DrawText(xc14 + Gap, y, cString::sprintf("%d", Channel->Number()), frameColorFg, recColorBg, smlFont, xc15 - xc14 - 2 * Gap - 1, smlLineHeight, taRight | taBorder);
+@@ -895,26 +895,26 @@ void cDrawChannelDescription::DrawBracket(int height)
+ 
+   // Upper Elbow part 1:
+   DrawRectangle(BracketPixmap, 0, 0, xy, xy, clrTransparent);
+-  DrawEllipseOutline(BracketPixmap, 0, 0, x1, xy, aI.frameColorBr, aI.frameColorBg, 2);
++  DrawEllipseOutline(nullptr, BracketPixmap, 0, 0, x1, xy, aI.frameColorBr, aI.frameColorBg, 2);
+   // Lower Elbow part 1:
+   DrawRectangle(BracketPixmap, 0, y1 - xy, xy, y1, clrTransparent);
+-  DrawEllipseOutline(BracketPixmap, 0, y1 - xy, x1, y1, aI.frameColorBr, aI.frameColorBg, 3);
++  DrawEllipseOutline(nullptr, BracketPixmap, 0, y1 - xy, x1, y1, aI.frameColorBr, aI.frameColorBg, 3);
+ 
+   DrawRectangle(BracketPixmap, x1 - Margin, yh, x1, y1 - yh, aI.frameColorBr);
+ 
+   // Upper Elbow part 2:
+-  DrawEllipseOutline(BracketPixmap, x1, yh, x1 + yh, xy, aI.frameColorBr, aI.frameColorBg, -2);
++  DrawEllipseOutline(nullptr, BracketPixmap, x1, yh, x1 + yh, xy, aI.frameColorBr, aI.frameColorBg, -2);
+   // Lower Elbow part 2:
+-  DrawEllipseOutline(BracketPixmap, x1, y1 - xy, x1 + yh, y1 - yh, aI.frameColorBr, aI.frameColorBg, -3);
++  DrawEllipseOutline(nullptr, BracketPixmap, x1, y1 - xy, x1 + yh, y1 - yh, aI.frameColorBr, aI.frameColorBg, -3);
+ 
+   // Top Right
+   DrawRectangleOutline(nullptr, BracketPixmap, x5, 0, x5 + xy / 2, xy, aI.frameColorBr, aI.frameColorBg, 11);
+   DrawRectangle(BracketPixmap, x5 + xy / 2, 0, x6, xy / 2, clrTransparent);
+-  DrawEllipseOutline(BracketPixmap, x5 + xy / 2, 0, x6, xy, aI.frameColorBr, aI.frameColorBg, 5);
++  DrawEllipseOutline(nullptr, BracketPixmap, x5 + xy / 2, 0, x6, xy, aI.frameColorBr, aI.frameColorBg, 5);
+   // Bottom Right
+   DrawRectangleOutline(nullptr, BracketPixmap, x5, y1 - xy, x5 + xy / 2, y1, aI.frameColorBr, aI.frameColorBg, 11);
+   DrawRectangle(BracketPixmap, x5 + xy / 2, y1 - xy / 2, x6, y1, clrTransparent);
+-  DrawEllipseOutline(BracketPixmap, x5 + xy / 2, y1 - xy, x6, y1, aI.frameColorBr, aI.frameColorBg, 5);
++  DrawEllipseOutline(nullptr, BracketPixmap, x5 + xy / 2, y1 - xy, x6, y1, aI.frameColorBr, aI.frameColorBg, 5);
+ }
+ 
+ void cDrawChannelDescription::Draw(void)
+diff --git a/displaymenu.c b/displaymenu.c
+index a844577..325698b 100644
+--- a/displaymenu.c
++++ b/displaymenu.c
+@@ -417,8 +417,8 @@ void cLCARSNGDisplayMenu::DrawMainFrameUpper(tColor Color, tColor ColorBg)
+   DrawRectangleOutline(osd, nullptr, xa00, yc00, xa01 - 1, yc01 - 1, Color, ColorBg, 3);
+   DrawRectangleOutline(osd, nullptr, xa01, yc00, xa02 - 1, yc05 - 1, Color, ColorBg, 14);
+   DrawRectangleOutline(osd, nullptr, xa02 - Margin, yc04, xa05 - 1, yc05 - 1, Color, ColorBg, 14);
+-  DrawEllipseOutline(osd, xa00, yc01, xa01 - 1, yc05 - 1, Color, ColorBg, 3);
+-  DrawEllipseOutline(osd, xa02, yc02, xa04 - 1, yc04 - 1, Color, ColorBg, -3);
++  DrawEllipseOutline(osd, nullptr, xa00, yc01, xa01 - 1, yc05 - 1, Color, ColorBg, 3);
++  DrawEllipseOutline(osd, nullptr, xa02, yc02, xa04 - 1, yc04 - 1, Color, ColorBg, -3);
+   if (viewmode == esplitscreen || (viewmode == efullscreen && (MenuCategory() == mcMain))) {
+      // Upper delimiter:
+      DrawRectangleOutline(osd, nullptr, xa06, yc04 + lineHeight / 2, xm08 - 1, yc05 - 1, Color, ColorBg, 15);
+@@ -443,12 +443,12 @@ void cLCARSNGDisplayMenu::DrawMainFrameUpper(tColor Color, tColor ColorBg)
+      if (!(viewmode == escaledvideosmall)) {
+         DrawRectangleOutline(osd, nullptr, x1, yt00, x2 - 1, yc04 - Gap - 1, Color, ColorBg, 15);
+         DrawRectangleOutline(osd, nullptr, xm04, yc04 + lineHeight / 2, x1 + Margin, yc05 - 1, Color, ColorBg, 11);
+-        DrawEllipseOutline(osd, x1, yc04 + Margin, x2 - 1, yc05 - 1, Color, ColorBg, 4);
++        DrawEllipseOutline(osd, nullptr, x1, yc04 + Margin, x2 - 1, yc05 - 1, Color, ColorBg, 4);
+ 	if (Margin) {
+            osd->DrawRectangle(x1, yc04, x1 + Margin, yc04 + lineHeight / 2 - 1, Color);
+            osd->DrawRectangle(x1, yc04, x2 - 1, yc04 + Margin - 1, Color);
+            }
+-        DrawEllipseOutline(osd, x1 - lineHeight / 2, yc04, x1, yc04 + lineHeight / 2, Color, ColorBg, -4);
++        DrawEllipseOutline(osd, nullptr, x1 - lineHeight / 2, yc04, x1, yc04 + lineHeight / 2, Color, ColorBg, -4);
+         }
+      else {
+         DrawRectangleOutline(osd, nullptr, xm04, yc04 + lineHeight / 2, xm08 - 1, yc05 - 1, Color, ColorBg, 15);
+@@ -472,8 +472,8 @@ void cLCARSNGDisplayMenu::DrawMainFrameLower(void)
+   DrawRectangleOutline(osd, nullptr, xa00, yc10, xa01 - 1, yc11 - 1, frameColorBr, frameColorBg, 9);
+   DrawRectangleOutline(osd, nullptr, xa01, yc06, xa02 - 1, yc11 - 1, frameColorBr, frameColorBg, 14);
+   DrawRectangleOutline(osd, nullptr, xa02 - Margin, yc06, xa05 - 1, yc07 - 1, frameColorBr, frameColorBg, 14);
+-  DrawEllipseOutline(osd, xa00, yc06, xa01 - 1, yc10 - 1, frameColorBr, frameColorBg, 2);
+-  DrawEllipseOutline(osd, xa02, yc07, xa04 - 1, yc09 - 1, frameColorBr, frameColorBg, -2);
++  DrawEllipseOutline(osd, nullptr, xa00, yc06, xa01 - 1, yc10 - 1, frameColorBr, frameColorBg, 2);
++  DrawEllipseOutline(osd, nullptr, xa02, yc07, xa04 - 1, yc09 - 1, frameColorBr, frameColorBg, -2);
+   // Lower delimiter:
+   if (!viewmode == escaledvideo && (MenuCategory() == mcMain)) {
+      DrawRectangleOutline(osd, nullptr, xa06, yc06, xm08 - 1, yc07 - lineHeight / 2 - 1, frameColorBr, frameColorBg, 15);
+@@ -498,12 +498,12 @@ void cLCARSNGDisplayMenu::DrawMainFrameChannel(void)
+   DrawRectangleOutline(osd, nullptr, xa00, yt05, xa01 - 1, yt06 - 1, frameColorBr, frameColorBg, 9);
+   DrawRectangleOutline(osd, nullptr, xa01, yt00, xa02 - 1, yt06 - 1, frameColorBr, frameColorBg, 14);
+   DrawRectangleOutline(osd, nullptr, xa02  - Margin, yt00, xa05 - 1, yt01 - 1, frameColorBr, frameColorBg, 14);
+-  DrawEllipseOutline(osd, xa00, yt00, xa01 - 1, yt05 - 1, frameColorBr, frameColorBg, 2);
+-  DrawEllipseOutline(osd, xa02, yt01, xa04 - 1, yt03 - 1, frameColorBr, frameColorBg, -2);
++  DrawEllipseOutline(osd, nullptr, xa00, yt00, xa01 - 1, yt05 - 1, frameColorBr, frameColorBg, 2);
++  DrawEllipseOutline(osd, nullptr, xa02, yt01, xa04 - 1, yt03 - 1, frameColorBr, frameColorBg, -2);
+   DrawRectangleOutline(osd, nullptr, xm02, yt00, xm03 -1, yt01 - 1, frameColorBr, frameColorBg, 15);
+   DrawRectangleOutline(osd, nullptr, xm04, yt00, xm07 - Gap - 1, yt01 - 1, frameColorBr, frameColorBg, 15);
+   DrawRectangleOutline(osd, nullptr, xm07, yt00, xm07 + lineHeight / 2 -1, yt01 - 1, frameColorBr, frameColorBg, 11);
+-  DrawEllipseOutline(osd, xm07 + lineHeight / 2, yt00, xm08 - 1, yt01 - 1, frameColorBr, frameColorBg, 5);
++  DrawEllipseOutline(osd, nullptr, xm07 + lineHeight / 2, yt00, xm08 - 1, yt01 - 1, frameColorBr, frameColorBg, 5);
+   // Center part:
+   DrawRectangleOutline(osd, nullptr, xa00, yc00, xa02 - 1, yc11 - 1, frameColorBr, frameColorBg, 15);
+   // VDR version:
+@@ -527,11 +527,11 @@ void cLCARSNGDisplayMenu::DrawMenuFrame(void)
+   DrawRectangleOutline(osd, nullptr, xa00, yt05, xa01 - 1, yt06 - 1, frameColorBr, frameColorBg, 9);
+   DrawRectangleOutline(osd, nullptr, xa01, yt00, xa02 - 1, yt06 - 1, frameColorBr, frameColorBg, 14);
+   DrawRectangleOutline(osd, nullptr, xa02 - Margin, yt00, xa05 - 1, yt01 - 1, frameColorBr, frameColorBg, 14);
+-  DrawEllipseOutline(osd, xa00, yt00, xa01 - 1, yt05 - 1, frameColorBr, frameColorBg, 2);
+-  DrawEllipseOutline(osd, xa02, yt01, xa04 - 1, yt03 - 1, frameColorBr, frameColorBg, -2);
++  DrawEllipseOutline(osd, nullptr, xa00, yt00, xa01 - 1, yt05 - 1, frameColorBr, frameColorBg, 2);
++  DrawEllipseOutline(osd, nullptr, xa02, yt01, xa04 - 1, yt03 - 1, frameColorBr, frameColorBg, -2);
+   DrawRectangleOutline(osd, nullptr, xa08, yt00, xa08 + lineHeight / 2 - 1, yt01 - 1, frameColorBr, frameColorBg, 11);
+   osd->DrawRectangle(xa08 + lineHeight / 2, yt00, xa09 - 1, yt00 + lineHeight / 2 - 1, clrTransparent);
+-  DrawEllipseOutline(osd, xa08 + lineHeight / 2, yt00, xa09 - 1, yt01 - 1, frameColorBr, frameColorBg, 5);
++  DrawEllipseOutline(osd, nullptr, xa08 + lineHeight / 2, yt00, xa09 - 1, yt01 - 1, frameColorBr, frameColorBg, 5);
+   // Center part:
+   DrawRectangleOutline(osd, nullptr, xa00, yc00, xa02 - 1, yc11 - 1, frameColorBr, frameColorBg, 15);
+   // Lower elbow:
+@@ -539,11 +539,11 @@ void cLCARSNGDisplayMenu::DrawMenuFrame(void)
+   DrawRectangleOutline(osd, nullptr, xa00, yb10, xa01 - 1, yb11 - 1, frameColorBr, frameColorBg, 3);
+   DrawRectangleOutline(osd, nullptr, xa01, yb10, xa02 - 1, yb15 - 1, frameColorBr, frameColorBg, 14);
+   DrawRectangleOutline(osd, nullptr, xa02 - Margin, yb14, xa05 - 1, yb15 - 1, frameColorBr, frameColorBg, 14);
+-  DrawEllipseOutline(osd, xa00, yb11, xa01 - 1, yb15 - 1, frameColorBr, frameColorBg, 3);
+-  DrawEllipseOutline(osd, xa02, yb12, xa04 - 1, yb14 - 1, frameColorBr, frameColorBg, -3);
++  DrawEllipseOutline(osd, nullptr, xa00, yb11, xa01 - 1, yb15 - 1, frameColorBr, frameColorBg, 3);
++  DrawEllipseOutline(osd, nullptr, xa02, yb12, xa04 - 1, yb14 - 1, frameColorBr, frameColorBg, -3);
+   DrawRectangleOutline(osd, nullptr, xa08, yb14, xa08 + lineHeight / 2 - 1, yb15 - 1, frameColorBr, frameColorBg, 11);
+   osd->DrawRectangle(xa08 + lineHeight / 2, yb14 + lineHeight / 2, xa09 - 1, yb15 - 1, clrTransparent);
+-  DrawEllipseOutline(osd, xa08 + lineHeight / 2, yb14, xa09 - 1, yb15 - 1, frameColorBr, frameColorBg, 5);
++  DrawEllipseOutline(osd, nullptr, xa08 + lineHeight / 2, yb14, xa09 - 1, yb15 - 1, frameColorBr, frameColorBg, 5);
+   osd->DrawText(xa00 + Margin, yb10 + Margin, cString::sprintf("%s-%s", "VDR", VDRVERSION), frameColorFg, frameColorBg, font, xa02 - xa00 - 2 * Margin, yb11 - yb10 - Margin, taTop | taRight | taBorder);
+   // Color buttons:
+   tColor lutBg[] = { clrButtonRedBg, clrButtonGreenBg, clrButtonYellowBg, clrButtonBlueBg };
+@@ -743,20 +743,20 @@ void cLCARSNGDisplayMenu::DrawStatusElbows(void)
+   osd->DrawRectangle(xs00, ys00, xs01 - 1, ys01 - 1, frameColorBr);
+   osd->DrawText     (xs00 + Margin, ys00 + Margin, tr("TIMERS"), frameColorFg, frameColorBg, font, xs01 - xs00 - 2 * Margin, lineHeight, taBottom | taLeft | taBorder);
+   DrawRectangleOutline(osd, nullptr, xs02, ys00, xs03 - 1, ys01 - 1, frameColorBr, frameColorBg, 11);
+-  DrawEllipseOutline(osd, xs03, ys00, xs05 - 1, ys01 - 1, frameColorBr, frameColorBg, 1);
++  DrawEllipseOutline(osd, nullptr, xs03, ys00, xs05 - 1, ys01 - 1, frameColorBr, frameColorBg, 1);
+   if (Margin)
+      osd->DrawRectangle(xs03, ys01 - Margin, xs04 - 1, ys01 - 1, frameColorBr);
+   DrawRectangleOutline(osd, nullptr, xs04, ys01 - Margin, xs05 - 1, ys03 - 1, frameColorBr, frameColorBg, 13);
+-  DrawEllipseOutline(osd, xs03, ys01, xs04 - 1, ys02 - 1, frameColorBr, frameColorBg, -1);
++  DrawEllipseOutline(osd, nullptr, xs03, ys01, xs04 - 1, ys02 - 1, frameColorBr, frameColorBg, -1);
+   DrawRectangleOutline(osd, nullptr, xs04, ys04, xs05 - 1, ys05 - 1, frameColorBr, frameColorBg, 15);
+   osd->DrawRectangle(xs10, ys00, xs11 - 1, ys01 - 1, frameColorBr);
+   osd->DrawText     (xs10 + Margin, ys00 + Margin, tr("DEVICES"), frameColorFg, frameColorBg, font, xs11 - xs10 - 2 * Margin, lineHeight, taBottom | taRight | taBorder);
+   DrawRectangleOutline(osd, nullptr, xs08, ys00, xs09 - 1, ys01 - 1, frameColorBr, frameColorBg, 14);
+-  DrawEllipseOutline(osd, xs06, ys00, xs08 - 1, ys01 - 1, frameColorBr, frameColorBg, 2);
++  DrawEllipseOutline(osd, nullptr, xs06, ys00, xs08 - 1, ys01 - 1, frameColorBr, frameColorBg, 2);
+   DrawRectangleOutline(osd, nullptr, xs06, ys01 - Margin, xs07 - 1, ys03 - 1, frameColorBr, frameColorBg, 13);
+   if (Margin)
+      osd->DrawRectangle(xs07, ys01 - Margin, xs08 - 1, ys01 - 1, frameColorBr);
+-  DrawEllipseOutline(osd, xs07, ys01, xs08 - 1, ys02 - 1, frameColorBr, frameColorBg, -2);
++  DrawEllipseOutline(osd, nullptr, xs07, ys01, xs08 - 1, ys02 - 1, frameColorBr, frameColorBg, -2);
+   DrawRectangleOutline(osd, nullptr, xs06, ys04, xs07 - 1, ys05 - 1, frameColorBr, frameColorBg, 15);
+   DrawRectangleOutline(osd, nullptr, xs12, ys00, xs13 - 1, ys01 - 1, frameColorBr, frameColorBg, 15);
+ }
+diff --git a/displayreplay.c b/displayreplay.c
+index b78126c..2917b63 100644
+--- a/displayreplay.c
++++ b/displayreplay.c
+@@ -141,15 +141,15 @@ cLCARSNGDisplayReplay::cLCARSNGDisplayReplay(bool ModeOnly) : cThread("LCARS Dis
+      DrawRectangleOutline(nullptr, ReplayPixmap, xp00, yp01, xp02, yp05, frameColorBr, frameColorBg, 13);
+      DrawRectangleOutline(nullptr, ReplayPixmap, xp02, yp00, xp05, yp01, frameColorBr, frameColorBg, 14);
+      DrawRectangle(ReplayPixmap, xp00, yp00, xp01, yp04, clrTransparent);
+-     DrawEllipseOutline(ReplayPixmap, xp00, yp00, xp01, yp04, frameColorBr, frameColorBg, 2);
+-     DrawEllipseOutline(ReplayPixmap, xp02, yp01, xp04, yp03, frameColorBr, frameColorBg, -2);
++     DrawEllipseOutline(nullptr, ReplayPixmap, xp00, yp00, xp01, yp04, frameColorBr, frameColorBg, 2);
++     DrawEllipseOutline(nullptr, ReplayPixmap, xp02, yp01, xp04, yp03, frameColorBr, frameColorBg, -2);
+      // Lower Elbow:
+      DrawRectangleOutline(nullptr, ReplayPixmap, xp00, yp08, xp02, yp11, frameColorBr, frameColorBg, 7);
+      DrawRectangleOutline(nullptr, ReplayPixmap, xp00, yp11, xp02, yp12, frameColorBr, frameColorBg, 8);
+      DrawRectangleOutline(nullptr, ReplayPixmap, xp02, yp11, xp05, yp12, frameColorBr, frameColorBg, 14);
+      DrawRectangle(ReplayPixmap, xp00, yp09, xp01, yp12, clrTransparent);
+-     DrawEllipseOutline(ReplayPixmap, xp00, yp09, xp01, yp12, frameColorBr, frameColorBg, 3);
+-     DrawEllipseOutline(ReplayPixmap, xp02, yp10, xp04, yp11, frameColorBr, frameColorBg, -3);
++     DrawEllipseOutline(nullptr, ReplayPixmap, xp00, yp09, xp01, yp12, frameColorBr, frameColorBg, 3);
++     DrawEllipseOutline(nullptr, ReplayPixmap, xp02, yp10, xp04, yp11, frameColorBr, frameColorBg, -3);
+      // Status area:
+      DrawRectangleOutline(nullptr, ReplayPixmap, xp06, yp11, xp07, yp12, frameColorBr, frameColorBg, 15);
+      DrawRectangleOutline(nullptr, ReplayPixmap, xp08, yp11, xp09, yp12, frameColorBr, frameColorBg, 15);
+@@ -157,11 +157,11 @@ cLCARSNGDisplayReplay::cLCARSNGDisplayReplay(bool ModeOnly) : cThread("LCARS Dis
+      DrawRectangleOutline(nullptr, ReplayPixmap, xp12, yp11, xp16, yp12, frameColorBr, frameColorBg, 15);
+      DrawRectangleOutline(nullptr, ReplayPixmap, xp17, yp11, xp17 + lineHeight / 2 + Margin, yp12, frameColorBr, frameColorBg, 11);
+      DrawRectangle(ReplayPixmap, xp17 + lineHeight / 2 + Margin, yp11 + lineHeight / 2, xp18, yp12, clrTransparent);
+-     DrawEllipseOutline(ReplayPixmap, xp17 + lineHeight / 2 + Margin, yp11, xp18, yp12, frameColorBr, frameColorBg, 5);
++     DrawEllipseOutline(nullptr, ReplayPixmap, xp17 + lineHeight / 2 + Margin, yp11, xp18, yp12, frameColorBr, frameColorBg, 5);
+      // Upper Right:
+      DrawRectangleOutline(nullptr, ReplayPixmap, xp17, yp00, xp17 + lineHeight / 2 + Margin, yp01, frameColorBr, frameColorBg, 11);
+      DrawRectangle(ReplayPixmap, xp17 + lineHeight / 2 + Margin, yp00, xp18, yp01 - lineHeight / 2, clrTransparent);
+-     DrawEllipseOutline(ReplayPixmap, xp17 + lineHeight / 2 + Margin, yp00, xp18, yp01, frameColorBr, frameColorBg, 5);
++     DrawEllipseOutline(nullptr, ReplayPixmap, xp17 + lineHeight / 2 + Margin, yp00, xp18, yp01, frameColorBr, frameColorBg, 5);
+      }
+ }
+ 
+diff --git a/displaytracks.c b/displaytracks.c
+index cdf7ac3..a304893 100644
+--- a/displaytracks.c
++++ b/displaytracks.c
+@@ -51,34 +51,34 @@ cLCARSNGDisplayTracks::cLCARSNGDisplayTracks(const char *Title, int NumTracks, c
+   // The upper elbow:
+   osd->DrawRectangle(xt00, yt00, xt12 - 1, yt07 - 1, Theme.Color(clrBackground));
+   osd->DrawRectangle(xt00, yt00, xt03 - 1, yt02 - 1, clrTransparent);
+-  DrawEllipseOutline(osd, xt00, yt00, xt03 - 1, yt02 - 1, frameColorMg, frameColorBg, 2);
++  DrawEllipseOutline(osd, nullptr, xt00, yt00, xt03 - 1, yt02 - 1, frameColorMg, frameColorBg, 2);
+   DrawRectangleOutline(osd, nullptr, xt03, yt00, xt04 - 1, yt01 - 1, frameColorMg, frameColorBg, 2);
+   DrawRectangleOutline(osd, nullptr, xt03, yt01, xt04 - 1, yt02 - 1, frameColorMg, frameColorBg, 12);
+   if (Margin)
+      osd->DrawRectangle(xt00, yt02 - Margin, xt03 - 1, yt02 - 1, frameColorMg);
+   DrawRectangleOutline(osd, nullptr, xt04, yt00, xt08 - 1, yt01 - 1, frameColorMg, frameColorBg, 14);
+-  DrawEllipseOutline(osd, xt04, yt01, xt06 - 1, yt02 - 1, frameColorMg, frameColorBg, -2);
++  DrawEllipseOutline(osd, nullptr, xt04, yt01, xt06 - 1, yt02 - 1, frameColorMg, frameColorBg, -2);
+   DrawRectangleOutline(osd, nullptr, xt09, yt00, xt10 - 1, yt01 - 1, frameColorMg, frameColorBg, 15);
+   DrawRectangleOutline(osd, nullptr, xt11, yt00, xt11 + lineHeight / 2 - 1, yt01 - 1, frameColorMg, frameColorBg, 11);
+   osd->DrawRectangle(xt11 + lineHeight / 2, yt00, xt12 - 1, yt00 + lineHeight / 2 - 1, clrTransparent);
+-  DrawEllipseOutline(osd, xt11 + lineHeight / 2, yt00, xt12 - 1, yt01 - 1, frameColorMg, frameColorBg, 5);
++  DrawEllipseOutline(osd, nullptr, xt11 + lineHeight / 2, yt00, xt12 - 1, yt01 - 1, frameColorMg, frameColorBg, 5);
+   osd->DrawText(xt03, yt00 + Margin, Title, frameColorFg, frameColorBg, font, xt04 - xt03, 0, taTop | taRight);
+   // The items:
+   for (int i = 0; i < NumTracks; i++)
+       SetItem(Tracks[i], i, false);
+   // The lower elbow:
+   osd->DrawRectangle(xt00, yt05, xt03 - 1, yt07 - 1, clrTransparent);
+-  DrawEllipseOutline(osd, xt00, yt05, xt03 - 1, yt07 - 1, frameColorMg, frameColorBg, 3);
++  DrawEllipseOutline(osd, nullptr, xt00, yt05, xt03 - 1, yt07 - 1, frameColorMg, frameColorBg, 3);
+   DrawRectangleOutline(osd, nullptr, xt03, yt05, xt04 - 1, yt06 - 1, frameColorMg, frameColorBg, 6);
+   DrawRectangleOutline(osd, nullptr, xt03, yt06, xt04 - 1, yt07 - 1, frameColorMg, frameColorBg, 8);
+   DrawRectangleOutline(osd, nullptr, xt04, yt06, xt08 - 1, yt07 - 1, frameColorMg, frameColorBg, 14);
+   if (Margin)
+      osd->DrawRectangle(xt00, yt05, xt03 - 1, yt05 + Margin - 1, frameColorMg);
+-  DrawEllipseOutline(osd, xt04, yt05, xt06 - 1, yt06 - 1, frameColorMg, frameColorBg, -3);
++  DrawEllipseOutline(osd, nullptr, xt04, yt05, xt06 - 1, yt06 - 1, frameColorMg, frameColorBg, -3);
+   DrawRectangleOutline(osd, nullptr, xt09, yt06, xt10 - 1, yt07 - 1, frameColorMg, frameColorBg, 15);
+   DrawRectangleOutline(osd, nullptr, xt11, yt06, xt11 + lineHeight / 2 - 1, yt07 - 1, frameColorMg, frameColorBg, 11);
+   osd->DrawRectangle(xt11 + lineHeight / 2, yt06 + lineHeight / 2, xt12 - 1, yt07 - 1, clrTransparent);
+-  DrawEllipseOutline(osd, xt11 + lineHeight / 2, yt06, xt12 - 1, yt07 - 1, frameColorMg, frameColorBg, 5);
++  DrawEllipseOutline(osd, nullptr, xt11 + lineHeight / 2, yt06, xt12 - 1, yt07 - 1, frameColorMg, frameColorBg, 5);
+ }
+ 
+ cLCARSNGDisplayTracks::~cLCARSNGDisplayTracks()
+@@ -99,7 +99,7 @@ void cLCARSNGDisplayTracks::SetItem(const char *Text, int Index, bool Current)
+      DrawRectangleOutline(osd, nullptr, xt00, y0, xt01 - 1, y1 - 1, frameColorMg, frameColorBg, 15);
+      DrawRectangleOutline(osd, nullptr, xt02, y0, xt04 - 1, y1 - 1, frameColorMg, frameColorBg, 15);
+      DrawRectangleOutline(osd, nullptr, xt05, y0, xt05 + lineHeight / 2 - 1, y1 - 1, frameColorMg, ColorBg, 11);
+-     DrawEllipseOutline(osd, xt05 + lineHeight / 2, y0, xt07 - 1, y1 - 1, frameColorMg, ColorBg, 5);
++     DrawEllipseOutline(osd, nullptr, xt05 + lineHeight / 2, y0, xt07 - 1, y1 - 1, frameColorMg, ColorBg, 5);
+      currentIndex = Index;
+      }
+   else {
+diff --git a/messagebox.c b/messagebox.c
+index ab8f3e7..c0958cd 100644
+--- a/messagebox.c
++++ b/messagebox.c
+@@ -42,12 +42,12 @@ void cLCARSNGMessageBox::SetMessage(eMessageType Type, const char *Text)
+      if (Full) {
+         pixmapBg->DrawRectangle(cRect(x0, y0, x7 - x0, y1 - y0), Theme.Color(clrBackground));
+         pixmapBg->DrawRectangle(cRect(x0, y0, x1 - x0, y1 - y0), clrTransparent);
+-        DrawEllipseOutline(pixmapBg, x0, y0, x1, y1, ColorFg, ColorBg, 7);
++        DrawEllipseOutline(nullptr, pixmapBg, x0, y0, x1, y1, ColorFg, ColorBg, 7);
+         DrawRectangleOutline(nullptr, pixmapBg, x1, y0, x2, y1, ColorFg, ColorBg, 14);
+         DrawRectangleOutline(nullptr, pixmapBg, x3, y0, x4, y1, ColorFg, ColorBg, 15);
+         DrawRectangleOutline(nullptr, pixmapBg, x5, y0, x6, y1, ColorFg, ColorBg, 11);
+         pixmapBg->DrawRectangle(cRect(x6, y0, x7 - x6, y1 - y0), clrTransparent);
+-        DrawEllipseOutline(pixmapBg, x6, y0, x7, y1, ColorFg, ColorBg, 5);
++        DrawEllipseOutline(nullptr, pixmapBg, x6, y0, x7, y1, ColorFg, ColorBg, 5);
+         xt0 = x3;
+         xt1 = x4;
+         }
+diff --git a/tools.c b/tools.c
+index e853b7c..d677f5d 100644
+--- a/tools.c
++++ b/tools.c
+@@ -320,7 +320,7 @@ void DrawRectangleOutline(cOsd *Osd, cPixmap *Pixmap, int x1, int y1, int x2, in
+                         y2 - ((Usage & muBottom) ? margin : 0), Color2);
+ }
+ 
+-void DrawEllipseOutline(cOsd *Osd, int x1, int y1, int x2, int y2, tColor Color1, tColor Color2, int Quadrants, int Margin)
++void DrawEllipseOutline(cOsd *Osd, cPixmap *Pixmap, int x1, int y1, int x2, int y2, tColor Color1, tColor Color2, int Quadrants, int Margin)
+ {
+   /* Quadrants:
+    * 0       draws the entire ellipse
+@@ -331,92 +331,85 @@ void DrawEllipseOutline(cOsd *Osd, int x1, int y1, int x2, int y2, tColor Color1
+    *  Color2 = inner color
+    */
+ 
+-  int margin = (Margin > 0) ? Margin : Config.Margin;
+-  Osd->DrawEllipse(x1, y1, x2, y2, (margin == 0) ? Color2 : Color1, Quadrants);
+-  if (margin == 0)
+-     return;
+-
+-  switch (Quadrants) {
+-             case  0: Osd->DrawEllipse(x1 + margin, y1 + margin, x2 - margin, y2 - margin, Color2, 0);                  // full ellipse
+-                      break;
+-             case  1: Osd->DrawEllipse(x1, y1 + margin, x2 - margin, y2, Color2, 1);                                    // top right
+-                      break;
+-             case  2: Osd->DrawEllipse(x1 + margin, y1 + margin, x2, y2, Color2, 2);                                    // top left
+-                      break;
+-             case  3: Osd->DrawEllipse(x1 + margin, y1, x2, y2 - margin, Color2, 3);                                    // bottom left
+-                      break;
+-             case  4: Osd->DrawEllipse(x1, y1, x2 - margin, y2 - margin, Color2, 4);                                    // bottom right
+-                      break;
+-             case  5: Osd->DrawEllipse(x1, y1 + margin, x2 - margin, y2 - margin, Color2, 5);                           // right
+-                      break;
+-             case  6: Osd->DrawEllipse(x1 + margin, y1 + margin, x2 - margin, y2, Color2, 6);                           // top
+-                      break;
+-             case  7: Osd->DrawEllipse(x1 + margin, y1 + margin, x2, y2 - margin, Color2, 7);                           // left
+-                      break;
+-             case  8: Osd->DrawEllipse(x1 + margin, y1, x2 - margin, y2 - margin, Color2, 8);                           // bottom
+-                      break;
+-             case -1: Osd->DrawEllipse(x1, y1 - margin, x2 + margin, y2, Color2, -1);                                   // top right invers
+-                      break;
+-             case -2: Osd->DrawEllipse(x1 - margin, y1 - margin, x2, y2, Color2, -2);                                   // top left invers
+-                      break;
+-             case -3: Osd->DrawEllipse(x1 - margin, y1, x2, y2 + margin, Color2, -3);                                   // bottom left invers
+-                      break;
+-             case -4: Osd->DrawEllipse(x1, y1, x2 + margin, y2 + margin, Color2, -4);                                   // bottom right invers
+-                      break;
+-             default: ;
+-             }
+-}
+-
+-void DrawEllipseOutline(cPixmap *Pixmap, int x1, int y1, int x2, int y2, tColor Color1, tColor Color2, int Quadrants, int Margin)
+-{
+-  if (!Pixmap)
+-     return;
+-
+-  /* Quadrants:
+-   * 0       draws the entire ellipse
+-   * 1..4    draws only the first, second, third or fourth quadrant, respectively
+-   * 5..8    draws the right, top, left or bottom half, respectively
+-   * -1..-4  draws the inverted part of the given quadrant
+-   *  Color1 = border color
+-   *  Color2 = inner color
+-   */
+-
+   int w = x2 - x1;
+   int h = y2 - y1;
+   int margin = (Margin > 0) ? Margin : Config.Margin;
+-  Pixmap->DrawEllipse(cRect(x1, y1, w, h), (margin == 0) ? Color2 : Color1, Quadrants);
++  if (Pixmap)
++     Pixmap->DrawEllipse(cRect(x1, y1, w, h), (margin == 0) ? Color2 : Color1, Quadrants);
++  else
++     Osd->DrawEllipse(x1, y1, x2, y2, (margin == 0) ? Color2 : Color1, Quadrants);
++
+   if (margin == 0)
+      return;
+ 
+   switch (Quadrants) {
+-             case  0: Pixmap->DrawEllipse(cRect(x1 + margin, y1 + margin, w - 2 * margin, h - 2 * margin), Color2, 0);  // full ellipse
+-                      break;
+-             case  1: Pixmap->DrawEllipse(cRect(x1, y1 + margin, w - margin, h - margin), Color2, 1);                   // top right
+-                      break;
+-             case  2: Pixmap->DrawEllipse(cRect(x1 + margin, y1 + margin, w - margin, h - margin), Color2, 2);          // top left
+-                      break;
+-             case  3: Pixmap->DrawEllipse(cRect(x1 + margin, y1, w - margin, h - margin), Color2, 3);                   // bottom left
+-                      break;
+-             case  4: Pixmap->DrawEllipse(cRect(x1, y1, w - margin, h - margin), Color2, 4);                            // bottom right
+-                      break;
+-             case  5: Pixmap->DrawEllipse(cRect(x1, y1 + margin, w - margin, h - 2 * margin), Color2, 5);               // right
+-                      break;
+-             case  6: Pixmap->DrawEllipse(cRect(x1 + margin, y1 + margin, w - 2 * margin, h - margin), Color2, 6);      // top
+-                      break;
+-             case  7: Pixmap->DrawEllipse(cRect(x1 + margin, y1 + margin, w - margin, h - 2 * margin), Color2, 7);      // left
+-                      break;
+-             case  8: Pixmap->DrawEllipse(cRect(x1 + margin, y1, w - 2 * margin, h - margin), Color2, 8);               // bottom
+-                      break;
+-             case -1: Pixmap->DrawEllipse(cRect(x1, y1 - margin, w + margin, h + margin), Color2, -1);                  // top right invers
+-                      break;
+-             case -2: Pixmap->DrawEllipse(cRect(x1 - margin, y1 - margin, w + margin, h + margin), Color2, -2);         // top left invers
+-                      break;
+-             case -3: Pixmap->DrawEllipse(cRect(x1 - margin, y1, w + margin, h + margin), Color2, -3);                  // bottom left invers
+-                      break;
+-             case -4: Pixmap->DrawEllipse(cRect(x1, y1, w + margin, h + margin), Color2, -4);                           // bottom right invers
+-                      break;
+-             default: ;
+-             }
++      case  0: if (Pixmap) // full ellipse
++                  Pixmap->DrawEllipse(cRect(x1 + margin, y1 + margin, w - 2 * margin, h - 2 * margin), Color2, 0);
++               else
++                  Osd->DrawEllipse(x1 + margin, y1 + margin, x2 - margin, y2 - margin, Color2, 0);
++               break;
++      case  1: if (Pixmap) // top right
++                  Pixmap->DrawEllipse(cRect(x1, y1 + margin, w - margin, h - margin), Color2, 1);
++               else
++                  Osd->DrawEllipse(x1, y1 + margin, x2 - margin, y2, Color2, 1);
++               break;
++      case  2: if (Pixmap) // top left
++                  Pixmap->DrawEllipse(cRect(x1 + margin, y1 + margin, w - margin, h - margin), Color2, 2);
++               else
++                  Osd->DrawEllipse(x1 + margin, y1 + margin, x2, y2, Color2, 2);
++               break;
++      case  3: if (Pixmap) // bottom left
++                  Pixmap->DrawEllipse(cRect(x1 + margin, y1, w - margin, h - margin), Color2, 3);
++               else
++                  Osd->DrawEllipse(x1 + margin, y1, x2, y2 - margin, Color2, 3);
++               break;
++      case  4: if (Pixmap) // bottom right
++                  Pixmap->DrawEllipse(cRect(x1, y1, w - margin, h - margin), Color2, 4);
++               else
++                  Osd->DrawEllipse(x1, y1, x2 - margin, y2 - margin, Color2, 4);
++               break;
++      case  5: if (Pixmap) // right
++                  Pixmap->DrawEllipse(cRect(x1, y1 + margin, w - margin, h - 2 * margin), Color2, 5);
++               else
++                  Osd->DrawEllipse(x1, y1 + margin, x2 - margin, y2 - margin, Color2, 5);
++               break;
++      case  6: if (Pixmap) // top
++                  Pixmap->DrawEllipse(cRect(x1 + margin, y1 + margin, w - 2 * margin, h - margin), Color2, 6);
++               else
++                  Osd->DrawEllipse(x1 + margin, y1 + margin, x2 - margin, y2, Color2, 6);
++               break;
++      case  7: if (Pixmap) // left
++                  Pixmap->DrawEllipse(cRect(x1 + margin, y1 + margin, w - margin, h - 2 * margin), Color2, 7);
++               else
++                  Osd->DrawEllipse(x1 + margin, y1 + margin, x2, y2 - margin, Color2, 7);
++               break;
++      case  8: if (Pixmap) // bottom
++                  Pixmap->DrawEllipse(cRect(x1 + margin, y1, w - 2 * margin, h - margin), Color2, 8);
++               else
++                  Osd->DrawEllipse(x1 + margin, y1, x2 - margin, y2 - margin, Color2, 8);
++               break;
++      case -1: if (Pixmap) // top right invers
++                  Pixmap->DrawEllipse(cRect(x1, y1 - margin, w + margin, h + margin), Color2, -1);
++               else
++                  Osd->DrawEllipse(x1, y1 - margin, x2 + margin, y2, Color2, -1);
++               break;
++      case -2: if (Pixmap) // top left invers
++                  Pixmap->DrawEllipse(cRect(x1 - margin, y1 - margin, w + margin, h + margin), Color2, -2);
++               else
++                  Osd->DrawEllipse(x1 - margin, y1 - margin, x2, y2, Color2, -2);
++               break;
++      case -3: if (Pixmap) // bottom left invers
++                  Pixmap->DrawEllipse(cRect(x1 - margin, y1, w + margin, h + margin), Color2, -3);
++               else
++                  Osd->DrawEllipse(x1 - margin, y1, x2, y2 + margin, Color2, -3);
++               break;
++      case -4: if (Pixmap) // bottom right invers
++                  Pixmap->DrawEllipse(cRect(x1, y1, w + margin, h + margin), Color2, -4);
++               else
++                  Osd->DrawEllipse(x1, y1, x2 + margin, y2 + margin, Color2, -4);
++               break;
++      default: ;
++      }
+ }
+ 
+ void DrawProgressbar(cPixmap *p, int left, int top, int width, int height, int Current, int Total, tColor clr1, tColor clr2, bool blend, bool partial) {
+diff --git a/tools.h b/tools.h
+index 055a5c9..5507e56 100644
+--- a/tools.h
++++ b/tools.h
+@@ -37,8 +37,7 @@ void DrawBitmap(cPixmap *Pixmap, int x, int y, const cBitmap &Bitmap, tColor Col
+ void DrawText(cPixmap *Pixmap, int x, int y, const char *s, tColor ColorFg, tColor ColorBg, const cFont *Font, int Width = 0, int Height = 0, int Alignment = taDefault);
+ void DrawRectangle(cPixmap *Pixmap, int x1, int y1, int x2, int y2, tColor Color);
+ void DrawRectangleOutline(cOsd *Osd, cPixmap *Pixmap, int x1, int y1, int x2, int y2, tColor Color1, tColor Color2, int Usage = 0, int Margin = 0);
+-void DrawEllipseOutline(cOsd *Osd, int x1, int y1, int x2, int y2, tColor Color1, tColor Color2, int Quadrants = 0, int Margin = 0);
+-void DrawEllipseOutline(cPixmap *Pixmap, int x, int y, int w, int h, tColor Color1, tColor Color2, int Quadrants = 0, int Margin = 0);
++void DrawEllipseOutline(cOsd *Osd, cPixmap *Pixmap, int x, int y, int w, int h, tColor Color1, tColor Color2, int Quadrants = 0, int Margin = 0);
+ void DrawProgressbar(cPixmap *p, int left, int top, int width, int height, int Current, int Total, tColor color, tColor colorBlending, bool blend = false, bool partial = false);
+ int GetFrameAfterEdit(const cMarks *marks = NULL, int Frame = 0, int LastFrame = 0);
+ int FreeMB(const char *Base, bool menurecording = false);
+-- 
+2.47.3
+

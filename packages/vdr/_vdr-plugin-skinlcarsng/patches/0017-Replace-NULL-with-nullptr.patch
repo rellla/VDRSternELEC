@@ -1,0 +1,792 @@
+From f2e4d2e5aa51c8f1192ddee5acf5742f95f51240 Mon Sep 17 00:00:00 2001
+From: kamel5 <vdr.kamel5 (at) gmx (dot) net>
+Date: Mon, 8 Jun 2026 11:32:51 +0200
+Subject: [PATCH] Replace NULL with nullptr
+
+---
+ displaychannel.c     | 22 ++++++-------
+ displaychannel.h     | 14 ++++----
+ displaymenu.c        | 78 ++++++++++++++++++++++----------------------
+ displaymenu.h        | 24 +++++++-------
+ displaymessage.h     |  2 +-
+ displayreplay.c      | 10 +++---
+ displayreplay.h      | 10 +++---
+ displaytracks.c      |  2 +-
+ imagemagickwrapper.c |  2 +-
+ imagescaler.c        | 10 +++---
+ setup.c              |  2 +-
+ skinlcarsng.c        | 20 ++++++------
+ tools.c              | 22 ++++++-------
+ tools.h              |  8 ++---
+ 14 files changed, 113 insertions(+), 113 deletions(-)
+
+diff --git a/displaychannel.c b/displaychannel.c
+index 80f9bc0..fdd216e 100644
+--- a/displaychannel.c
++++ b/displaychannel.c
+@@ -27,12 +27,12 @@ cLCARSNGDisplayChannel::cLCARSNGDisplayChannel(bool WithInfo) : cThread("LCARS D
+   textBorder = lineHeight * TEXT_ALIGN_BORDER / 100;
+   zoom = 0;
+   initial = true;
+-  present = NULL;
+-  following = NULL;
++  present = nullptr;
++  following = nullptr;
+   lastSeen = -1;
+   lastCurrentPosition = -1;
+   lastDeviceNumber = -1;
+-  lastCamSlot = NULL;
++  lastCamSlot = nullptr;
+   lastSignalStrength = -1;
+   lastSignalQuality = -1;
+   lastSignalDisplay = 0;
+@@ -48,7 +48,7 @@ cLCARSNGDisplayChannel::cLCARSNGDisplayChannel(bool WithInfo) : cThread("LCARS D
+   On = false;
+   Margin = Config.Margin;
+   lastVolume = statusMonitor->GetVolume();
+-  lastVolumeTime = time(NULL);
++  lastVolumeTime = time(nullptr);
+   lastDate = "";
+   oldResolution = "";
+ 
+@@ -352,7 +352,7 @@ void cLCARSNGDisplayChannel::DrawDevice(void)
+ 
+ void cLCARSNGDisplayChannel::DrawSignal(void)
+ {
+-  time_t Now = time(NULL);
++  time_t Now = time(nullptr);
+   if (Now != lastSignalDisplay) {
+      DrawDeviceSignal(osd, nullptr, cDevice::ActualDevice(), xs + lineHeight / 2, yc15, xc09, yc16, lastSignalStrength, lastSignalQuality, initial);
+      lastSignalDisplay = Now;
+@@ -435,7 +435,7 @@ void cLCARSNGDisplayChannel::DrawTimer(void)
+                      : (i == 1) ? yc09 - Margin - smlLineHeight - yrel
+                                 : yc10 + Margin;
+      if (const cTimer *Timer = SortedTimers[i + j]) {
+-        time_t Now = time(NULL);
++        time_t Now = time(nullptr);
+         if (!(Timer->HasFlags(tfActive)) || (Timer->StopTime() < Now))
+            j++;
+         else {
+@@ -493,7 +493,7 @@ void cLCARSNGDisplayChannel::DrawTimer(void)
+ #endif
+                     }
+                  else {
+-                    const cDevice *Device = NULL;
++                    const cDevice *Device = nullptr;
+                     if (cRecordControl *RecordControl = cRecordControls::GetRecordControl(Timer))
+                        Device = RecordControl->Device();
+                     cString Number = Device ? itoa(Device->DeviceNumber() + 1) : "?";
+@@ -551,7 +551,7 @@ void cLCARSNGDisplayChannel::SetChannel(const cChannel *Channel, int Number)
+   else if (Number)
+      ChNumber = cString::sprintf("%d-", Number);
+   else
+-     ChName = ChannelString(NULL, 0);
++     ChName = ChannelString(nullptr, 0);
+ 
+   int xR = (withInfo) ? xc09 : xc22;
+   int w = tallFont->Width(ChName);
+@@ -636,11 +636,11 @@ void cLCARSNGDisplayChannel::DrawVolume(void)
+          if (!volumeBox)
+             volumeBox = new cLCARSNGVolumeBox(osd, cRect(xv00, yv00, xv01 - xv00, yv01 - yv00), !withInfo);
+          volumeBox->SetVolume(volume, MAXVOLUME, volume ? false : true);
+-         lastVolumeTime = time(NULL);
++         lastVolumeTime = time(nullptr);
+          lastVolume = volume;
+          }
+       else {
+-         if (volumeBox && (time(NULL) - lastVolumeTime > 2))
++         if (volumeBox && (time(nullptr) - lastVolumeTime > 2))
+             DELETENULL(volumeBox);
+       }
+    }
+@@ -788,7 +788,7 @@ void cLCARSNGDisplayChannel::Flush(void)
+         int Current = 0;
+         int Total = 0;
+         if (present) {
+-           time_t t = time(NULL);
++           time_t t = time(nullptr);
+            if (t > present->StartTime())
+               Current = t - present->StartTime();
+            Total = present->Duration();
+diff --git a/displaychannel.h b/displaychannel.h
+index ec2c1dd..6889802 100644
+--- a/displaychannel.h
++++ b/displaychannel.h
+@@ -2,7 +2,7 @@
+ #include "volumebox.h"
+ 
+ typedef struct AnimatedChannelInfo {
+-  const cEvent *Event = NULL;
++  const cEvent *Event = nullptr;
+   int x0 = 0;
+   int x1 = 0;
+   int y0 = 0;
+@@ -20,9 +20,9 @@ private:
+   int Margin;
+   bool dowait = false;
+   uint64_t StartTime = 0;
+-  cPixmap *BracketPixmap = NULL;
+-  cPixmap *TextPixmap = NULL;
+-  cPixmap *PosterPixmap = NULL;
++  cPixmap *BracketPixmap = nullptr;
++  cPixmap *TextPixmap = nullptr;
++  cPixmap *PosterPixmap = nullptr;
+   cTextWrapper wrapper;
+   void DrawBracket(int lines = 0);
+   void Draw(void);
+@@ -57,9 +57,9 @@ private:
+   int lastVolume;
+   time_t lastVolumeTime;
+   AnimatedChannelInfo_t animatedInfo;
+-  cDrawChannelDescription *drawDescription = NULL;
+-  cLCARSNGMessageBox *messageBox = NULL;
+-  cLCARSNGVolumeBox *volumeBox = NULL;
++  cDrawChannelDescription *drawDescription = nullptr;
++  cLCARSNGMessageBox *messageBox = nullptr;
++  cLCARSNGVolumeBox *volumeBox = nullptr;
+   uint64_t StartTime = 0;
+   const cFont *osdFont;
+   const cFont *tinyFont;
+diff --git a/displaymenu.c b/displaymenu.c
+index 325698b..47428f0 100644
+--- a/displaymenu.c
++++ b/displaymenu.c
+@@ -25,9 +25,9 @@ cLCARSNGDisplayMenu::cLCARSNGDisplayMenu(void)
+   viewmode = efullscreen;
+   zoom = 0;
+   lastMode = cmUnknown;
+-  lastChannel = NULL;
+-  lastEvent = NULL;
+-  lastRecording = NULL;
++  lastChannel = nullptr;
++  lastEvent = nullptr;
++  lastRecording = nullptr;
+   lastSeen = -1;
+ #if APIVERSNUM < 20301
+   lastTimersState = -1;
+@@ -35,8 +35,8 @@ cLCARSNGDisplayMenu::cLCARSNGDisplayMenu(void)
+   lastSignalDisplay = 0;
+   lastLiveIndicatorY = -1;
+   lastLiveIndicatorTransferring = false;
+-  currentTitle = NULL;
+-  lastcurrentTitle = NULL;
++  currentTitle = nullptr;
++  lastcurrentTitle = nullptr;
+   lastDiskUsageState = -1;
+   lastDiskAlert = false;
+   lastSystemLoad = -1;
+@@ -52,10 +52,10 @@ cLCARSNGDisplayMenu::cLCARSNGDisplayMenu(void)
+   currentIndex = -1;
+   Margin = Config.Margin;
+   border = 2 * (Margin + Gap);
+-  drawDescription = NULL;
+-  volumeBox = NULL;
++  drawDescription = nullptr;
++  volumeBox = nullptr;
+   lastVolume = statusMonitor->GetVolume();
+-  lastVolumeTime = time(NULL);
++  lastVolumeTime = time(nullptr);
+ 
+   animatedInfo.titleColorFg = Theme.Color(clrEventTitle);
+   animatedInfo.shortTextColorFg = Theme.Color(clrEventShortText);
+@@ -395,7 +395,7 @@ void cLCARSNGDisplayMenu::SetMenuCategory(eMenuCategory MenuCategory)
+   animatedInfo.y1 = yi00 + (int)((yi01 - yi00) / lineHeight) * lineHeight;
+   animatedInfo.viewmode = viewmode;
+   animatedInfo.Init = true;
+-  actualpath = NULL;
++  actualpath = nullptr;
+ }
+ 
+ void cLCARSNGDisplayMenu::DrawMainFrameUpper(tColor Color, tColor ColorBg)
+@@ -841,7 +841,7 @@ void cLCARSNGDisplayMenu::DrawTimer(const cTimer *Timer, int y, bool MultiRec)
+      Date = cString::sprintf("-%s", *TimeString(Timer->StopTime()));
+ #endif
+   else {
+-     time_t Now = time(NULL);
++     time_t Now = time(nullptr);
+ #if APIVERSNUM > 20502
+      time_t StartTime = Timer->StartTimeEvent();
+ #else
+@@ -911,7 +911,7 @@ void cLCARSNGDisplayMenu::DrawTimers(void)
+      // Timers and recording devices:
+      while (1) {
+            int NumTimers = 0;
+-           const cDevice *Device = NULL;
++           const cDevice *Device = nullptr;
+            for (int i = 0; i < SortedTimers.Size(); i++) {
+                if (y + lineHeight > ys05)
+                   break;
+@@ -947,13 +947,13 @@ void cLCARSNGDisplayMenu::DrawTimers(void)
+                         else
+                            continue;
+                         }
+-                     SortedTimers[i] = NULL;
++                     SortedTimers[i] = nullptr;
+                      }
+                   else if (!Device && Timer->HasFlags(tfActive)) {
+                      DrawTimer(Timer, y, false);
+                      FreeDeviceSlots.Append(y);
+                      y += lineHeight + Gap;
+-                     SortedTimers[i] = NULL;
++                     SortedTimers[i] = nullptr;
+                      }
+                   }
+                }
+@@ -1062,7 +1062,7 @@ void cLCARSNGDisplayMenu::DrawLiveIndicator(void)
+ 
+ void cLCARSNGDisplayMenu::DrawSignals(void)
+ {
+-  time_t Now = time(NULL);
++  time_t Now = time(nullptr);
+   if (initial || Now - lastSignalDisplay >= SIGNALDISPLAYDELTA) {
+      for (int i = 0; i < cDevice::NumDevices(); i++) {
+          if (const cDevice *Device = cDevice::GetDevice(i)) {
+@@ -1124,7 +1124,7 @@ void cLCARSNGDisplayMenu::DrawLive(const cChannel *Channel)
+      int Current = 0;
+      int Total = 0;
+      if (Event) {
+-        time_t t = time(NULL);
++        time_t t = time(nullptr);
+         if (t > Event->StartTime())
+            Current = t - Event->StartTime();
+         Total = Event->Duration();
+@@ -1143,7 +1143,7 @@ void cLCARSNGDisplayMenu::DrawLive(const cChannel *Channel)
+         int Current = 0;
+         int Total = 0;
+         if (Event) {
+-           time_t t = time(NULL);
++           time_t t = time(nullptr);
+            if (t > Event->StartTime())
+               Current = t - Event->StartTime();
+            Total = Event->Duration();
+@@ -1281,7 +1281,7 @@ int cLCARSNGDisplayMenu::MaxItems(void)
+ 
+ void cLCARSNGDisplayMenu::SetTitle(const char *Title)
+ {
+-  currentTitle = NULL;
++  currentTitle = nullptr;
+   switch (MenuCategory()) {
+      case mcMain:
+         break;
+@@ -1359,15 +1359,15 @@ void cLCARSNGDisplayMenu::Clear(void)
+ void cLCARSNGDisplayMenu::DescriptionClear(bool clearAll)
+ {
+   if (clearAll) {
+-     animatedInfo.Event = NULL;
+-     animatedInfo.Timer = NULL;
+-     animatedInfo.Recording = NULL;
++     animatedInfo.Event = nullptr;
++     animatedInfo.Timer = nullptr;
++     animatedInfo.Recording = nullptr;
+      }
+   textScroller.Reset();
+   // Destroy PosterPixmap from SetEvent() or SetRecording()
+   if (PosterPixmap) {
+      osd->DestroyPixmap(PosterPixmap);
+-     PosterPixmap = NULL;
++     PosterPixmap = nullptr;
+      }
+   // Set drawDescription pixmap layer to -1
+   if (drawDescription)
+@@ -1420,7 +1420,7 @@ bool cLCARSNGDisplayMenu::SetItemRecording(const cRecording *Recording, int Inde
+ {
+   // Get the actual path
+   if (Level == 0)
+-     actualpath = NULL;
++     actualpath = nullptr;
+   else if (Index == 0) {
+      if (!Total)
+         actualpath = strdup(Recording->Folder());
+@@ -1541,7 +1541,7 @@ void cLCARSNGDisplayMenu::SetEvent(const cEvent *Event)
+ 
+   if (PosterPixmap) {
+      osd->DestroyPixmap(PosterPixmap);
+-     PosterPixmap = NULL;
++     PosterPixmap = nullptr;
+      }
+ 
+   int xl = xi00;
+@@ -1625,7 +1625,7 @@ void cLCARSNGDisplayMenu::SetRecording(const cRecording *Recording)
+ 
+   if (PosterPixmap) {
+      osd->DestroyPixmap(PosterPixmap);
+-     PosterPixmap = NULL;
++     PosterPixmap = nullptr;
+      }
+ 
+   const cRecordingInfo *Info = Recording->Info();
+@@ -1717,7 +1717,7 @@ void cLCARSNGDisplayMenu::SetRecording(const cRecording *Recording)
+      }
+ #endif
+ 
+-  const char *aux = NULL;
++  const char *aux = nullptr;
+   aux = Info->Aux();
+   if (aux) {
+      std::string strAux = aux;
+@@ -1780,11 +1780,11 @@ void cLCARSNGDisplayMenu::DrawVolume(void)
+          if (!volumeBox)
+             volumeBox = new cLCARSNGVolumeBox(osd, cRect(0, yb15 - lineHeight, xa09 - 1, lineHeight));
+          volumeBox->SetVolume(volume, MAXVOLUME, volume ? false : true);
+-         lastVolumeTime = time(NULL);
++         lastVolumeTime = time(nullptr);
+          lastVolume = volume;
+          }
+       else {
+-         if (volumeBox && (time(NULL) - lastVolumeTime > 2))
++         if (volumeBox && (time(nullptr) - lastVolumeTime > 2))
+             DELETENULL(volumeBox);
+       }
+       animatedInfo.doflash = false;
+@@ -1846,12 +1846,12 @@ void cLCARSNGDisplayMenu::Flush(void)
+      cDevice::PrimaryDevice()->ScaleVideo(availableRect);
+      }
+   if (!message && animatedInfo.Init && !drawDescription) {
+-     if ((Config.displInfoMenuEPG && (MenuCategory() == mcSchedule || MenuCategory() == mcScheduleNow || MenuCategory() == mcScheduleNext) && animatedInfo.Event != NULL)
+-         || (Config.displInfoMenuTimer && MenuCategory() == mcTimer && animatedInfo.Timer != NULL)
++     if ((Config.displInfoMenuEPG && (MenuCategory() == mcSchedule || MenuCategory() == mcScheduleNow || MenuCategory() == mcScheduleNext) && animatedInfo.Event != nullptr)
++         || (Config.displInfoMenuTimer && MenuCategory() == mcTimer && animatedInfo.Timer != nullptr)
+ #if APIVERSNUM >= 30012
+          || (Config.displInfoMenuRec && MenuCategory() == mcRecordingDel && animatedInfo.Recording != nullptr)
+ #endif
+-         || (Config.displInfoMenuRec && MenuCategory() == mcRecording && animatedInfo.Recording != NULL)) {
++         || (Config.displInfoMenuRec && MenuCategory() == mcRecording && animatedInfo.Recording != nullptr)) {
+         drawDescription = new cDrawDescription(&animatedInfo);
+         if (drawDescription)
+            drawDescription->Start();
+@@ -2114,18 +2114,18 @@ void cDrawDescription::Draw(void)
+ 
+   if (PosterPixmap) {
+      aI->osd->DestroyPixmap(PosterPixmap);
+-     PosterPixmap = NULL;
++     PosterPixmap = nullptr;
+      }
+ 
+   if (TextPixmap) {
+      aI->osd->DestroyPixmap(TextPixmap);
+-     TextPixmap = NULL;
++     TextPixmap = nullptr;
+      }
+ 
+-  const cEvent *Event = NULL;
+-  const cTimer *Timer = NULL;
+-  const cRecording *Recording = NULL;
+-  const cRecordingInfo *Info = NULL;
++  const cEvent *Event = nullptr;
++  const cTimer *Timer = nullptr;
++  const cRecording *Recording = nullptr;
++  const cRecordingInfo *Info = nullptr;
+ 
+   if (aI->Recording) {
+      Recording = aI->Recording;
+@@ -2144,9 +2144,9 @@ void cDrawDescription::Draw(void)
+   } else
+      return;
+ 
+-  const char *title = NULL;
+-  const char *shortText = NULL;
+-  const char *s = NULL;
++  const char *title = nullptr;
++  const char *shortText = nullptr;
++  const char *s = nullptr;
+   const cFont *font = cFont::GetFont(fontOsd);
+   const cFont *fontsml = cFont::GetFont(fontSml);
+   cString parentalRating = "";
+diff --git a/displaymenu.h b/displaymenu.h
+index d3e75a1..f76fad6 100644
+--- a/displaymenu.h
++++ b/displaymenu.h
+@@ -2,10 +2,10 @@
+ #include "volumebox.h"
+ 
+ typedef struct AnimatedInfo {
+-  cOsd *osd = NULL;
+-  const cEvent *Event = NULL;
+-  const cTimer *Timer = NULL;
+-  const cRecording *Recording = NULL;
++  cOsd *osd = nullptr;
++  const cEvent *Event = nullptr;
++  const cTimer *Timer = nullptr;
++  const cRecording *Recording = nullptr;
+   int Level = -1;
+   int New = -1;
+   int x0 = 0;
+@@ -28,10 +28,10 @@ private:
+   bool dowait = false;
+   uint64_t StartTime = 0;
+   uint64_t StartFadeIn = 0;
+-  cPixmap *BackgroundPixmap = NULL;
+-  cPixmap *BracketPixmap = NULL;
+-  cPixmap *TextPixmap = NULL;
+-  cPixmap *PosterPixmap = NULL;
++  cPixmap *BackgroundPixmap = nullptr;
++  cPixmap *BracketPixmap = nullptr;
++  cPixmap *TextPixmap = nullptr;
++  cPixmap *PosterPixmap = nullptr;
+   cTextWrapper wrapper;
+   void SetAlpha(int alpha = 255);
+   void DrawBracket(void);
+@@ -68,7 +68,7 @@ private:
+   int xs; // starting column for signal display
+   int lineHeight;
+   int lineHeightSml;
+-  cPixmap *PosterPixmap = NULL;
++  cPixmap *PosterPixmap = nullptr;
+   const cFont *font;
+   const cFont *fontsml;
+   const cFont *tinyFont;
+@@ -93,7 +93,7 @@ private:
+   enum eCurrentMode { cmUnknown, cmLive, cmPlay };
+   eCurrentMode lastMode;
+   cString lastDate;
+-  const char *actualpath = NULL;
++  const char *actualpath = nullptr;
+   const char *currentTitle;
+   const char *lastcurrentTitle;
+   int lastDiskUsageState;
+@@ -122,7 +122,7 @@ private:
+   int lastVolume;
+   time_t lastVolumeTime;
+   cDrawDescription *drawDescription;
+-  cLCARSNGMessageBox *messageBox = NULL;
++  cLCARSNGMessageBox *messageBox = nullptr;
+   cLCARSNGVolumeBox *volumeBox;
+   static cBitmap bmArrowUp, bmArrowDown, bmTransferMode;
+   void SetCoordinateY(int y);
+@@ -168,7 +168,7 @@ public:
+   virtual void Clear(void);
+   virtual void SetMenuCategory(eMenuCategory MenuCategory);
+   virtual void SetTitle(const char *Title);
+-  virtual void SetButtons(const char *Red, const char *Green = NULL, const char *Yellow = NULL, const char *Blue = NULL);
++  virtual void SetButtons(const char *Red, const char *Green = nullptr, const char *Yellow = nullptr, const char *Blue = nullptr);
+   virtual void SetMessage(eMessageType Type, const char *Text);
+   virtual bool SetItemEvent(const cEvent *Event, int Index, bool Current, bool Selectable, const cChannel *Channel, bool WithDate, eTimerMatch TimerMatch, bool TimerActive);
+   virtual bool SetItemTimer(const cTimer *Timer, int Index, bool Current, bool Selectable);
+diff --git a/displaymessage.h b/displaymessage.h
+index 8640a8c..4031694 100644
+--- a/displaymessage.h
++++ b/displaymessage.h
+@@ -5,7 +5,7 @@
+ class cLCARSNGDisplayMessage : public cSkinDisplayMessage {
+ private:
+   cOsd *osd;
+-  cLCARSNGMessageBox *messageBox = NULL;
++  cLCARSNGMessageBox *messageBox = nullptr;
+ public:
+   cLCARSNGDisplayMessage(void);
+   virtual ~cLCARSNGDisplayMessage();
+diff --git a/displayreplay.c b/displayreplay.c
+index 2917b63..ba816a3 100644
+--- a/displayreplay.c
++++ b/displayreplay.c
+@@ -37,9 +37,9 @@ cLCARSNGDisplayReplay::cLCARSNGDisplayReplay(bool ModeOnly) : cThread("LCARS Dis
+   fps = DEFAULTFRAMESPERSECOND;
+   framesTotal = 0;
+   pbinit = true;
+-  volumeBox = NULL;
++  volumeBox = nullptr;
+   lastVolume = statusMonitor->GetVolume();
+-  lastVolumeTime = time(NULL);
++  lastVolumeTime = time(nullptr);
+   lastDate = "";
+   resolution = "";
+   oldResolution = "";
+@@ -206,7 +206,7 @@ void cLCARSNGDisplayReplay::SetRecording(const cRecording *Recording)
+ 
+   if (PosterPixmap) {
+      osd->DestroyPixmap(PosterPixmap);
+-     PosterPixmap = NULL;
++     PosterPixmap = nullptr;
+      }
+ 
+   if (Config.displayScraperInfo && Config.displReplayPoster) {
+@@ -497,11 +497,11 @@ void cLCARSNGDisplayReplay::DrawVolume(void)
+         if (!volumeBox)
+            volumeBox = new cLCARSNGVolumeBox(osd, cRect(xv00, yv00, xv01 - xv00, yv01 - yv00), modeOnly);
+         volumeBox->SetVolume(volume, MAXVOLUME, volume ? false : true);
+-        lastVolumeTime = time(NULL);
++        lastVolumeTime = time(nullptr);
+         lastVolume = volume;
+         }
+      else {
+-        if (volumeBox && (time(NULL) - lastVolumeTime > 2))
++        if (volumeBox && (time(nullptr) - lastVolumeTime > 2))
+            DELETENULL(volumeBox);
+         }
+      }
+diff --git a/displayreplay.h b/displayreplay.h
+index a00ba18..8116334 100644
+--- a/displayreplay.h
++++ b/displayreplay.h
+@@ -6,9 +6,9 @@
+ class cLCARSNGDisplayReplay : public cSkinDisplayReplay, cThread {
+ private:
+   cOsd *osd;
+-  cPixmap *ReplayPixmap = NULL;
+-  cPixmap *PosterPixmap = NULL;
+-  cPixmap *GridPixmap = NULL;
++  cPixmap *ReplayPixmap = nullptr;
++  cPixmap *PosterPixmap = nullptr;
++  cPixmap *GridPixmap = nullptr;
+   const cFont *osdFont;
+   const cFont *smlFont;
+   int Margin;
+@@ -33,8 +33,8 @@ private:
+   tTrackId lastTrackId;
+   int lastVolume;
+   time_t lastVolumeTime;
+-  cLCARSNGMessageBox *messageBox = NULL;
+-  cLCARSNGVolumeBox *volumeBox = NULL;
++  cLCARSNGMessageBox *messageBox = nullptr;
++  cLCARSNGVolumeBox *volumeBox = nullptr;
+   cString resolution;
+   cString oldResolution;
+   int leftIcons;
+diff --git a/displaytracks.c b/displaytracks.c
+index a304893..e66fe2c 100644
+--- a/displaytracks.c
++++ b/displaytracks.c
+@@ -123,7 +123,7 @@ void cLCARSNGDisplayTracks::SetTrack(int Index, const char * const *Tracks)
+ 
+ void cLCARSNGDisplayTracks::SetAudioChannel(int AudioChannel)
+ {
+-  cBitmap *bm = NULL;
++  cBitmap *bm = nullptr;
+   switch (AudioChannel) {
+     case 0: bm = &bmAudioStereo; break;
+     case 1: bm = &bmAudioLeft;   break;
+diff --git a/imagemagickwrapper.c b/imagemagickwrapper.c
+index a9a6abe..8c7ea46 100644
+--- a/imagemagickwrapper.c
++++ b/imagemagickwrapper.c
+@@ -140,7 +140,7 @@ bool cImageMagickWrapper::LoadImage(std::string FileName, std::string Path, std:
+ }
+ 
+ bool cImageMagickWrapper::LoadImage(const char *fullpath) {
+-    if ((fullpath == NULL) || (strlen(fullpath) < 5))
++    if ((fullpath == nullptr) || (strlen(fullpath) < 5))
+         return false;
+     try {
+ //        if (config.GetValue("debugImageLoading"))
+diff --git a/imagescaler.c b/imagescaler.c
+index c3e5fdd..bd7676e 100644
+--- a/imagescaler.c
++++ b/imagescaler.c
+@@ -4,11 +4,11 @@
+ #include <cmath>
+ 
+ ImageScaler::ImageScaler() :
+-	m_memory(NULL),
+-	m_hor_filters(NULL),
+-	m_ver_filters(NULL),
+-	m_buffer(NULL),
+-	m_dst_image(NULL),
++	m_memory(nullptr),
++	m_hor_filters(nullptr),
++	m_ver_filters(nullptr),
++	m_buffer(nullptr),
++	m_dst_image(nullptr),
+ 	m_dst_stride(0),
+ 	m_dst_width(0),
+ 	m_dst_height(0),
+diff --git a/setup.c b/setup.c
+index 19da7bb..723fd03 100644
+--- a/setup.c
++++ b/setup.c
+@@ -114,7 +114,7 @@ void cLCARSNGSetup::Set(void) {
+ 
+   SetCurrent(Get(currentItem));
+   Display();
+-  SetHelp(NULL, NULL, NULL, NULL);
++  SetHelp(nullptr, nullptr, nullptr, nullptr);
+ }
+ 
+ eOSState cLCARSNGSetup::ProcessKey(eKeys Key)
+diff --git a/skinlcarsng.c b/skinlcarsng.c
+index d2d1c4b..675d1fb 100644
+--- a/skinlcarsng.c
++++ b/skinlcarsng.c
+@@ -29,25 +29,25 @@ class cPluginLCARSNG : public cPlugin {
+         virtual void MainThreadHook(void);
+         virtual cString Active(void);
+         virtual time_t WakeupTime(void);
+-        virtual const char *MainMenuEntry(void) {return NULL;}
++        virtual const char *MainMenuEntry(void) {return nullptr;}
+         virtual cOsdObject *MainMenuAction(void);
+         virtual cMenuSetupPage *SetupMenu(void);
+         virtual bool SetupParse(const char *Name, const char *Value);
+-        virtual bool Service(const char *Id, void *Data = NULL);
++        virtual bool Service(const char *Id, void *Data = nullptr);
+         virtual const char **SVDRPHelpPages(void);
+         virtual cString SVDRPCommand(const char *Command, const char *Option, int &ReplyCode);
+ };
+ 
+ __attribute__((constructor)) static void init(void) {
+ #ifndef IMAGEMAGICK
+-   MagickLib::InitializeMagickEx(NULL, MAGICK_OPT_NO_SIGNAL_HANDER, NULL);
++   MagickLib::InitializeMagickEx(nullptr, MAGICK_OPT_NO_SIGNAL_HANDER, nullptr);
+ #else
+-   Magick::InitializeMagick(NULL);
++   Magick::InitializeMagick(nullptr);
+ #endif
+ }
+ 
+ cPluginLCARSNG::cPluginLCARSNG(void) {
+-    statusMonitor = NULL;
++    statusMonitor = nullptr;
+ }
+ 
+ cPluginLCARSNG::~cPluginLCARSNG() {
+@@ -55,7 +55,7 @@ cPluginLCARSNG::~cPluginLCARSNG() {
+ }
+ 
+ const char *cPluginLCARSNG::CommandLineHelp(void) {
+-    return NULL; 
++    return nullptr; 
+ }
+ 
+ bool cPluginLCARSNG::ProcessArgs(int argc, char *argv[]) {
+@@ -87,7 +87,7 @@ void cPluginLCARSNG::MainThreadHook(void) {
+ }
+ 
+ cString cPluginLCARSNG::Active(void) {
+-    return NULL;
++    return nullptr;
+ }
+ 
+ time_t cPluginLCARSNG::WakeupTime(void) {
+@@ -95,7 +95,7 @@ time_t cPluginLCARSNG::WakeupTime(void) {
+ }
+ 
+ cOsdObject *cPluginLCARSNG::MainMenuAction(void) {
+-    return NULL;
++    return nullptr;
+ }
+ 
+ cMenuSetupPage *cPluginLCARSNG::SetupMenu(void) {
+@@ -111,11 +111,11 @@ bool cPluginLCARSNG::Service(const char *Id, void *Data) {
+ }
+ 
+ const char **cPluginLCARSNG::SVDRPHelpPages(void) {
+-    return NULL;
++    return nullptr;
+ }
+ 
+ cString cPluginLCARSNG::SVDRPCommand(const char *Command, const char *Option, int &ReplyCode) {
+-    return NULL;
++    return nullptr;
+ }
+ 
+ VDRPLUGINCREATOR(cPluginLCARSNG); // Don't touch this!
+diff --git a/tools.c b/tools.c
+index d677f5d..504681d 100644
+--- a/tools.c
++++ b/tools.c
+@@ -62,30 +62,30 @@ cPixmap *CreatePixmap(cOsd *osd, cString Name, int Layer, const cRect &ViewPort,
+             }
+         }
+     }
+-    return NULL;
++    return nullptr;
+ }
+ 
+ cPixmap *DrawPoster(DrawPoster_t dP) {
+ 
+   if (!dP.Event && !dP.Recording)
+-     return NULL;
++     return nullptr;
+ 
+   static cPlugin *pScraper = GetScraperPlugin();
+   if (!pScraper)
+-     return NULL;
++     return nullptr;
+ 
+   ScraperGetPoster call;
+   call.event = dP.Event;
+   call.recording = dP.Recording;
+   if (!pScraper->Service("GetPoster", &call))
+-     return NULL;
++     return nullptr;
+ 
+   if (!(call.poster.path.size() > 0 && call.poster.height > 0))
+-     return NULL;
++     return nullptr;
+ 
+   cImageLoader imgLoader;
+   if (!imgLoader.LoadPoster(call.poster.path.c_str(), dP.width - 2 * dP.border, dP.height - 2 * dP.border))
+-     return NULL;
++     return nullptr;
+ 
+   cImage logo = imgLoader.GetImage();
+ 
+@@ -98,7 +98,7 @@ cPixmap *DrawPoster(DrawPoster_t dP) {
+                                              logo.Width() + 2 * dP.border,
+                                              logo.Height() + 2 * dP.border));
+   if (!PosterPixmap)
+-     return NULL;
++     return nullptr;
+ 
+   PosterPixmap->SetAlpha(0);
+   PosterPixmap->Fill(clrTransparent);
+@@ -505,7 +505,7 @@ int FreeMB(const char *Base, bool menurecording)
+      return cVideoDiskUsage::FreeMinutes();
+ 
+   bool Directory = false;
+-  char *currentBase = Base ? strdup(Base) : NULL;
++  char *currentBase = Base ? strdup(Base) : nullptr;
+ 
+   if (currentBase) {
+      const char *p = strchr(currentBase, ' ');
+@@ -521,12 +521,12 @@ int FreeMB(const char *Base, bool menurecording)
+      return cVideoDiskUsage::FreeMinutes();
+ 
+   cStateKey recordingsStateKey;
+-  if (lastFreeMB <= 0 || (time(NULL) - lastDiskSpaceCheck) > DISKSPACECHEK) {
++  if (lastFreeMB <= 0 || (time(nullptr) - lastDiskSpaceCheck) > DISKSPACECHEK) {
+      dev_t fsid = 0;
+      int freediskspace = 0;
+      std::string path = cVideoDirectory::Name();
+      path += "/";
+-     char *tmpbase = Directory ? ExchangeChars(strdup(currentBase), true) : NULL;
++     char *tmpbase = Directory ? ExchangeChars(strdup(currentBase), true) : nullptr;
+      if (tmpbase)
+         path += tmpbase;
+      struct stat statdir;
+@@ -566,7 +566,7 @@ int FreeMB(const char *Base, bool menurecording)
+         }
+      free(tmpbase);
+      lastFreeMB = freediskspace;
+-     lastDiskSpaceCheck = time(NULL);
++     lastDiskSpaceCheck = time(nullptr);
+      }
+   free(currentBase);
+   if (lastFreeMB == 0)
+diff --git a/tools.h b/tools.h
+index 5507e56..eeaea56 100644
+--- a/tools.h
++++ b/tools.h
+@@ -13,9 +13,9 @@ enum eMarginUsage {
+   };
+ 
+ typedef struct DrawPoster {
+-  cOsd *osd = NULL;
+-  const cEvent *Event = NULL;
+-  const cRecording *Recording = NULL;
++  cOsd *osd = nullptr;
++  const cEvent *Event = nullptr;
++  const cRecording *Recording = nullptr;
+   int layer = 3;
+   int x = 0;
+   int y = 0;
+@@ -39,7 +39,7 @@ void DrawRectangle(cPixmap *Pixmap, int x1, int y1, int x2, int y2, tColor Color
+ void DrawRectangleOutline(cOsd *Osd, cPixmap *Pixmap, int x1, int y1, int x2, int y2, tColor Color1, tColor Color2, int Usage = 0, int Margin = 0);
+ void DrawEllipseOutline(cOsd *Osd, cPixmap *Pixmap, int x, int y, int w, int h, tColor Color1, tColor Color2, int Quadrants = 0, int Margin = 0);
+ void DrawProgressbar(cPixmap *p, int left, int top, int width, int height, int Current, int Total, tColor color, tColor colorBlending, bool blend = false, bool partial = false);
+-int GetFrameAfterEdit(const cMarks *marks = NULL, int Frame = 0, int LastFrame = 0);
++int GetFrameAfterEdit(const cMarks *marks = nullptr, int Frame = 0, int LastFrame = 0);
+ int FreeMB(const char *Base, bool menurecording = false);
+ std::string StripXmlTag(std::string &Line, const char *Tag);
+ cString GetScreenResolutionIcon(void);
+-- 
+2.47.3
+

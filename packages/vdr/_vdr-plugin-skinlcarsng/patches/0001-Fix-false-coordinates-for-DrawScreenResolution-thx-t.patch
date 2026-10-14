@@ -1,0 +1,26 @@
+From 8cadd6739aa5f27a9bb32f06468f03f20db80641 Mon Sep 17 00:00:00 2001
+From: kamel5 <vdr.kamel5 (at) gmx (dot) net>
+Date: Sun, 7 Jun 2026 11:35:36 +0200
+Subject: [PATCH] Fix false coordinates for DrawScreenResolution() (thx to
+ @rell at vdr-portal.de)
+
+---
+ displaychannel.c | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/displaychannel.c b/displaychannel.c
+index c97debd..66dc918 100644
+--- a/displaychannel.c
++++ b/displaychannel.c
+@@ -796,7 +796,7 @@ void cLCARSNGDisplayChannel::Flush(void)
+         DrawSeen(Current, Total);
+         DrawTrack(osd, xc14 + Margin, yc15 + Margin, xc18 - textBorder - 2 * Margin, yc16 - 2 * Margin,  Theme.Color(clrTrackName), frameColorBg, (zoom) ? smlFont : osdFont, &lastTrackId);
+         int x = leftIcons - SymbolSpacing;
+-        DrawScreenResolution(osd, xc19 + Margin, yc15 + Margin, x - xc19 - 2 * Margin, yc16 - yc15 - 2 * Margin, Theme.Color(clrChannelSymbolOn), frameColorBr, (zoom) ? smlFont : osdFont, &oldResolution);
++        DrawScreenResolution(osd, xc19 + Margin, yc15 + Margin, x - 2 * Margin, yc16 - 2 * Margin, Theme.Color(clrChannelSymbolOn), frameColorBr, (zoom) ? smlFont : osdFont, &oldResolution);
+ 	DrawEventRec(present, following);
+         DrawBlinkingRec();
+         }
+-- 
+2.47.3
+

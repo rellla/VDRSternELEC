@@ -1,0 +1,147 @@
+From 875bfc4d73b77a85864b2d029a1d3eb01a88fe50 Mon Sep 17 00:00:00 2001
+From: kamel5 <vdr.kamel5 (at) gmx (dot) net>
+Date: Sun, 7 Jun 2026 17:29:01 +0200
+Subject: [PATCH] Merge  DrawDeviceData(cOsd *osd) and  DrawDeviceData(cPixmap
+ *pixmap)
+
+---
+ displaychannel.c |  2 +-
+ displaymenu.c    |  2 +-
+ tools.c          | 62 ++++++++++++++++--------------------------------
+ tools.h          |  3 +--
+ 4 files changed, 24 insertions(+), 45 deletions(-)
+
+diff --git a/displaychannel.c b/displaychannel.c
+index 021a1e2..6300e29 100644
+--- a/displaychannel.c
++++ b/displaychannel.c
+@@ -341,7 +341,7 @@ void cLCARSNGDisplayChannel::DrawSeen(int Current, int Total)
+ void cLCARSNGDisplayChannel::DrawDevice(void)
+ {
+   const cDevice *Device = cDevice::ActualDevice();
+-  if (DrawDeviceData(osd, Device, xc06, yc15, xc09, yc16, xs, tinyFont, lastDeviceType, lastCamSlot, Device->DeviceNumber() != lastDeviceNumber)) {
++  if (DrawDeviceData(osd, nullptr, Device, xc06, yc15, xc09 - 1, yc16 - 1, xs, tinyFont, lastDeviceType, lastCamSlot, Device->DeviceNumber() != lastDeviceNumber)) {
+      lastDeviceNumber = Device->DeviceNumber();
+      // Make sure signal meters are redrawn:
+      lastSignalStrength = -1;
+diff --git a/displaymenu.c b/displaymenu.c
+index fdbbac4..744ead1 100644
+--- a/displaymenu.c
++++ b/displaymenu.c
+@@ -1004,7 +1004,7 @@ void cLCARSNGDisplayMenu::DrawDevice(const cDevice *Device)
+   int dn = Device->DeviceNumber();
+   int y = deviceOffset[dn];
+   if (y + lineHeight <= ys05) {
+-     if (DrawDeviceData(osd, Device, xs08, y, xs11, y + lineHeight, xs, tinyFont, lastDeviceType[dn], lastCamSlot[dn], initial)) {
++     if (DrawDeviceData(osd, nullptr, Device, xs08, y, xs11 - 1, y + lineHeight - 1, xs, tinyFont, lastDeviceType[dn], lastCamSlot[dn], initial)) {
+         // Make sure signal meters are redrawn:
+         lastSignalStrength[dn] = -1;
+         lastSignalQuality[dn] = -1;
+diff --git a/tools.c b/tools.c
+index ae7a450..7f14a98 100644
+--- a/tools.c
++++ b/tools.c
+@@ -107,7 +107,7 @@ cPixmap *DrawPoster(DrawPoster_t dP) {
+   return PosterPixmap;
+ }
+ 
+-bool DrawDeviceData(cPixmap *Pixmap, const cDevice *Device, int x, int y, int w, int h, int &xs, const cFont *TinyFont, cString &LastDeviceType, cCamSlot *&LastCamSlot, bool Initial)
++bool DrawDeviceData(cOsd *Osd, cPixmap *Pixmap, const cDevice *Device, int x0, int y0, int x1, int y1, int &xs, const cFont *TinyFont, cString &LastDeviceType, cCamSlot *&LastCamSlot, bool Initial)
+ {
+   cString DeviceType = Device->DeviceType();
+   cCamSlot *CamSlot = Device->CamSlot();
+@@ -115,49 +115,26 @@ bool DrawDeviceData(cPixmap *Pixmap, const cDevice *Device, int x, int y, int w,
+      const cFont *font = cFont::GetFont(fontOsd);
+      tColor ColorFg = Theme.Color(clrDeviceFg);
+      tColor ColorBg = Theme.Color(clrDeviceBg);
+-     Pixmap->DrawRectangle(cRect(x, y, w, h), ColorBg);
+-     // Device number:
+-     cString Nr = itoa(Device->DeviceNumber() + 1);
+-     int W = max(font->Width(Nr), h);
+-     Pixmap->DrawText(cPoint(x, y), Nr, ColorFg, ColorBg, font, W, h, taCenter);
+-     x += W;
+-     // Device type:
+-     Pixmap->DrawText(cPoint(x, y), DeviceType, ColorFg, ColorBg, TinyFont);
+-     xs = max(xs, W + TinyFont->Width(DeviceType));
+-     LastDeviceType = DeviceType;
+-     // CAM:
+-     if (CamSlot) {
+-#if APIVERSNUM > 20302
+-        cString s = cString::sprintf("CAM %d", CamSlot->MasterSlotNumber());
+-#else
+-        cString s = cString::sprintf("CAM %d", CamSlot->SlotNumber());
+-#endif
+-        Pixmap->DrawText(cPoint(x, y + h - TinyFont->Height()), s, ColorFg, ColorBg, TinyFont);
+-        xs = max(xs, W + TinyFont->Width(s));
+-        }
+-     LastCamSlot = CamSlot;
+-     return true;
+-     }
+-  return false;
+-}
+-
+-bool DrawDeviceData(cOsd *Osd, const cDevice *Device, int x0, int y0, int x1, int y1, int &xs, const cFont *TinyFont, cString &LastDeviceType, cCamSlot *&LastCamSlot, bool Initial)
+-{
+-  cString DeviceType = Device->DeviceType();
+-  cCamSlot *CamSlot = Device->CamSlot();
+-  if (Initial || strcmp(DeviceType, LastDeviceType) || CamSlot != LastCamSlot) {
+-     const cFont *font = cFont::GetFont(fontOsd);
+-     tColor ColorFg = Theme.Color(clrDeviceFg);
+-     tColor ColorBg = Theme.Color(clrDeviceBg);
+-     Osd->DrawRectangle(x0, y0, x1 - 1, y1 - 1, ColorBg);
++     int w = x1 - x0;
++     int h = y1 - y0;
++     if (Pixmap)
++        Pixmap->DrawRectangle(cRect(x0, y0, w, h), ColorBg);
++     else
++        Osd->DrawRectangle(x0, y0, x1, y1, ColorBg);
+      int x = x0;
+      // Device number:
+      cString Nr = itoa(Device->DeviceNumber() + 1);
+-     int w = max(font->Width(Nr), y1 - y0);
+-     Osd->DrawText(x, y0, Nr, ColorFg, ColorBg, font, w, y1 - y0, taCenter);
+-     x += w;
++     int wl = max(font->Width(Nr), h);
++     if (Pixmap)
++        Pixmap->DrawText(cPoint(x, y0), Nr, ColorFg, ColorBg, font, wl, h, taCenter);
++     else
++        Osd->DrawText(x, y0, Nr, ColorFg, ColorBg, font, wl, h, taCenter);
++     x += wl;
+      // Device type:
+-     Osd->DrawText(x, y0, DeviceType, ColorFg, ColorBg, TinyFont);
++     if (Pixmap)
++        Pixmap->DrawText(cPoint(x0, y0), DeviceType, ColorFg, ColorBg, TinyFont);
++     else
++        Osd->DrawText(x, y0, DeviceType, ColorFg, ColorBg, TinyFont);
+      xs = max(xs, x + TinyFont->Width(DeviceType));
+      LastDeviceType = DeviceType;
+      // CAM:
+@@ -167,7 +144,10 @@ bool DrawDeviceData(cOsd *Osd, const cDevice *Device, int x0, int y0, int x1, in
+ #else
+         cString s = cString::sprintf("CAM %d", CamSlot->SlotNumber());
+ #endif
+-        Osd->DrawText(x, y1 - TinyFont->Height(), s, ColorFg, ColorBg, TinyFont);
++        if (Pixmap)
++           Pixmap->DrawText(cPoint(x, y1 - TinyFont->Height()), s, ColorFg, ColorBg, TinyFont);
++        else
++           Osd->DrawText(x, y1 - TinyFont->Height(), s, ColorFg, ColorBg, TinyFont);
+         xs = max(xs, x + TinyFont->Width(s));
+         }
+      LastCamSlot = CamSlot;
+diff --git a/tools.h b/tools.h
+index a58ded4..ba359a8 100644
+--- a/tools.h
++++ b/tools.h
+@@ -28,8 +28,7 @@ cFont *CreateTinyFont(int LineHeight);
+ cOsd *CreateOsd(int Left, int Top, int x0, int y0, int x1, int y1);
+ cPixmap *CreatePixmap(cOsd *osd, cString Name = "", int Layer = 0, const cRect &ViewPort = cRect::Null, const cRect &DrawPort = cRect::Null);
+ cPixmap *DrawPoster(DrawPoster_t dP);
+-bool DrawDeviceData(cPixmap *Pixmap, const cDevice *Device, int x, int y, int w, int h, int &xs, const cFont *TinyFont, cString &LastDeviceType, cCamSlot *&LastCamSlot, bool Initial);
+-bool DrawDeviceData(cOsd *Osd, const cDevice *Device, int x0, int y0, int x1, int y1, int &xs, const cFont *TinyFont, cString &LastDeviceType, cCamSlot *&LastCamSlot, bool Initial);
++bool DrawDeviceData(cOsd *Osd, cPixmap *Pixmap, const cDevice *Device, int x0, int y0, int x1, int y1, int &xs, const cFont *TinyFont, cString &LastDeviceType, cCamSlot *&LastCamSlot, bool Initial);
+ void DrawDeviceSignal(cPixmap *Pixmap, const cDevice *Device, int x, int y, int w, int h, int &LastSignalStrength, int &LastSignalQuality, bool Initial);
+ void DrawDeviceSignal(cOsd *Osd, const cDevice *Device, int x0, int y0, int x1, int y1, int &LastSignalStrength, int &LastSignalQuality, bool Initial);
+ void DrawDevicePosition(cOsd *Osd, cPixmap *Pixmap, const cPositioner *Positioner, int x0, int y0, int x1, int y1, int &LastCurrent);
+-- 
+2.47.3
+
