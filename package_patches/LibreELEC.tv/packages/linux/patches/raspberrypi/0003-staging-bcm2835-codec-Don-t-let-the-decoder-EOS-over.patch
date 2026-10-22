@@ -1,0 +1,182 @@
+From a2c33941aba0f666fda78ed30b295de9d4065f11 Mon Sep 17 00:00:00 2001
+From: Andreas Baierl <ichgeh@imkreisrum.de>
+Date: Wed, 21 Oct 2026 12:44:25 +0200
+Subject: [PATCH 3/3] staging: bcm2835-codec: Don't let the decoder EOS
+ overtake queued buffers
+
+V4L2_DEC_CMD_STOP submits the EOS buffer to the VPU directly, while
+OUTPUT buffers are only passed on from device_run(). If the command
+arrives before device_run() has picked up the last queued buffer, the
+VPU receives the EOS before that frame:
+
+  vidioc_decoder_cmd, cmd 1
+  device_run: Submitted ip buffer len 178579, pts 21356, flags 0004
+  ip_buffer_cb: eos buffer returned.
+
+The frame is then never decoded and no EOS is returned on CAPTURE, so
+the drain only ends by a timeout in userspace and the decoder stays
+stuck. This happens readily when a single frame is queued and drained
+straight away, e.g. in trick play.
+
+The V4L2 stateful decoder spec requires all OUTPUT buffers queued before
+V4L2_DEC_CMD_STOP to be processed first. If OUTPUT buffers are still
+waiting in the m2m queue, defer the EOS and submit it from device_run()
+after the last of them. A deferred EOS is dropped when OUTPUT is
+stopped.
+
+Signed-off-by: Andreas Baierl <ichgeh@imkreisrum.de>
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+Claude-Session: https://claude.ai/code/session_01U8m77zxZBqWxJfZ1vTmVej
+---
+ .../bcm2835-codec/bcm2835-v4l2-codec.c        | 70 ++++++++++++++++---
+ 1 file changed, 62 insertions(+), 8 deletions(-)
+
+diff --git a/drivers/staging/vc04_services/bcm2835-codec/bcm2835-v4l2-codec.c b/drivers/staging/vc04_services/bcm2835-codec/bcm2835-v4l2-codec.c
+index 89dea0229..d0d78dee6 100644
+--- a/drivers/staging/vc04_services/bcm2835-codec/bcm2835-v4l2-codec.c
++++ b/drivers/staging/vc04_services/bcm2835-codec/bcm2835-v4l2-codec.c
+@@ -717,6 +717,14 @@ struct bcm2835_codec_ctx {
+ 	 */
+ 	bool needs_reset;
+ 
++	/*
++	 * Decode only: V4L2_DEC_CMD_STOP was received while OUTPUT buffers
++	 * were still waiting in the m2m queue. The EOS is submitted by
++	 * device_run() after the last of them. Protected by eos_lock.
++	 */
++	bool eos_pending;
++	struct mutex eos_lock;
++
+ 	enum v4l2_colorspace	colorspace;
+ 	enum v4l2_ycbcr_encoding ycbcr_enc;
+ 	enum v4l2_xfer_func	xfer_func;
+@@ -1328,6 +1336,19 @@ static void vb2_to_mmal_buffer(struct m2m_mmal_buffer *buf,
+  * a device. This will be called by the framework when it decides to schedule
+  * a particular instance.
+  */
++/* Submit the decoder EOS buffer to the VPU input port */
++static void bcm2835_codec_submit_eos(struct bcm2835_codec_ctx *ctx)
++{
++	int ret;
++
++	ret = vchiq_mmal_submit_buffer(ctx->dev->instance,
++				       &ctx->component->input[0],
++				       &ctx->q_data[V4L2_M2M_SRC].eos_buffer.mmal);
++	if (ret)
++		v4l2_err(&ctx->dev->v4l2_dev, "%s: EOS buffer submit failed %d\n",
++			 __func__, ret);
++}
++
+ static void device_run(void *priv)
+ {
+ 	struct bcm2835_codec_ctx *ctx = priv;
+@@ -1339,6 +1360,7 @@ static void device_run(void *priv)
+ 
+ 	v4l2_dbg(3, debug, &ctx->dev->v4l2_dev, "%s: off we go\n", __func__);
+ 
++	mutex_lock(&ctx->eos_lock);
+ 	if (ctx->fh.m2m_ctx->out_q_ctx.q.streaming) {
+ 		src_buf = v4l2_m2m_buf_remove(&ctx->fh.m2m_ctx->out_q_ctx);
+ 		if (src_buf) {
+@@ -1360,7 +1382,16 @@ static void device_run(void *priv)
+ 					 "%s: Failed submitting ip buffer\n",
+ 					 __func__);
+ 		}
++
++		if (ctx->eos_pending &&
++		    !v4l2_m2m_num_src_bufs_ready(ctx->fh.m2m_ctx)) {
++			v4l2_dbg(2, debug, &ctx->dev->v4l2_dev, "%s: Submitting deferred EOS\n",
++				 __func__);
++			ctx->eos_pending = false;
++			bcm2835_codec_submit_eos(ctx);
++		}
+ 	}
++	mutex_unlock(&ctx->eos_lock);
+ 
+ 	if (ctx->fh.m2m_ctx->cap_q_ctx.q.streaming) {
+ 		dst_buf = v4l2_m2m_buf_remove(&ctx->fh.m2m_ctx->cap_q_ctx);
+@@ -2517,13 +2548,23 @@ static int vidioc_decoder_cmd(struct file *file, void *priv,
+ 		if (!ctx->component)
+ 			break;
+ 
+-		ret = vchiq_mmal_submit_buffer(ctx->dev->instance,
+-					       &ctx->component->input[0],
+-					       &q_data->eos_buffer.mmal);
+-		if (ret)
+-			v4l2_err(&ctx->dev->v4l2_dev,
+-				 "%s: EOS buffer submit failed %d\n",
+-				 __func__, ret);
++		/*
++		 * The EOS buffer is passed to the VPU directly, so it must not
++		 * overtake OUTPUT buffers that are still waiting for
++		 * device_run(). Otherwise the VPU sees the EOS before the last
++		 * frame(s), never returns them and stays stuck in the drain.
++		 */
++		mutex_lock(&ctx->eos_lock);
++		if (ctx->fh.m2m_ctx->out_q_ctx.q.streaming &&
++		    v4l2_m2m_num_src_bufs_ready(ctx->fh.m2m_ctx)) {
++			v4l2_dbg(2, debug, &ctx->dev->v4l2_dev, "%s: Deferring EOS behind %u queued buffers\n",
++				 __func__,
++				 v4l2_m2m_num_src_bufs_ready(ctx->fh.m2m_ctx));
++			ctx->eos_pending = true;
++		} else {
++			bcm2835_codec_submit_eos(ctx);
++		}
++		mutex_unlock(&ctx->eos_lock);
+ 
+ 		break;
+ 
+@@ -3195,6 +3236,9 @@ static int bcm2835_codec_start_streaming(struct vb2_queue *q,
+ 		mmal_vchi_buffer_init(dev->instance,
+ 				      &q_data->eos_buffer.mmal);
+ 		q_data->eos_buffer_in_use = false;
++		mutex_lock(&ctx->eos_lock);
++		ctx->eos_pending = false;
++		mutex_unlock(&ctx->eos_lock);
+ 
+ 		ret = vchiq_mmal_port_enable(dev->instance,
+ 					     port,
+@@ -3281,8 +3325,15 @@ static void bcm2835_codec_stop_streaming(struct vb2_queue *q)
+ 		ctx->component_enabled = false;
+ 	}
+ 
+-	if (V4L2_TYPE_IS_OUTPUT(q->type))
++	if (V4L2_TYPE_IS_OUTPUT(q->type)) {
++		mutex_lock(&ctx->eos_lock);
++		if (ctx->eos_pending) {
++			ctx->eos_pending = false;
++			q_data->eos_buffer_in_use = false;
++		}
++		mutex_unlock(&ctx->eos_lock);
+ 		mmal_vchi_buffer_cleanup(&q_data->eos_buffer.mmal);
++	}
+ 
+ 	/*
+ 	 * After a drain the VPU decoder ignores all further input, so a
+@@ -3466,6 +3517,7 @@ static int bcm2835_codec_open(struct file *file)
+ 		rc = -ENOMEM;
+ 		goto open_unlock;
+ 	}
++	mutex_init(&ctx->eos_lock);
+ 
+ 	ctx->q_data[V4L2_M2M_SRC].fmt = get_default_format(dev, false);
+ 	ctx->q_data[V4L2_M2M_DST].fmt = get_default_format(dev, true);
+@@ -3676,6 +3728,7 @@ static int bcm2835_codec_open(struct file *file)
+ 
+ free_ctrl_handler:
+ 	v4l2_ctrl_handler_free(hdl);
++	mutex_destroy(&ctx->eos_lock);
+ 	kfree(ctx);
+ open_unlock:
+ 	mutex_unlock(&dev->dev_mutex);
+@@ -3700,6 +3753,7 @@ static int bcm2835_codec_release(struct file *file)
+ 		vchiq_mmal_component_finalise(dev->instance, ctx->component);
+ 
+ 	mutex_unlock(&dev->dev_mutex);
++	mutex_destroy(&ctx->eos_lock);
+ 	kfree(ctx);
+ 
+ 	atomic_dec(&dev->num_inst);
+-- 
+2.43.0
+
