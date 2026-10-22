@@ -1,0 +1,68 @@
+From 4afab32c4c4d95c5b0c8b4388d4a08998150b316 Mon Sep 17 00:00:00 2001
+From: Andreas Baierl <ichgeh@imkreisrum.de>
+Date: Mon, 19 Oct 2026 15:24:32 +0200
+Subject: [PATCH 1/3] staging: bcm2835-codec: Fix inverted check when waiting
+ for buffers
+
+bcm2835_codec_flush_buffers() waits on frame_cmplt for the VPU to hand
+back all buffers after vchiq_mmal_port_disable(). The buffer callbacks
+however only signal the completion while buffers_with_vpu is still
+non-zero. As the MMAL core decrements the counter before calling the
+callback, the waiter is woken by the first returned buffer while the
+rest are still outstanding, and never by the last one.
+
+stop_streaming() then returns with buffers still owned by the VPU:
+
+  bcm2835_codec_flush_buffers: Waiting for buffers to be returned - 7 outstanding
+  WARNING: ... at __vb2_queue_cancel+0x28c/0x328 [videobuf2_common]
+  videobuf2_common: driver bug: stop_streaming operation is leaving buffer 2 in active state
+
+The stale buffers are returned by the VPU after the next STREAMON and
+get resubmitted while the same vb2 buffers have been queued again by
+userspace. With a decoder that is drained (V4L2_DEC_CMD_STOP), restarted
+with STREAMOFF/STREAMON and fed again, the next drain then returns only
+the EOS buffer and the decoded frame is lost.
+
+Signal the completion once the last buffer has been returned.
+
+Signed-off-by: Andreas Baierl <ichgeh@imkreisrum.de>
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+Claude-Session: https://claude.ai/code/session_01U8m77zxZBqWxJfZ1vTmVej
+---
+ .../vc04_services/bcm2835-codec/bcm2835-v4l2-codec.c        | 6 +++---
+ 1 file changed, 3 insertions(+), 3 deletions(-)
+
+diff --git a/drivers/staging/vc04_services/bcm2835-codec/bcm2835-v4l2-codec.c b/drivers/staging/vc04_services/bcm2835-codec/bcm2835-v4l2-codec.c
+index 903cb88d8..075ba9af7 100644
+--- a/drivers/staging/vc04_services/bcm2835-codec/bcm2835-v4l2-codec.c
++++ b/drivers/staging/vc04_services/bcm2835-codec/bcm2835-v4l2-codec.c
+@@ -1008,7 +1008,7 @@ static void ip_buffer_cb(struct vchiq_mmal_instance *instance,
+ 	v4l2_dbg(2, debug, &ctx->dev->v4l2_dev, "%s: done %d input buffers\n",
+ 		 __func__, ctx->num_ip_buffers);
+ 
+-	if (!port->enabled && atomic_read(&port->buffers_with_vpu))
++	if (!port->enabled && !atomic_read(&port->buffers_with_vpu))
+ 		complete(&ctx->frame_cmplt);
+ }
+ 
+@@ -1211,7 +1211,7 @@ static void op_buffer_cb(struct vchiq_mmal_instance *instance,
+ 		if (!(mmal_buf->mmal_flags & MMAL_BUFFER_HEADER_FLAG_EOS)) {
+ 			if (!port->enabled) {
+ 				vb2_buffer_done(&vb2->vb2_buf, VB2_BUF_STATE_QUEUED);
+-				if (atomic_read(&port->buffers_with_vpu))
++				if (!atomic_read(&port->buffers_with_vpu))
+ 					complete(&ctx->frame_cmplt);
+ 			} else {
+ 				vchiq_mmal_submit_buffer(ctx->dev->instance,
+@@ -1259,7 +1259,7 @@ static void op_buffer_cb(struct vchiq_mmal_instance *instance,
+ 	v4l2_dbg(2, debug, &ctx->dev->v4l2_dev, "%s: done %d output buffers\n",
+ 		 __func__, ctx->num_op_buffers);
+ 
+-	if (!port->enabled && atomic_read(&port->buffers_with_vpu))
++	if (!port->enabled && !atomic_read(&port->buffers_with_vpu))
+ 		complete(&ctx->frame_cmplt);
+ }
+ 
+-- 
+2.43.0
+
