@@ -1,0 +1,447 @@
+From fe2d6cfa37f94503f0a741c4205da0cc7e0bfac5 Mon Sep 17 00:00:00 2001
+From: Andreas Baierl <ichgeh@imkreisrum.de>
+Date: Sun, 8 Nov 2026 10:50:17 +0100
+Subject: [PATCH 1/3] device: log lost and damaged video ts packets
+
+VDR drops the PES of a TS packet with the transport error indicator
+set, but passes a PES with lost packets on. Such an incomplete access
+unit may hang a hardware decoder.
+
+Check the continuity counter, the transport error indicator and the
+scrambling of the video TS packets and log the errors with the new
+debug log category for TS errors.
+
+Co-Authored-By: Claude Opus 5.5
+---
+ README.md          |  1 +
+ config.cpp         |  2 +
+ device.cpp         | 16 +++++++-
+ device.h           |  3 ++
+ logger.cpp         |  3 ++
+ logger.h           |  1 +
+ pes.cpp            | 91 +++++++++++++++++++++++++++++++++++++++++++++
+ pes.h              | 34 ++++++++++++++++-
+ po/de_DE.po        |  3 ++
+ setupmenu.cpp      |  3 ++
+ setupmenu.h        |  1 +
+ tests/test_pes.cpp | 92 ++++++++++++++++++++++++++++++++++++++++++++++
+ 12 files changed, 247 insertions(+), 3 deletions(-)
+
+diff --git a/README.md b/README.md
+index 233bdf3..ff6ac5e 100644
+--- a/README.md
++++ b/README.md
+@@ -334,6 +334,7 @@ Setup: /etc/vdr/setup.conf
+ 			4096  Packet tracking logs (decoder + display)
+ 			8192  Grabbing debug logs
+ 			16384 FFmpeg debug logs
++			32768 TS error logs (lost and damaged video packets)
+ 
+ 	drmdevice.LogFFmpegLevel = 0
+ 		max. level of the FFmpeg logs (only used with the FFmpeg debug logs)
+diff --git a/config.cpp b/config.cpp
+index b8f1029..4242d0c 100644
+--- a/config.cpp
++++ b/config.cpp
+@@ -174,6 +174,8 @@ void cDeviceConfig::PrintLogLevel(int loglevel)
+ 		strcat(prefix, " OpenGL OSD,");
+ 	if (loglevel & L_PACKET)
+ 		strcat(prefix, " packet tracking,");
++	if (loglevel & L_TS)
++		strcat(prefix, " ts errors,");
+ 	if (loglevel & L_GRAB)
+ 		strcat(prefix, " grabbing");
+ 
+diff --git a/device.cpp b/device.cpp
+index 07e2aa1..efffaff 100644
+--- a/device.cpp
++++ b/device.cpp
+@@ -566,13 +566,25 @@ int cOutputDevice::PlayAudio(const uchar *data, int size, uchar id)
+  */
+ int cOutputDevice::PlayTs(const uchar *data, int length, bool videoOnly)
+ {
++	if (!data)
++		m_tsVideoCheck.Reset();
++
+ 	// the synchronous audio has to fill the buffer up to the playback start threshold
+ 	if (m_zapCache.SpliceArmed && m_zapCache.SpliceArmed() && data && length >= TS_SIZE) {
+-		if (m_zapCache.Splice(data, GetBufferFillLevelThresholdMs(), PlayBufferedTs, this) >= 0)
++		if (m_zapCache.Splice(data, GetBufferFillLevelThresholdMs(), PlayBufferedTs, this) >= 0) {
+ 			m_zapCacheSwitch = true;
++			// the buffered packets aren't checked, the counters continue with the live packets
++			m_tsVideoCheck.Reset();
++		}
+ 	}
+ 
+-	return cDevice::PlayTs(data, length, videoOnly);
++	int played = cDevice::PlayTs(data, length, videoOnly);
++
++	// check only the played packets, the others are passed again
++	if (data && played > 0)
++		m_tsVideoCheck.Check(data, played);
++
++	return played;
+ }
+ 
+ /**
+diff --git a/device.h b/device.h
+index c67978d..3ef18f6 100644
+--- a/device.h
++++ b/device.h
+@@ -309,6 +309,9 @@ private:
+ 	cPipHandler *m_pPipHandler = nullptr; ///< pointer to pip handler (exists also in detached state)
+ 	ZapCacheService_v1_0 m_zapCache = {}; ///< service interface of the zapcache plugin (empty without the plugin, set in Start())
+ 	std::atomic<bool> m_zapCacheSwitch = false; ///< the current channel switch started with the buffer of the zapcache plugin
++
++	cTsVideoCheck m_tsVideoCheck;    ///< checks the video TS packets for lost and damaged packets
++
+ 	std::mutex m_sizeMutex;          ///< mutex to lock screen size (which is accessed by different threads)
+ 	std::atomic<bool> m_receivedAudio = false; ///< flag if audio packets have been received
+ 	std::atomic<bool> m_receivedVideo = false; ///< flag if video packets have been received
+diff --git a/logger.cpp b/logger.cpp
+index 5765371..f3abd88 100644
+--- a/logger.cpp
++++ b/logger.cpp
+@@ -191,6 +191,9 @@ void cLogger::LogDebug2(const int cat, const char *format, ...)
+ 	case L_GRAB:
+ 		strcpy(prefix, "[Grab]");
+ 		break;
++	case L_TS:
++		strcpy(prefix, "[TS]");
++		break;
+ 	case L_DEBUG:
+ 	default:
+ 		return;
+diff --git a/logger.h b/logger.h
+index d77d627..74854c8 100644
+--- a/logger.h
++++ b/logger.h
+@@ -73,6 +73,7 @@ enum LogFlags {
+ 	L_PACKET          = (1 << 12), ///< decoder packet/frame tracking logs
+ 	L_GRAB            = (1 << 13), ///< grabbing logs
+ 	L_FFMPEG          = (1 << 14), ///< ffmpeg logs
++	L_TS              = (1 << 15), ///< ts error logs (lost and damaged video packets)
+ };
+ 
+ /** @} */
+diff --git a/pes.cpp b/pes.cpp
+index 730e5fa..712607a 100644
+--- a/pes.cpp
++++ b/pes.cpp
+@@ -332,6 +332,24 @@ bool cPes::IsValid(void)
+ 	return m_valid;
+ }
+ 
++/**
++ * Check, if data starts a video PES packet
++ *
++ * Only the start code prefix and the stream ID are checked, nothing is logged
++ * (e.g. to detect the video PID from the TS packets).
++ *
++ * @param data      data to check
++ * @param size      size of the data
++ *
++ * @return true, if a video PES packet starts
++ */
++bool cPesVideo::IsStart(const uint8_t *data, int size)
++{
++	return size > (int)PES_PACKET_START_CODE_PREFIX_LEN &&
++	       ReadBytes(data, PES_PACKET_START_CODE_PREFIX_LEN) == PES_PACKET_START_CODE_PREFIX &&
++	       IsVideoStreamId(data[PES_PACKET_START_CODE_PREFIX_LEN]);
++}
++
+ /**
+  * Check if the PES header is valid
+  *
+@@ -843,3 +861,76 @@ int64_t cPtsTrackingBuffer::GetPts(void)
+ 
+ 	return m_pts.begin()->second;
+ }
++
++/*****************************************************************************
++ * TS video check
++ ****************************************************************************/
++
++/**
++ * Reset the check (e.g. at a channel switch)
++ */
++void cTsVideoCheck::Reset(void)
++{
++	m_videoPid.reset();
++	m_cc.fill(-1);
++	m_initialized = true;
++}
++
++/**
++ * Check TS packets for lost, damaged and scrambled packets of the video and log them
++ *
++ * @param data      TS packets
++ * @param length    length of the data
++ */
++void cTsVideoCheck::Check(const uint8_t *data, int length)
++{
++	if (!m_initialized)
++		Reset();
++
++	for (; length >= TS_SIZE; data += TS_SIZE, length -= TS_SIZE) {
++		if (data[0] != TS_SYNC_BYTE)
++			break;
++
++		int pid = TsPid(data);
++
++		// a video PID starts a PES with a video stream id
++		if (TsPayloadStart(data) && !TsError(data) && !TsIsScrambled(data)) {
++			int offset = TsPayloadOffset(data);
++			if (offset < TS_SIZE && cPesVideo::IsStart(data + offset, TS_SIZE - offset))
++				m_videoPid.set(pid);
++		}
++
++		if (!m_videoPid.test(pid))
++			continue;
++
++		if (TsError(data)) {
++			m_errorPackets++;
++			m_cc[pid] = -1;
++			LOGDEBUG2(L_TS, "ts check: video PID %d: transport error indicator set, VDR drops the PES", pid);
++			continue;
++		}
++
++		if (TsIsScrambled(data)) {
++			m_scrambledPackets++;
++			LOGDEBUG2(L_TS, "ts check: video PID %d: scrambled packet", pid);
++		}
++
++		// the counter is only incremented with a payload
++		if (!TsHasPayload(data))
++			continue;
++
++		int cc = TsContinuityCounter(data);
++		int last = m_cc[pid];
++		bool discontinuity = TsHasAdaptationField(data) && data[4] > 0 && (data[5] & TS_ADAPT_DISCONT);
++
++		// a duplicate packet has the same counter
++		if (last >= 0 && !discontinuity && cc != last && cc != ((last + 1) & TS_CONT_CNT_MASK)) {
++			int lost = (cc - last - 1) & TS_CONT_CNT_MASK;
++			m_lostPackets += lost;
++			LOGDEBUG2(L_TS, "ts check: video PID %d: continuity error, expected %d got %d, %d packet(s) lost",
++				  pid, (last + 1) & TS_CONT_CNT_MASK, cc, lost);
++		}
++
++		m_cc[pid] = cc;
++	}
++}
+diff --git a/pes.h b/pes.h
+index 901e3bb..8393a50 100644
+--- a/pes.h
++++ b/pes.h
+@@ -10,6 +10,9 @@
+ #ifndef __DRMDEVICE_PES_H
+ #define __DRMDEVICE_PES_H
+ 
++#include <array>
++#include <atomic>
++#include <bitset>
+ #include <cstdint>
+ #include <map>
+ #include <vector>
+@@ -108,8 +111,10 @@ class cPesVideo : public cPes {
+ public:
+ 	/** Parse a video PES packet of the given size */
+ 	cPesVideo(const uint8_t *data, int size) : cPes(data, size, false) { cPes::Init(); }
++	static bool IsVideoStreamId(uint8_t id) { return (id & 0xF0) == 0xE0; } ///< video stream IDs are in the range 0xE0-0xEF
++	static bool IsStart(const uint8_t *, int);
+ private:
+-	bool IsStreamIdValid(void) override { return (GetStreamId() & 0xF0) == 0xE0; } ///< video stream IDs are in the range 0xE0-0xEF
++	bool IsStreamIdValid(void) override { return IsVideoStreamId(GetStreamId()); } ///< true, if it is a video stream ID
+ };
+ 
+ /**
+@@ -241,4 +246,31 @@ private:
+ 	bool m_ptsInvalid = false;                ///< flag indicating if PTS is invalid for current buffer, because it was truncated
+ };
+ 
++/**
++ * Check the TS packets of the video for lost and damaged packets (diagnosis)
++ *
++ * VDR drops the PES of a packet with the transport error indicator set, but it passes a PES
++ * with lost packets (a gap of the continuity counter) on. Such an incomplete access unit may
++ * hang a hardware decoder. The video PIDs are detected by the stream id of their PES.
++ *
++ * @ingroup misc
++ */
++class cTsVideoCheck {
++public:
++	void Reset(void);
++	void Check(const uint8_t *, int);
++	int GetLostPackets(void) const { return m_lostPackets; }           ///< number of lost packets
++	int GetErrorPackets(void) const { return m_errorPackets; }         ///< number of packets with an error
++	int GetScrambledPackets(void) const { return m_scrambledPackets; } ///< number of scrambled packets
++private:
++	static constexpr int NUM_PIDS = 0x2000;  ///< number of PIDs
++
++	std::bitset<NUM_PIDS> m_videoPid;        ///< PIDs of a video stream
++	std::array<int8_t, NUM_PIDS> m_cc{};     ///< last continuity counter of a PID (-1 = unknown)
++	bool m_initialized = false;              ///< m_cc is initialized
++	std::atomic<int> m_lostPackets = 0;      ///< number of lost packets
++	std::atomic<int> m_errorPackets = 0;     ///< number of packets with an error
++	std::atomic<int> m_scrambledPackets = 0; ///< number of scrambled packets
++};
++
+ #endif
+diff --git a/po/de_DE.po b/po/de_DE.po
+index 3320f55..8787602 100644
+--- a/po/de_DE.po
++++ b/po/de_DE.po
+@@ -360,6 +360,9 @@ msgstr "  FFmpeg Loglevel"
+ msgid " Packet tracking logs"
+ msgstr " Paketverfolgung"
+ 
++msgid " TS error logs"
++msgstr " TS-Fehler"
++
+ msgid " OSD debug logs"
+ msgstr " OSD debug Logs"
+ 
+diff --git a/setupmenu.cpp b/setupmenu.cpp
+index 1da950c..eda707f 100644
+--- a/setupmenu.cpp
++++ b/setupmenu.cpp
+@@ -380,6 +380,7 @@ void cDeviceSetupMenu::Create(int current)
+ 			if (m_cLogFFmpeg)
+ 				Add(new cMenuEditStraItem(tr("  FFmpeg log level"), &m_cLogFFmpegLevel, FFMPEG_LOG_LEVELS, m_ffmpegLogLevels));
+ 			Add(new cMenuEditBoolItem(tr(" Packet tracking logs"), &m_cLogPacket, trVDR("no"), trVDR("yes")));
++			Add(new cMenuEditBoolItem(tr(" TS error logs"), &m_cLogTs, trVDR("no"), trVDR("yes")));
+ 			Add(new cMenuEditBoolItem(tr(" OSD debug logs"), &m_cLogOSD, trVDR("no"), trVDR("yes")));
+ 			Add(new cMenuEditBoolItem(tr(" Grabbing debug logs"), &m_cLogGrab, trVDR("no"), trVDR("yes")));
+ 			Add(new cMenuEditBoolItem(tr(" Stillpicture debug logs"), &m_cLogStill, trVDR("no"), trVDR("yes")));
+@@ -612,6 +613,7 @@ void cDeviceSetupMenu::LoadValues(void)
+ 	m_cLogFFmpeg    = m_pConfig->ConfigLogLevels & L_FFMPEG;
+ 	m_cLogFFmpegLevel = m_pConfig->ConfigLogFFmpegLevel;
+ 	m_cLogPacket    = m_pConfig->ConfigLogLevels & L_PACKET;
++	m_cLogTs        = m_pConfig->ConfigLogLevels & L_TS;
+ 	m_cLogOSD       = m_pConfig->ConfigLogLevels & L_OSD;
+ 	m_cLogGrab      = m_pConfig->ConfigLogLevels & L_GRAB;
+ 	m_cLogStill     = m_pConfig->ConfigLogLevels & L_STILL;
+@@ -829,6 +831,7 @@ void cDeviceSetupMenu::Store(void)
+ 		(m_cLogSound     ? L_SOUND : 0) |
+ 		(m_cLogFFmpeg    ? L_FFMPEG : 0) |
+ 		(m_cLogPacket    ? L_PACKET : 0) |
++		(m_cLogTs        ? L_TS : 0) |
+ 		(m_cLogOSD       ? L_OSD : 0) |
+ 		(m_cLogGrab      ? L_GRAB : 0) |
+ 		(m_cLogStill     ? L_STILL : 0) |
+diff --git a/setupmenu.h b/setupmenu.h
+index d27ebfa..3aa4b9f 100644
+--- a/setupmenu.h
++++ b/setupmenu.h
+@@ -97,6 +97,7 @@ protected:
+ 	int m_cLogFFmpeg;
+ 	int m_cLogFFmpegLevel;
+ 	int m_cLogPacket;
++	int m_cLogTs;
+ 	int m_cLogOSD;
+ 	int m_cLogGrab;
+ 	int m_cLogStill;
+diff --git a/tests/test_pes.cpp b/tests/test_pes.cpp
+index 3181f73..8a63d01 100644
+--- a/tests/test_pes.cpp
++++ b/tests/test_pes.cpp
+@@ -1880,3 +1880,95 @@ TEST_CASE("DVD audio sub streams", "[pes]") {
+ 	REQUIRE_FALSE(IsDvdAudioSubStream(0x00));
+ 	REQUIRE_FALSE(IsDvdLpcmSubStream(0xBD));
+ }
++
++// Helper function to create a TS packet with a payload
++static std::vector<uint8_t> createTsPacket(int pid, int cc, bool payloadStart, uint8_t streamId = 0xE0,
++                                           bool error = false, bool discontinuity = false)
++{
++    std::vector<uint8_t> ts(188, 0xFF);
++    ts[0] = 0x47;
++    ts[1] = (error ? 0x80 : 0x00) | (payloadStart ? 0x40 : 0x00) | ((pid >> 8) & 0x1F);
++    ts[2] = pid & 0xFF;
++    int offset = 4;
++    if (discontinuity) {
++        ts[3] = 0x30 | (cc & 0x0F);
++        ts[4] = 1;
++        ts[5] = 0x80;
++        offset = 6;
++    } else {
++        ts[3] = 0x10 | (cc & 0x0F);
++    }
++    if (payloadStart) {
++        ts[offset] = 0x00;
++        ts[offset + 1] = 0x00;
++        ts[offset + 2] = 0x01;
++        ts[offset + 3] = streamId;
++    }
++    return ts;
++}
++
++TEST_CASE("cTsVideoCheck - continuity", "[pes][ts]") {
++    cTsVideoCheck check;
++
++    SECTION("continuous packets and the wrap of the counter") {
++        check.Check(createTsPacket(100, 14, true).data(), 188);
++        check.Check(createTsPacket(100, 15, false).data(), 188);
++        check.Check(createTsPacket(100, 0, false).data(), 188);
++        REQUIRE(check.GetLostPackets() == 0);
++    }
++
++    SECTION("lost packets") {
++        check.Check(createTsPacket(100, 3, true).data(), 188);
++        check.Check(createTsPacket(100, 6, false).data(), 188);
++        REQUIRE(check.GetLostPackets() == 2);
++    }
++
++    SECTION("a duplicate packet") {
++        check.Check(createTsPacket(100, 3, true).data(), 188);
++        check.Check(createTsPacket(100, 3, false).data(), 188);
++        REQUIRE(check.GetLostPackets() == 0);
++    }
++
++    SECTION("the discontinuity indicator") {
++        check.Check(createTsPacket(100, 3, true).data(), 188);
++        check.Check(createTsPacket(100, 9, false, 0xE0, false, true).data(), 188);
++        REQUIRE(check.GetLostPackets() == 0);
++    }
++
++    SECTION("the transport error indicator") {
++        check.Check(createTsPacket(100, 3, true).data(), 188);
++        check.Check(createTsPacket(100, 4, false, 0xE0, true).data(), 188);
++        check.Check(createTsPacket(100, 9, false).data(), 188);
++        REQUIRE(check.GetErrorPackets() == 1);
++        REQUIRE(check.GetLostPackets() == 0);
++    }
++
++    SECTION("an audio PID isn't checked") {
++        check.Check(createTsPacket(200, 3, true, 0xC0).data(), 188);
++        check.Check(createTsPacket(200, 8, false).data(), 188);
++        REQUIRE(check.GetLostPackets() == 0);
++    }
++
++    SECTION("several packets at once and a reset") {
++        std::vector<uint8_t> data = createTsPacket(100, 1, true);
++        std::vector<uint8_t> next = createTsPacket(100, 3, false);
++        data.insert(data.end(), next.begin(), next.end());
++        check.Check(data.data(), data.size());
++        REQUIRE(check.GetLostPackets() == 1);
++
++        check.Reset();
++        check.Check(createTsPacket(100, 7, false).data(), 188);
++        REQUIRE(check.GetLostPackets() == 1);
++    }
++}
++
++TEST_CASE("cPesVideo - start of a video PES packet", "[pes]") {
++    const uint8_t video[] = { 0x00, 0x00, 0x01, 0xE0, 0x00, 0x00 };
++    const uint8_t audio[] = { 0x00, 0x00, 0x01, 0xC0, 0x00, 0x00 };
++    const uint8_t noStart[] = { 0x00, 0x00, 0x02, 0xE0, 0x00, 0x00 };
++
++    REQUIRE(cPesVideo::IsStart(video, sizeof(video)));
++    REQUIRE_FALSE(cPesVideo::IsStart(audio, sizeof(audio)));
++    REQUIRE_FALSE(cPesVideo::IsStart(noStart, sizeof(noStart)));
++    REQUIRE_FALSE(cPesVideo::IsStart(video, 3));
++}
+-- 
+2.43.0
+

@@ -1,0 +1,738 @@
+From 2becd4fa08012a044d73ad471914e0013753d84d Mon Sep 17 00:00:00 2001
+From: Andreas Baierl <ichgeh@imkreisrum.de>
+Date: Mon, 9 Nov 2026 21:42:59 +0100
+Subject: [PATCH 2/3] device: drop damaged video up to the next key frame
+
+A hardware decoder may hang or fail on an incomplete frame, e.g. the
+Amlogic decoder after lost TS packets at the start of VDR. VDR passes a
+PES with lost packets on.
+
+Play the TS packets one by one to assign a lost or damaged video packet
+to its PES. With a hardware decoder drop the damaged frame and the
+following frames, which may refer to it, up to the next key frame and
+restart the decoder there like at a new stream.
+
+The new option DropDamagedVideo enables it, by default automatically
+with the new hardware quirk of the Amlogic SoCs.
+
+Co-Authored-By: Claude Opus 5.5
+---
+ README.md                     |  7 +++
+ codec_video.h                 |  3 +-
+ config.cpp                    |  1 +
+ config.h                      | 12 +++++
+ device.cpp                    | 93 ++++++++++++++++++++++++++++++---
+ device.h                      |  7 ++-
+ hardwaredevice.h              | 13 ++++-
+ pes.cpp                       | 98 +++++++++++++++++++++++++++++++++--
+ pes.h                         |  4 ++
+ po/de_DE.po                   |  3 ++
+ setupmenu.cpp                 |  7 +++
+ setupmenu.h                   |  2 +
+ tests/test_hardwaredevice.cpp |  9 ++++
+ tests/test_pes.cpp            | 68 ++++++++++++++++++++++++
+ videostream.cpp               | 30 +++++++++--
+ videostream.h                 |  3 +-
+ 16 files changed, 343 insertions(+), 17 deletions(-)
+
+diff --git a/README.md b/README.md
+index ff6ac5e..1d8009b 100644
+--- a/README.md
++++ b/README.md
+@@ -352,6 +352,13 @@ Setup: /etc/vdr/setup.conf
+ 		0 = deinterlacer active if available
+ 		1 = deinterlacer is disabled
+ 
++	drmdevice.DropDamagedVideo = 2
++		drop damaged video (lost TS packets) up to the next key frame,
++		if a hardware decoder is used (some hang on incomplete frames)
++		0 = off
++		1 = on
++		2 = automatic (on with Amlogic)
++
+ 	drmdevice.DecoderFallbackToSw = 0
+ 		0 = always use hardware decoder if available
+ 		1 = fallback to software decoder if hardware decoder
+diff --git a/codec_video.h b/codec_video.h
+index a55d585..c414a35 100644
+--- a/codec_video.h
++++ b/codec_video.h
+@@ -13,6 +13,7 @@
+ #ifndef __DRMDEVICE_CODEC_VIDEO_H
+ #define __DRMDEVICE_CODEC_VIDEO_H
+ 
++#include <atomic>
+ #include <mutex>
+ 
+ extern "C" {
+@@ -57,7 +58,7 @@ private:
+ 	std::mutex m_mutex;                     ///< mutex to lock codec context
+ 	int m_cntPacketsSent = 0;               ///< number of packets sent to decoder
+ 	int m_cntFramesReceived = 0;            ///< number of decoded frames received from decoder
+-	bool m_isHardwareDecoder = false;       ///< true, if this is a hardware decoder
++	std::atomic<bool> m_isHardwareDecoder = false; ///< true, if this is a hardware decoder
+ 
+ 	int GetExtraData(const AVPacket *);
+ 	void ResetPacketCounter(void) { m_cntPacketsSent = m_cntFramesReceived = 0; }  ///< reset the packet and frame counters
+diff --git a/config.cpp b/config.cpp
+index 4242d0c..29c5ada 100644
+--- a/config.cpp
++++ b/config.cpp
+@@ -103,6 +103,7 @@ bool cDeviceConfig::SetupParse(const char *name, const char *value)
+ 	// Expert Settings
+ 	} else if (!strcasecmp(name, "AdditionalBufferLengthMs"))   { ConfigAdditionalBufferLengthMs = atoi(value);
+ 	} else if (!strcasecmp(name, "DisableDeint"))               { ConfigDisableDeint = atoi(value);
++	} else if (!strcasecmp(name, "DropDamagedVideo"))           { ConfigDropDamagedVideo = std::clamp(atoi(value), 0, 2);
+ 	} else if (!strcasecmp(name, "DecoderFallbackToSw"))        { ConfigDecoderFallbackToSw = atoi(value);
+ 	} else if (!strcasecmp(name, "DecoderFallbackToSwNumPkts")) { ConfigDecoderFallbackToSwNumPkts = atoi(value);
+ 	} else if (!strcasecmp(name, "ParseH264StreamStart"))       { ConfigParseH264StreamStart = atoi(value);
+diff --git a/config.h b/config.h
+index e567bae..ca7bef2 100644
+--- a/config.h
++++ b/config.h
+@@ -88,6 +88,17 @@ enum ChannelSwitchMode {
+ 	CHANNEL_SWITCH_FAST_AUDIO
+ };
+ 
++/**
++ * Modes to drop damaged video
++ *
++ * @ingroup device
++ */
++enum DropDamagedVideoMode {
++	DROP_DAMAGED_VIDEO_OFF,
++	DROP_DAMAGED_VIDEO_ON,
++	DROP_DAMAGED_VIDEO_AUTO,  ///< depends on the hardware (QUIRK_DROP_DAMAGED_VIDEO)
++};
++
+ /**
+  * Plugin Configuration
+  *
+@@ -151,6 +162,7 @@ public:
+ 	// Expert Settings
+ 	int ConfigAdditionalBufferLengthMs = 0;     ///< config size ms of a/v buffer
+ 	bool ConfigDisableDeint = false;            ///< disable deinterlacer
++	int ConfigDropDamagedVideo = DROP_DAMAGED_VIDEO_AUTO; ///< drop damaged video (lost TS packets) up to the next key frame (enum DropDamagedVideoMode)
+ 	bool ConfigDecoderFallbackToSw = false;     ///< fallback to software decoder if the hardware decoder fails
+ 	int ConfigDecoderFallbackToSwNumPkts = 22;  ///< maximum number of packets sent before fallback to sw decoder
+ 	int ConfigParseH264StreamStart = 0;         ///< log frames at stream start up to the given number of I-Frames
+diff --git a/device.cpp b/device.cpp
+index efffaff..9f253c9 100644
+--- a/device.cpp
++++ b/device.cpp
+@@ -578,15 +578,67 @@ int cOutputDevice::PlayTs(const uchar *data, int length, bool videoOnly)
+ 		}
+ 	}
+ 
+-	int played = cDevice::PlayTs(data, length, videoOnly);
++	if (!data || !DropDamagedVideo()) {
++		int played = cDevice::PlayTs(data, length, videoOnly);
+ 
+-	// check only the played packets, the others are passed again
+-	if (data && played > 0)
+-		m_tsVideoCheck.Check(data, played);
++		// check only the played packets, the others are passed again
++		if (data && played > 0)
++			m_tsVideoCheck.Check(data, played);
++
++		return played;
++	}
++
++	// Play packet by packet, so a lost or damaged video packet is assigned to its PES (VDR
++	// passes the previous PES on with the next payload start). Only the played packets are
++	// checked, the others are passed again.
++	int played = 0;
++	while (played < length) {
++		const uchar *packet = data + played;
++		int size = length - played;
++		bool synced = size >= TS_SIZE && packet[0] == TS_SYNC_BYTE;
++
++		if (synced) {
++			size = TS_SIZE;
++			if (m_tsVideoCheck.IsDamaged(packet))
++				m_videoDamagePending = true;
++		}
++
++		int ret = cDevice::PlayTs(packet, size, videoOnly);
++		if (ret <= 0)
++			return played ? played : ret;
++
++		if (synced && ret == TS_SIZE)
++			m_tsVideoCheck.Check(packet, TS_SIZE);
++
++		played += ret;
++	}
+ 
+ 	return played;
+ }
+ 
++/**
++ * Check, if damaged video is dropped up to the next key frame
++ *
++ * @return true, if damaged video is dropped (setup or hardware quirk)
++ */
++bool cOutputDevice::DropDamagedVideo(void)
++{
++	if (m_pConfig->ConfigDropDamagedVideo == DROP_DAMAGED_VIDEO_AUTO)
++		return m_pHardwareDevice && (m_pHardwareDevice->GetQuirks() & QUIRK_DROP_DAMAGED_VIDEO);
++
++	return m_pConfig->ConfigDropDamagedVideo == DROP_DAMAGED_VIDEO_ON;
++}
++
++/**
++ * Forget lost video data (e.g. at a clear or a channel switch)
++ */
++void cOutputDevice::ResetVideoDamage(void)
++{
++	m_videoDamagePending = false;
++	m_dropVideo = false;
++	m_restartVideoDecoder = false;
++}
++
+ /**
+  * Play a buffered TS packet of the zapcache plugin
+  *
+@@ -807,6 +859,7 @@ void cOutputDevice::Clear(void)
+ 	m_pVideoStream->CancelFilterThread();
+ 
+ 	m_videoReassemblyBuffer.Reset();
++	ResetVideoDamage();
+ 	m_pVideoStream->ClearVdrCoreToDecoderQueue();
+ 	m_pRender->ClearDecoderToDisplayQueue();
+ 
+@@ -1959,6 +2012,9 @@ int cOutputDevice::PlayVideoInternal(cVideoStream *stream, cReassemblyBufferVide
+ 
+ 	cPesVideo pesPacket((const uint8_t*)data, size);
+ 
++	// the PES lost TS packets (see PlayTs())
++	bool damaged = mainStream && m_videoDamagePending.exchange(false);
++
+ 	if (!pesPacket.IsValid()) {
+ 		buffer->Reset();
+ 
+@@ -1986,7 +2042,7 @@ int cOutputDevice::PlayVideoInternal(cVideoStream *stream, cReassemblyBufferVide
+ 
+ 	if (stream->GetCodecId() == AV_CODEC_ID_NONE) {
+ 		// The playback has just started
+-		if (!pesPacket.HasPts() || !buffer->ParseCodecHeader(pesPacket.GetPayload(), pesPacket.GetPayloadSize())) {
++		if (damaged || !pesPacket.HasPts() || !buffer->ParseCodecHeader(pesPacket.GetPayload(), pesPacket.GetPayloadSize())) {
+ 			// received the middle of fragmented data, wait for the next PES packets with the start of a new frame
+ 			return size;
+ 		}
+@@ -2000,10 +2056,34 @@ int cOutputDevice::PlayVideoInternal(cVideoStream *stream, cReassemblyBufferVide
+ 
+ 		stream->Open(buffer->GetCodec());
+ 	} else {
++		// A hardware decoder may hang or fail on an incomplete frame (e.g. Amlogic), so drop a
++		// damaged frame and the following frames, which may refer to it, up to the next key frame.
++		if (damaged && DropDamagedVideo() && stream->IsHardwareDecoder()) {
++			// the PES starts a new frame, the previous one is complete
++			if (pesPacket.HasPts() && !buffer->IsEmpty() && !m_dropVideo)
++				stream->PushAvPacket(buffer->PopAvPacket(), m_restartVideoDecoder.exchange(false));
++
++			if (!m_dropVideo)
++				LOGDEBUG2(L_TS, "device: %s: lost video data, drop the video up to the next key frame", __FUNCTION__);
++
++			buffer->Reset();
++			m_dropVideo = true;
++
++			return size;
++		}
++
++		if (m_dropVideo) {
++			if (!pesPacket.HasPts() || !buffer->IsKeyFrame(pesPacket.GetPayload(), pesPacket.GetPayloadSize()))
++				return size;
++
++			m_dropVideo = false;
++			m_restartVideoDecoder = true;
++		}
++
+ 		int payloadOffset = 0;
+ 		if (pesPacket.HasPts() && !buffer->IsEmpty()) {
+ 			// received the first fragment of a new frame, finish the current reassembly buffer into an AVPacket
+-			stream->PushAvPacket(buffer->PopAvPacket());
++			stream->PushAvPacket(buffer->PopAvPacket(), m_restartVideoDecoder.exchange(false));
+ 
+ 			// populate the cleared buffer with the next frame
+ 			if (buffer->HasLeadingZero(pesPacket.GetPayload(), pesPacket.GetPayloadSize()))
+@@ -2295,6 +2375,7 @@ void cOutputDevice::EnterState(State state)
+ 			m_playbackMode = NONE;
+ 
+ 			m_videoReassemblyBuffer.Reset();
++			ResetVideoDamage();
+ 			m_pVideoStream->ClearVdrCoreToDecoderQueue();
+ 			m_pRender->ClearDecoderToDisplayQueue();
+ 			m_pRender->ResetDecodingStrategy();
+diff --git a/device.h b/device.h
+index 3ef18f6..d451f6e 100644
+--- a/device.h
++++ b/device.h
+@@ -310,7 +310,10 @@ private:
+ 	ZapCacheService_v1_0 m_zapCache = {}; ///< service interface of the zapcache plugin (empty without the plugin, set in Start())
+ 	std::atomic<bool> m_zapCacheSwitch = false; ///< the current channel switch started with the buffer of the zapcache plugin
+ 
+-	cTsVideoCheck m_tsVideoCheck;    ///< checks the video TS packets for lost and damaged packets
++	cTsVideoCheck m_tsVideoCheck;                    ///< checks the video TS packets for lost and damaged packets
++	std::atomic<bool> m_videoDamagePending = false;  ///< a video TS packet was lost or damaged, the next video PES is damaged
++	std::atomic<bool> m_dropVideo = false;           ///< drop the video up to the next key frame
++	std::atomic<bool> m_restartVideoDecoder = false; ///< restart the decoder with the next video frame (the key frame)
+ 
+ 	std::mutex m_sizeMutex;          ///< mutex to lock screen size (which is accessed by different threads)
+ 	std::atomic<bool> m_receivedAudio = false; ///< flag if audio packets have been received
+@@ -331,6 +334,8 @@ private:
+ 	bool m_externalPlayerActive = false; ///< true, if we detached for an external player
+ 
+ 	int PlayVideoInternal(cVideoStream *, cReassemblyBufferVideo *, const uchar *, int, bool, bool);
++	void ResetVideoDamage(void);
++	bool DropDamagedVideo(void);
+ 	void FlushAudio(void);
+ 	void DeleteDecoderAndOutput(void);
+ 	void ResetPipStreamLocked(void);
+diff --git a/hardwaredevice.h b/hardwaredevice.h
+index a6ddb6f..d9b74b7 100644
+--- a/hardwaredevice.h
++++ b/hardwaredevice.h
+@@ -27,6 +27,7 @@
+  */
+ enum HardwareQuirks {
+ 	QUIRK_CODEC_FLUSH_WORKAROUND       = 1 << 0,     ///< set, if we have to close and reopen the codec instead of avcodec_flush_buffers (rpi)
++	QUIRK_DROP_DAMAGED_VIDEO           = 1 << 1,     ///< set, if the hardware decoder may hang on an incomplete frame, drop damaged video (amlogic)
+ };
+ 
+ /**
+@@ -81,6 +82,13 @@ public:
+ 			{ "bcm2837", "bcm2837 (Raspberry Pi 2 Model B v1.2/ 3 Model B, Raspberry Pi 3 Compute Module 3)", QUIRK_CODEC_FLUSH_WORKAROUND },
+ 			{ "bcm2711", "bcm2711 (Raspberry Pi 4 Model B, Compute Module 4, Pi 400)", QUIRK_CODEC_FLUSH_WORKAROUND },
+ 			{ "bcm2712", "bcm2712 (Raspberry Pi 5, Compute Module 5, Pi 500)", QUIRK_CODEC_FLUSH_WORKAROUND },
++			{ "amlogic,gxbb", "Amlogic GXBB (S905)", QUIRK_DROP_DAMAGED_VIDEO },
++			{ "amlogic,gxl", "Amlogic GXL (S905X/D/W)", QUIRK_DROP_DAMAGED_VIDEO },
++			{ "amlogic,gxm", "Amlogic GXM (S912)", QUIRK_DROP_DAMAGED_VIDEO },
++			{ "amlogic,g12a", "Amlogic G12A (S905X2/D2/Y2)", QUIRK_DROP_DAMAGED_VIDEO },
++			{ "amlogic,g12b", "Amlogic G12B (S922X/A311D, e.g. Odroid N2)", QUIRK_DROP_DAMAGED_VIDEO },
++			{ "amlogic,sm1", "Amlogic SM1 (S905X3/D3)", QUIRK_DROP_DAMAGED_VIDEO },
++			{ "amlogic,s4", "Amlogic S4 (S905Y4/W2)", QUIRK_DROP_DAMAGED_VIDEO },
+ 		};
+ 
+ 		size_t pos = 0;
+@@ -102,8 +110,9 @@ public:
+ 		}
+ 
+ 		if (m_deviceName)
+-			LOGDEBUG("%s found%s", m_deviceName,
+-			    m_quirks & QUIRK_CODEC_FLUSH_WORKAROUND ? ", flush workaround" : "");
++			LOGDEBUG("%s found%s%s", m_deviceName,
++			    m_quirks & QUIRK_CODEC_FLUSH_WORKAROUND ? ", flush workaround" : "",
++			    m_quirks & QUIRK_DROP_DAMAGED_VIDEO ? ", drop damaged video" : "");
+ 		else
+ 			LOGDEBUG("%s found, no quirks set", compatible.c_str());
+ 	}
+diff --git a/pes.cpp b/pes.cpp
+index 712607a..6093408 100644
+--- a/pes.cpp
++++ b/pes.cpp
+@@ -876,6 +876,47 @@ void cTsVideoCheck::Reset(void)
+ 	m_initialized = true;
+ }
+ 
++/**
++ * Check, if the continuity counter of a TS packet with payload shows lost packets
++ *
++ * @param data      TS packet
++ * @param last      last continuity counter of the PID (-1 = unknown)
++ *
++ * @return true, if packets were lost (a duplicate packet has the same counter)
++ */
++bool cTsVideoCheck::HasGap(const uint8_t *data, int last)
++{
++	int cc = TsContinuityCounter(data);
++	bool discontinuity = TsHasAdaptationField(data) && data[4] > 0 && (data[5] & TS_ADAPT_DISCONT);
++
++	return last >= 0 && !discontinuity && cc != last && cc != ((last + 1) & TS_CONT_CNT_MASK);
++}
++
++/**
++ * Check, if a TS packet of the video follows lost packets or has an error
++ *
++ * The state isn't changed, call Check() after the packet was played.
++ *
++ * @param data      TS packet
++ *
++ * @return true, if the PES of this packet (or the previous one at a payload start) is damaged
++ */
++bool cTsVideoCheck::IsDamaged(const uint8_t *data) const
++{
++	if (!m_initialized || data[0] != TS_SYNC_BYTE)
++		return false;
++
++	int pid = TsPid(data);
++
++	if (!m_videoPid.test(pid))
++		return false;
++
++	if (TsError(data))
++		return true;
++
++	return TsHasPayload(data) && HasGap(data, m_cc[pid]);
++}
++
+ /**
+  * Check TS packets for lost, damaged and scrambled packets of the video and log them
+  *
+@@ -921,10 +962,8 @@ void cTsVideoCheck::Check(const uint8_t *data, int length)
+ 
+ 		int cc = TsContinuityCounter(data);
+ 		int last = m_cc[pid];
+-		bool discontinuity = TsHasAdaptationField(data) && data[4] > 0 && (data[5] & TS_ADAPT_DISCONT);
+ 
+-		// a duplicate packet has the same counter
+-		if (last >= 0 && !discontinuity && cc != last && cc != ((last + 1) & TS_CONT_CNT_MASK)) {
++		if (HasGap(data, last)) {
+ 			int lost = (cc - last - 1) & TS_CONT_CNT_MASK;
+ 			m_lostPackets += lost;
+ 			LOGDEBUG2(L_TS, "ts check: video PID %d: continuity error, expected %d got %d, %d packet(s) lost",
+@@ -934,3 +973,56 @@ void cTsVideoCheck::Check(const uint8_t *data, int length)
+ 		m_cc[pid] = cc;
+ 	}
+ }
++
++/**
++ * Check, if a PES payload starts a key frame
++ *
++ * A decoder can start with a key frame: a sequence header (MPEG-2), a SPS or an IDR picture
++ * (H.264) or a VPS, SPS or IRAP picture (HEVC) before the first slice.
++ *
++ * @param data      PES payload
++ * @param size      size of the payload
++ *
++ * @return true, if a key frame starts
++ */
++bool cReassemblyBufferVideo::IsKeyFrame(const uint8_t *data, int size) const
++{
++	for (int i = 0; i + VIDEO_FRAME_START_CODE_LEN < size; i++) {
++		if (ReadBytes(&data[i], VIDEO_FRAME_START_CODE_LEN) != VIDEO_FRAME_START_CODE)
++			continue;
++
++		const uint8_t *nal = &data[i + VIDEO_FRAME_START_CODE_LEN];
++		int left = size - i - VIDEO_FRAME_START_CODE_LEN;
++
++		switch (m_codec) {
++		case AV_CODEC_ID_MPEG2VIDEO:
++			if (nal[0] == MPEG2_STREAM_TYPE)
++				return true;
++			if (nal[0] == 0x00) // picture header: I picture?
++				return left > 2 && ((nal[2] >> 3) & 0x07) == 1;
++			break;
++		case AV_CODEC_ID_H264: {
++			int type = nal[0] & 0x1F;
++			if (type == 5 || type == 7) // IDR, SPS
++				return true;
++			if (type >= 1 && type <= 4) // first slice
++				return false;
++			break;
++		}
++		case AV_CODEC_ID_HEVC: {
++			int type = (nal[0] >> 1) & 0x3F;
++			if ((type >= 16 && type <= 23) || type == 32 || type == 33) // IRAP, VPS, SPS
++				return true;
++			if (type <= 9) // first slice
++				return false;
++			break;
++		}
++		default:
++			return false;
++		}
++
++		i += VIDEO_FRAME_START_CODE_LEN - 1;
++	}
++
++	return false;
++}
+diff --git a/pes.h b/pes.h
+index 8393a50..34a7119 100644
+--- a/pes.h
++++ b/pes.h
+@@ -203,6 +203,7 @@ public:
+ 	AVPacket *PopAvPacket(void) override { return cReassemblyBuffer::PopAvPacket(m_buffer.GetSize()); }
+ 	bool ParseCodecHeader(const uint8_t *, int);
+ 	bool HasLeadingZero(const uint8_t *, int);
++	bool IsKeyFrame(const uint8_t *, int) const;
+ private:
+ 	static constexpr uint32_t VIDEO_FRAME_START_CODE = 0x00'0001;  ///< start code of a video frame
+ 	static constexpr int VIDEO_FRAME_START_CODE_LEN = 3;           ///< length of the start code in bytes
+@@ -259,6 +260,7 @@ class cTsVideoCheck {
+ public:
+ 	void Reset(void);
+ 	void Check(const uint8_t *, int);
++	bool IsDamaged(const uint8_t *) const;
+ 	int GetLostPackets(void) const { return m_lostPackets; }           ///< number of lost packets
+ 	int GetErrorPackets(void) const { return m_errorPackets; }         ///< number of packets with an error
+ 	int GetScrambledPackets(void) const { return m_scrambledPackets; } ///< number of scrambled packets
+@@ -271,6 +273,8 @@ private:
+ 	std::atomic<int> m_lostPackets = 0;      ///< number of lost packets
+ 	std::atomic<int> m_errorPackets = 0;     ///< number of packets with an error
+ 	std::atomic<int> m_scrambledPackets = 0; ///< number of scrambled packets
++
++	static bool HasGap(const uint8_t *, int);
+ };
+ 
+ #endif
+diff --git a/po/de_DE.po b/po/de_DE.po
+index 8787602..fe1902e 100644
+--- a/po/de_DE.po
++++ b/po/de_DE.po
+@@ -411,6 +411,9 @@ msgstr "Video Einstellungen"
+ msgid "Disable deinterlacer"
+ msgstr "Deaktiviere Deinterlacer"
+ 
++msgid "Drop damaged video until key frame"
++msgstr "Beschädigtes Video bis Keyframe verwerfen"
++
+ msgid "Enable SW decoder fallback"
+ msgstr "Aktiviere SW Dekoder Fallback"
+ 
+diff --git a/setupmenu.cpp b/setupmenu.cpp
+index eda707f..c7fc561 100644
+--- a/setupmenu.cpp
++++ b/setupmenu.cpp
+@@ -417,6 +417,7 @@ void cDeviceSetupMenu::Create(int current)
+ 
+ 		Add(SeparatorName(tr("Video settings")));
+ 		Add(new cMenuEditBoolItem(tr("Disable deinterlacer"), &m_cDisableDeint, trVDR("no"), trVDR("yes")));
++		Add(new cMenuEditStraItem(tr("Drop damaged video until key frame"), &m_cDropDamagedVideo, 3, m_dropDamagedVideoModes));
+ 		Add(new cMenuEditBoolItem(tr("Enable SW decoder fallback"), &m_cDecoderFallbackToSw, trVDR("no"), trVDR("yes")));
+ 		if (m_cDecoderFallbackToSw) {
+ 			Add(new cOsdItem(cString::sprintf(tr(" (minimum: %d)"), m_pConfig->GetDecoderNeedsMaxPackets() + 1), osUnknown, false));
+@@ -537,6 +538,10 @@ cDeviceSetupMenu::cDeviceSetupMenu(cOutputDevice *device)
+ 	m_passthroughModes[PASSTHROUGH_MANUAL] = tr("manual");
+ 	m_passthroughModes[PASSTHROUGH_AUTO] = tr("automatic");
+ 
++	m_dropDamagedVideoModes[DROP_DAMAGED_VIDEO_OFF] = trVDR("no");
++	m_dropDamagedVideoModes[DROP_DAMAGED_VIDEO_ON] = trVDR("yes");
++	m_dropDamagedVideoModes[DROP_DAMAGED_VIDEO_AUTO] = tr("automatic");
++
+ 	LoadValues();
+ 	Create();
+ }
+@@ -628,6 +633,7 @@ void cDeviceSetupMenu::LoadValues(void)
+ 	//
+ 	m_cAdditionalBufferLengthMs= m_pConfig->ConfigAdditionalBufferLengthMs;
+ 	m_cDisableDeint = m_pConfig->ConfigDisableDeint;
++	m_cDropDamagedVideo = m_pConfig->ConfigDropDamagedVideo;
+ 	m_cDecoderFallbackToSw = m_pConfig->ConfigDecoderFallbackToSw;
+ 	m_cDecoderFallbackToSwNumPkts = m_pConfig->ConfigDecoderFallbackToSwNumPkts;
+ 	m_cParseH264StreamStart = m_pConfig->ConfigParseH264StreamStart;
+@@ -867,6 +873,7 @@ void cDeviceSetupMenu::Store(void)
+ 			LOGDEBUG("Disable deinterlacer!");
+ 		m_pDevice->SetDisableDeint();
+ 	}
++	StoreChanged("DropDamagedVideo", m_pConfig->ConfigDropDamagedVideo, m_cDropDamagedVideo);
+ 	bool fallbackChanged = StoreChanged("DecoderFallbackToSw", m_pConfig->ConfigDecoderFallbackToSw, m_cDecoderFallbackToSw);
+ 	fallbackChanged |= StoreChanged("DecoderFallbackToSwNumPkts", m_pConfig->ConfigDecoderFallbackToSwNumPkts, m_cDecoderFallbackToSwNumPkts);
+ 	if (fallbackChanged)
+diff --git a/setupmenu.h b/setupmenu.h
+index 3aa4b9f..d0ae2cf 100644
+--- a/setupmenu.h
++++ b/setupmenu.h
+@@ -110,6 +110,7 @@ protected:
+ 	// Expert settings
+ 	int m_cAdditionalBufferLengthMs;
+ 	int m_cDisableDeint;
++	int m_cDropDamagedVideo;
+ 	int m_cDecoderFallbackToSw;
+ 	int m_cDecoderFallbackToSwNumPkts;
+ 	int m_cParseH264StreamStart;
+@@ -142,6 +143,7 @@ private:
+ 	std::vector<std::string> m_displayMode;            ///< texts of the display mode selection
+ 	std::vector<const char *> m_displayModePtrs;       ///< pointers to m_displayMode for cMenuEditStraItem
+ 	const char *m_passthroughModes[3];                 ///< texts of the passthrough mode selection
++	const char *m_dropDamagedVideoModes[3];            ///< texts of the drop damaged video selection
+ 	std::vector<std::string> m_channelSwitchMode;      ///< texts of the channel switch mode selection
+ 	std::vector<const char *> m_channelSwitchModePtrs; ///< pointers to m_channelSwitchMode for cMenuEditStraItem
+ 	static constexpr int FFMPEG_LOG_LEVELS = 4;        ///< number of the FFmpeg log levels
+diff --git a/tests/test_hardwaredevice.cpp b/tests/test_hardwaredevice.cpp
+index cbbd656..200227a 100644
+--- a/tests/test_hardwaredevice.cpp
++++ b/tests/test_hardwaredevice.cpp
+@@ -43,6 +43,15 @@ TEST_CASE("cHardwareDevice - detection from the device tree", "[hardwaredevice]"
+ 		REQUIRE(device.GetQuirks() & QUIRK_CODEC_FLUSH_WORKAROUND);
+ 	}
+ 
++	SECTION("Odroid N2, Amlogic G12B") {
++		cCompatibleFile file(std::string("hardkernel,odroid-n2\0amlogic,s922x\0amlogic,g12b\0", 48));
++		cHardwareDevice device(file.Path());
++
++		REQUIRE(device.GetName() != nullptr);
++		REQUIRE(std::string(device.GetName()).find("Amlogic G12B") == 0);
++		REQUIRE(device.GetQuirks() == QUIRK_DROP_DAMAGED_VIDEO);
++	}
++
+ 	SECTION("Long property (larger than the old fixed read buffer)") {
+ 		std::string content;
+ 		for (int i = 0; i < 20; i++)
+diff --git a/tests/test_pes.cpp b/tests/test_pes.cpp
+index 8a63d01..539d709 100644
+--- a/tests/test_pes.cpp
++++ b/tests/test_pes.cpp
+@@ -1972,3 +1972,71 @@ TEST_CASE("cPesVideo - start of a video PES packet", "[pes]") {
+     REQUIRE_FALSE(cPesVideo::IsStart(noStart, sizeof(noStart)));
+     REQUIRE_FALSE(cPesVideo::IsStart(video, 3));
+ }
++
++TEST_CASE("cTsVideoCheck - damaged packets", "[pes][ts]") {
++    cTsVideoCheck check;
++
++    check.Check(createTsPacket(100, 3, true).data(), 188);
++
++    SECTION("the next packet is fine") {
++        REQUIRE_FALSE(check.IsDamaged(createTsPacket(100, 4, false).data()));
++    }
++
++    SECTION("lost packets") {
++        REQUIRE(check.IsDamaged(createTsPacket(100, 6, false).data()));
++        REQUIRE(check.IsDamaged(createTsPacket(100, 6, true).data()));
++    }
++
++    SECTION("the transport error indicator") {
++        REQUIRE(check.IsDamaged(createTsPacket(100, 4, false, 0xE0, true).data()));
++    }
++
++    SECTION("an unknown PID") {
++        REQUIRE_FALSE(check.IsDamaged(createTsPacket(200, 9, false).data()));
++    }
++
++    SECTION("the state isn't changed") {
++        REQUIRE(check.IsDamaged(createTsPacket(100, 6, false).data()));
++        REQUIRE(check.GetLostPackets() == 0);
++        REQUIRE_FALSE(check.IsDamaged(createTsPacket(100, 4, false).data()));
++    }
++}
++
++TEST_CASE("cReassemblyBufferVideo - key frame", "[pes]") {
++    cReassemblyBufferVideo buffer;
++
++    SECTION("H.264") {
++        // AUD, SPS
++        const uint8_t aud[] = { 0x00, 0x00, 0x00, 0x01, 0x09, 0x10, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00 };
++        REQUIRE(buffer.ParseCodecHeader(aud, sizeof(aud)));
++
++        const uint8_t sps[] = { 0x00, 0x00, 0x00, 0x01, 0x09, 0x10, 0x00, 0x00, 0x01, 0x67, 0x64, 0x00 };
++        const uint8_t idr[] = { 0x00, 0x00, 0x01, 0x09, 0x10, 0x00, 0x00, 0x01, 0x06, 0x00, 0x00, 0x01, 0x65, 0x88 };
++        const uint8_t p[] = { 0x00, 0x00, 0x01, 0x09, 0x30, 0x00, 0x00, 0x01, 0x41, 0x9A, 0x00, 0x00, 0x01, 0x67 };
++        REQUIRE(buffer.IsKeyFrame(sps, sizeof(sps)));
++        REQUIRE(buffer.IsKeyFrame(idr, sizeof(idr)));
++        REQUIRE_FALSE(buffer.IsKeyFrame(p, sizeof(p)));
++    }
++
++    SECTION("HEVC") {
++        const uint8_t aud[] = { 0x00, 0x00, 0x01, 0x46, 0x01, 0x10, 0x00, 0x00, 0x00, 0x00, 0x40, 0x00 };
++        REQUIRE(buffer.ParseCodecHeader(aud, sizeof(aud)));
++
++        const uint8_t vps[] = { 0x00, 0x00, 0x01, 0x46, 0x01, 0x10, 0x00, 0x00, 0x01, 0x40, 0x01 };
++        const uint8_t trail[] = { 0x00, 0x00, 0x01, 0x46, 0x01, 0x30, 0x00, 0x00, 0x01, 0x02, 0x01 };
++        REQUIRE(buffer.IsKeyFrame(vps, sizeof(vps)));
++        REQUIRE_FALSE(buffer.IsKeyFrame(trail, sizeof(trail)));
++    }
++
++    SECTION("MPEG-2") {
++        const uint8_t seq[] = { 0x00, 0x00, 0x01, 0xB3, 0x2D, 0x02, 0x40, 0x33, 0x00, 0x00 };
++        REQUIRE(buffer.ParseCodecHeader(seq, sizeof(seq)));
++        REQUIRE(buffer.IsKeyFrame(seq, sizeof(seq)));
++
++        // picture headers: I (type 1) and P (type 2)
++        const uint8_t i[] = { 0x00, 0x00, 0x01, 0x00, 0x00, 0x0F, 0xFF, 0xF8 };
++        const uint8_t pic[] = { 0x00, 0x00, 0x01, 0x00, 0x00, 0x17, 0xFF, 0xF8 };
++        REQUIRE(buffer.IsKeyFrame(i, sizeof(i)));
++        REQUIRE_FALSE(buffer.IsKeyFrame(pic, sizeof(pic)));
++    }
++}
+diff --git a/videostream.cpp b/videostream.cpp
+index 88e8aa9..5766851 100644
+--- a/videostream.cpp
++++ b/videostream.cpp
+@@ -38,6 +38,9 @@ extern "C" {
+ #include "videostream.h"
+ #include "videorender.h"
+ 
++/** marker of a packet (AVPacket::opaque), the decoder is restarted before it */
++static char s_restartDecoder;
++
+ /*****************************************************************************
+  * cVideoStream class
+  ****************************************************************************/
+@@ -90,14 +93,18 @@ bool cVideoStream::Drain(void)
+  * when packets are received from sources that don't require fragmentation handling.
+  * The stream takes the ownership of the packet, a packet which can't be queued is freed.
+  *
+- * @param avpkt    The AVPacket to push to the queue
+- * @return         true if the packet was successfully pushed, false otherwise
++ * @param avpkt            The AVPacket to push to the queue
++ * @param restartDecoder   restart the decoder before this packet is decoded (a key frame after damaged video)
++ * @return                 true if the packet was successfully pushed, false otherwise
+  */
+-bool cVideoStream::PushAvPacket(AVPacket *avpkt)
++bool cVideoStream::PushAvPacket(AVPacket *avpkt, bool restartDecoder)
+ {
+ 	if (!avpkt)          // e.g. an empty reassembly buffer
+ 		return false;
+ 
++	if (restartDecoder)
++		avpkt->opaque = &s_restartDecoder;
++
+ 	if (avpkt->pts != AV_NOPTS_VALUE)
+ 		m_inputPts = avpkt->pts;
+ 
+@@ -183,6 +190,16 @@ void cVideoStream::CloseDecoder(void)
+ 	m_framerate = 0.0;
+ }
+ 
++/**
++ * Check, if a hardware decoder is used
++ *
++ * @return true, if a hardware decoder is used
++ */
++bool cVideoStream::IsHardwareDecoder(void)
++{
++	return m_pDecoder->IsHardwareDecoder();
++}
++
+ /**
+  * Restart the decoder
+  *
+@@ -462,6 +479,13 @@ void cVideoStream::DecodeInput(void)
+ 	if (m_codecId == AV_CODEC_ID_NONE || m_pDrmBufferQueue->IsFull() || m_videoFilter.IsInputBufferFull())
+ 		return;
+ 
++	// a key frame after damaged video starts the decoder like a new stream
++	if (!m_packets.IsEmpty() && m_packets.Peek() && m_packets.Peek()->opaque == &s_restartDecoder) {
++		m_packets.Peek()->opaque = nullptr;
++		if (!m_newStream)
++			RestartDecoder();
++	}
++
+ 	// open decoder on new stream
+ 	if (m_newStream)
+ 		OpenDecoder();
+diff --git a/videostream.h b/videostream.h
+index 1ced42e..1f44f7f 100644
+--- a/videostream.h
++++ b/videostream.h
+@@ -64,7 +64,7 @@ public:
+ 	void FlushDecoder(void);
+ 	void CloseDecoder(void);
+ 	void RestartDecoder(void);
+-	bool PushAvPacket(AVPacket *avpkt);
++	bool PushAvPacket(AVPacket *avpkt, bool restartDecoder = false);
+ 	bool Drain(void);
+ 
+ 	// decoding thread
+@@ -77,6 +77,7 @@ public:
+ 	void StartDecoder();
+ 	size_t GetAvPacketsFilled(void) { return m_packets.Size(); }                  ///< get the number of queued packets
+ 	bool IsInputBufferFull(void) { return m_packets.Size() >= VIDEO_PACKET_MAX; } ///< true, if the packet queue is full
++	bool IsHardwareDecoder(void);
+ 	bool BuffersEmpty(void);
+ 	enum AVCodecID GetCodecId(void) { return m_codecId; }                          ///< get the current codec id
+ 	void ResetTrickSpeedFramesSentCounter(void) { m_sentTrickPkts = 0; }           ///< reset the counter of packets sent in trick speed
+-- 
+2.43.0
+

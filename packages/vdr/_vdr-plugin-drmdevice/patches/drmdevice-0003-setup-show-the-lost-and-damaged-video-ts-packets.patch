@@ -1,0 +1,73 @@
+From 491fc4f05800d4b736918de000651671d6f1442a Mon Sep 17 00:00:00 2001
+From: Andreas Baierl <ichgeh@imkreisrum.de>
+Date: Sun, 8 Nov 2026 11:47:36 +0100
+Subject: [PATCH 3/3] setup: show the lost and damaged video ts packets
+
+Show the numbers of the video TS check in the statistics.
+
+Co-Authored-By: Claude Opus 5.5
+---
+ device.h      | 1 +
+ pes.h         | 1 +
+ po/de_DE.po   | 4 ++++
+ setupmenu.cpp | 5 +++++
+ 4 files changed, 11 insertions(+)
+
+diff --git a/device.h b/device.h
+index d451f6e..0c2d1f9 100644
+--- a/device.h
++++ b/device.h
+@@ -204,6 +204,7 @@ public:
+ 
+ 	// Logging, statistics
+ 	void GetStats(int *, int *, int *);
++	const cTsVideoCheck &GetTsVideoCheck(void) const { return m_tsVideoCheck; } ///< checks the video TS packets
+ 
+ 	// Mediaplayer
+ 	bool SetAudioCodec(enum AVCodecID, AVCodecParameters *, AVRational);
+diff --git a/pes.h b/pes.h
+index 34a7119..51b1923 100644
+--- a/pes.h
++++ b/pes.h
+@@ -253,6 +253,7 @@ private:
+  * VDR drops the PES of a packet with the transport error indicator set, but it passes a PES
+  * with lost packets (a gap of the continuity counter) on. Such an incomplete access unit may
+  * hang a hardware decoder. The video PIDs are detected by the stream id of their PES.
++ * The numbers of the packets are counted since the start (statistics of the setup menu).
+  *
+  * @ingroup misc
+  */
+diff --git a/po/de_DE.po b/po/de_DE.po
+index fe1902e..970aaa8 100644
+--- a/po/de_DE.po
++++ b/po/de_DE.po
+@@ -152,6 +152,10 @@ msgstr "Anzeige: %dx%d@%.2f%s, %s"
+ msgid "Frames duped(%d) dropped(%d) total(%d)"
+ msgstr "Frames verdoppelt(%d) verworfen (%d) gesamt (%d)"
+ 
++#, c-format
++msgid "Video TS packets lost(%d) damaged(%d) scrambled(%d)"
++msgstr "Video-TS-Pakete verloren (%d) fehlerhaft (%d) verschlüsselt (%d)"
++
+ msgid "Audio: none"
+ msgstr "Audio: keins"
+ 
+diff --git a/setupmenu.cpp b/setupmenu.cpp
+index c7fc561..dda28ad 100644
+--- a/setupmenu.cpp
++++ b/setupmenu.cpp
+@@ -216,6 +216,11 @@ void cDeviceSetupMenu::AddStatistics(void)
+ 		m_pDevice->GetStats(&duped, &dropped, &counter);
+ 		return cString::sprintf(tr("Frames duped(%d) dropped(%d) total(%d)"), duped, dropped, counter);
+ 	});
++	AddLiveItem([this]() {
++		const cTsVideoCheck &check = m_pDevice->GetTsVideoCheck();
++		return cString::sprintf(tr("Video TS packets lost(%d) damaged(%d) scrambled(%d)"), check.GetLostPackets(),
++			check.GetErrorPackets(), check.GetScrambledPackets());
++	});
+ 
+ 	// audio
+ 	AddLiveItem([this]() {
+-- 
+2.43.0
+
