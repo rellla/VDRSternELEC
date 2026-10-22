@@ -1,0 +1,197 @@
+From 3905636e5229e6037dfba1b484f689a6b4820e1c Mon Sep 17 00:00:00 2001
+From: Andreas Baierl <ichgeh@imkreisrum.de>
+Date: Tue, 20 Oct 2026 09:51:57 +0200
+Subject: [PATCH 2/3] staging: bcm2835-codec: Recreate decoder component after
+ a drain
+
+Once the VPU decoder has been drained (V4L2_DEC_CMD_STOP), it does not
+decode any further input, even after both queues have been stopped and
+restarted, which disables and re-enables the MMAL component. Every
+following drain only returns the empty EOS buffer. Only closing and
+reopening the device recovers, as that destroys and recreates the
+component.
+
+This breaks the V4L2 stateful decoder drain/resume sequence and e.g.
+trick play in players that decode single frames with
+send_packet(frame) + send_packet(NULL) followed by
+avcodec_flush_buffers().
+
+Remember that a drain has been requested (or an EOS has been returned
+by the VPU), and release the component once both queues are stopped
+afterwards. It is recreated with the current formats and controls on
+the next start_streaming (or queue_setup), and the port buffer counts
+normally set up in queue_setup are restored for queues that already
+have buffers.
+
+The flag is set on V4L2_DEC_CMD_STOP and not only when the EOS comes
+back, as a freshly created component occasionally never answers the
+drain and would otherwise stay stuck.
+
+The component is not recreated in stop_streaming directly, as that is
+also called from release after the control handler has been freed.
+
+Signed-off-by: Andreas Baierl <ichgeh@imkreisrum.de>
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+Claude-Session: https://claude.ai/code/session_01U8m77zxZBqWxJfZ1vTmVej
+---
+ .../bcm2835-codec/bcm2835-v4l2-codec.c        | 96 ++++++++++++++++++-
+ 1 file changed, 92 insertions(+), 4 deletions(-)
+
+diff --git a/drivers/staging/vc04_services/bcm2835-codec/bcm2835-v4l2-codec.c b/drivers/staging/vc04_services/bcm2835-codec/bcm2835-v4l2-codec.c
+index 075ba9af7..89dea0229 100644
+--- a/drivers/staging/vc04_services/bcm2835-codec/bcm2835-v4l2-codec.c
++++ b/drivers/staging/vc04_services/bcm2835-codec/bcm2835-v4l2-codec.c
+@@ -710,6 +710,12 @@ struct bcm2835_codec_ctx {
+ 
+ 	struct vchiq_mmal_component  *component;
+ 	bool component_enabled;
++	/*
++	 * Decode only: a drain has been requested (V4L2_DEC_CMD_STOP) or the
++	 * VPU has signalled EOS. The firmware decoder does not decode any
++	 * further input after that until the component has been recreated.
++	 */
++	bool needs_reset;
+ 
+ 	enum v4l2_colorspace	colorspace;
+ 	enum v4l2_ycbcr_encoding ycbcr_enc;
+@@ -1223,6 +1229,7 @@ static void op_buffer_cb(struct vchiq_mmal_instance *instance,
+ 	}
+ 	if (mmal_buf->mmal_flags & MMAL_BUFFER_HEADER_FLAG_EOS) {
+ 		/* EOS packet from the VPU */
++		ctx->needs_reset = true;
+ 		send_eos_event(ctx);
+ 		vb2->flags |= V4L2_BUF_FLAG_LAST;
+ 	}
+@@ -2490,6 +2497,12 @@ static int vidioc_decoder_cmd(struct file *file, void *priv,
+ 
+ 	switch (cmd->cmd) {
+ 	case V4L2_DEC_CMD_STOP:
++		/*
++		 * Recreate the component after the drain even if the VPU never
++		 * returns the EOS, otherwise it stays stuck.
++		 */
++		ctx->needs_reset = true;
++
+ 		if (q_data->eos_buffer_in_use)
+ 			v4l2_err(&ctx->dev->v4l2_dev, "EOS buffers already in use\n");
+ 		q_data->eos_buffer_in_use = true;
+@@ -2835,6 +2848,51 @@ static int bcm2835_codec_create_component(struct bcm2835_codec_ctx *ctx)
+ 	return ret;
+ }
+ 
++/*
++ * Create the component if it has been released after an EOS (see
++ * bcm2835_codec_stop_streaming()). The port buffer counts are normally set
++ * up in queue_setup, so restore them for queues that already have buffers.
++ */
++static int bcm2835_codec_ensure_component(struct bcm2835_codec_ctx *ctx)
++{
++	static const enum v4l2_buf_type types[] = {
++		V4L2_BUF_TYPE_VIDEO_OUTPUT_MPLANE,
++		V4L2_BUF_TYPE_VIDEO_CAPTURE_MPLANE,
++	};
++	struct bcm2835_codec_dev *dev = ctx->dev;
++	unsigned int i;
++	int ret;
++
++	if (ctx->component)
++		return 0;
++
++	ret = bcm2835_codec_create_component(ctx);
++	if (ret)
++		return ret;
++
++	for (i = 0; i < ARRAY_SIZE(types); i++) {
++		struct vb2_queue *vq = v4l2_m2m_get_vq(ctx->fh.m2m_ctx,
++						       types[i]);
++		struct vchiq_mmal_port *port = get_port_data(ctx, types[i]);
++
++		if (!vq || !port || !vb2_get_num_buffers(vq))
++			continue;
++
++		/* See bcm2835_codec_queue_setup() */
++		port->current_buffer.num = VB2_MAX_FRAME + 1;
++		ret = vchiq_mmal_port_set_format(dev->instance, port);
++		if (ret)
++			v4l2_err(&dev->v4l2_dev, "%s: Failed setting buffer count on %s port, ret %d\n",
++				 __func__, V4L2_TYPE_IS_OUTPUT(types[i]) ? "i/p" : "o/p",
++				 ret);
++	}
++
++	v4l2_dbg(1, debug, &dev->v4l2_dev, "%s: component recreated\n",
++		 __func__);
++
++	return 0;
++}
++
+ /*
+  * Queue operations
+  */
+@@ -2854,9 +2912,8 @@ static int bcm2835_codec_queue_setup(struct vb2_queue *vq,
+ 	if (!q_data)
+ 		return -EINVAL;
+ 
+-	if (!ctx->component)
+-		if (bcm2835_codec_create_component(ctx))
+-			return -EINVAL;
++	if (bcm2835_codec_ensure_component(ctx))
++		return -EINVAL;
+ 
+ 	port = get_port_data(ctx, vq->type);
+ 
+@@ -3046,13 +3103,21 @@ static int bcm2835_codec_start_streaming(struct vb2_queue *q,
+ 	struct bcm2835_codec_ctx *ctx = vb2_get_drv_priv(q);
+ 	struct bcm2835_codec_dev *dev = ctx->dev;
+ 	struct bcm2835_codec_q_data *q_data = get_q_data(ctx, q->type);
+-	struct vchiq_mmal_port *port = get_port_data(ctx, q->type);
++	struct vchiq_mmal_port *port;
+ 	int ret = 0;
+ 
+ 	v4l2_dbg(1, debug, &ctx->dev->v4l2_dev, "%s: type: %d count %d\n",
+ 		 __func__, q->type, count);
+ 	q_data->sequence = 0;
+ 
++	ret = bcm2835_codec_ensure_component(ctx);
++	if (ret) {
++		v4l2_err(&ctx->dev->v4l2_dev, "%s: Failed to recreate component, ret %d\n",
++			 __func__, ret);
++		return ret;
++	}
++	port = get_port_data(ctx, q->type);
++
+ 	if (!ctx->component_enabled) {
+ 		ret = vchiq_mmal_component_enable(dev->instance,
+ 						  ctx->component);
+@@ -3219,6 +3284,29 @@ static void bcm2835_codec_stop_streaming(struct vb2_queue *q)
+ 	if (V4L2_TYPE_IS_OUTPUT(q->type))
+ 		mmal_vchi_buffer_cleanup(&q_data->eos_buffer.mmal);
+ 
++	/*
++	 * After a drain the VPU decoder ignores all further input, so a
++	 * drained decoder could only be reused by closing and reopening the
++	 * device. Release the component once both queues are stopped, it is
++	 * recreated on the next start_streaming (or queue_setup).
++	 * It is not recreated here as stop_streaming is also called from
++	 * release, after the control handler has been freed.
++	 */
++	if (dev->role == DECODE && ctx->needs_reset &&
++	    !ctx->component->input[0].enabled &&
++	    !ctx->component->output[0].enabled) {
++		v4l2_dbg(1, debug, &ctx->dev->v4l2_dev, "%s: releasing component after drain\n",
++			 __func__);
++		if (ctx->component_enabled) {
++			vchiq_mmal_component_disable(dev->instance,
++						     ctx->component);
++			ctx->component_enabled = false;
++		}
++		vchiq_mmal_component_finalise(dev->instance, ctx->component);
++		ctx->component = NULL;
++		ctx->needs_reset = false;
++	}
++
+ 	v4l2_dbg(1, debug, &ctx->dev->v4l2_dev, "%s: done\n", __func__);
+ }
+ 
+-- 
+2.43.0
+
