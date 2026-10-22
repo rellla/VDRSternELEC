@@ -1,0 +1,33 @@
+From 8d69140f130befd306d4270d4a7d4cc8a51dd00d Mon Sep 17 00:00:00 2001
+From: Andreas Baierl <ichgeh@imkreisrum.de>
+Date: Fri, 6 Nov 2026 16:24:13 +0100
+Subject: [PATCH] videorender: disable the osd plane at init
+
+With enabled OpenGL/ES the osd plane isn't set right at the init, so it keeps the
+framebuffer of the previous drm master. This could be a console output sitting
+on a primary plane with a higher zpos than the video plane. The video is playing
+and is displayed behind that plane and therefor not visible.
+ClearPlane() disables the OSD plane at init.
+
+This was observed on Amlogic Odroid N2+ on a DETA/ATTA sequence.
+---
+ videorender.cpp | 3 ++-
+ 1 file changed, 2 insertions(+), 1 deletion(-)
+
+diff --git a/videorender.cpp b/videorender.cpp
+index 295143e..5a14af8 100644
+--- a/videorender.cpp
++++ b/videorender.cpp
+@@ -1497,7 +1497,8 @@ int cVideoRender::Init(void)
+ 			0, 0, m_pBufOsd->Width(), m_pBufOsd->Height());
+ 
+ 		osdPlane->SetPlane(modeReq);
+-	}
++	} else
++		osdPlane->ClearPlane(modeReq);
+ #endif
+ 	if (m_pDrmDevice->UseZpos()) {
+ 		videoPlane->SetZpos(m_pDrmDevice->ZposOverlay());
+-- 
+2.47.3
+

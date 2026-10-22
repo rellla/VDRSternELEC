@@ -1,0 +1,119 @@
+From 053df0304955311adb25acf57e9d2cf38c373f23 Mon Sep 17 00:00:00 2001
+From: Andreas Baierl <ichgeh@imkreisrum.de>
+Date: Fri, 6 Nov 2026 16:10:50 +0100
+Subject: [PATCH] videofilter: keep enough free buffers for the hardware
+ deinterlacer
+
+A hardware deinterlacer (e.g. Amlogic's deinterlace_v4l2m2m) outputs both fields of a frame
+at once and has only a few output buffers. If the render queue and the displayed frame holds
+all of them, the filter times out and fails.
+---
+ queue.h         | 24 ++++++++++++++++++++++++
+ videofilter.cpp |  8 +++++++-
+ videorender.cpp |  4 +++-
+ 3 files changed, 34 insertions(+), 2 deletions(-)
+
+diff --git a/queue.h b/queue.h
+index 2a01ee5..4acb220 100644
+--- a/queue.h
++++ b/queue.h
+@@ -10,6 +10,7 @@
+ #ifndef __DRMDEVICE_QUEUE_H
+ #define __DRMDEVICE_QUEUE_H
+ 
++#include <algorithm>
+ #include <cstdint>
+ #include <deque>
+ #include <mutex>
+@@ -114,6 +115,28 @@ public:
+ 		return m_deque.size() >= m_maxSize;
+ 	}
+ 
++	/**
++	 * Set the number of elements, which are pushed at once
++	 *
++	 * @param            Number of elements pushed at once (at least 1)
++	 */
++	void SetChunkSize(size_t size) {
++		std::lock_guard<std::mutex> lock(m_mutex);
++
++		m_chunkSize = std::max<size_t>(size, 1);
++	}
++
++	/**
++	 * Check if the queue has no room for the next chunk
++	 *
++	 * @return true if less than the chunk size elements can be pushed, false otherwise
++	 */
++	bool IsChunkFull(void) {
++		std::lock_guard<std::mutex> lock(m_mutex);
++
++		return m_deque.size() + m_chunkSize > m_maxSize;
++	}
++
+ 	/**
+ 	 * Get the current size of the queue
+ 	 *
+@@ -129,6 +152,7 @@ private:
+ 	std::deque<T*> m_deque;    ///< Underlying deque container
+ 	std::mutex m_mutex;        ///< Mutex for thread-safe access
+ 	size_t m_maxSize;          ///< Maximum queue capacity
++	size_t m_chunkSize = 1;    ///< Number of elements pushed at once
+ };
+ 
+ #endif
+diff --git a/videofilter.cpp b/videofilter.cpp
+index 43262ed..0733d20 100644
+--- a/videofilter.cpp
++++ b/videofilter.cpp
+@@ -98,6 +98,7 @@ void cVideoFilter::InitAndStart(const AVCodecContext *videoCtx, AVFrame *frame,
+ 	if (enableDeinterlacer) {
+ 		if (frame->format == AV_PIX_FMT_DRM_PRIME) {
+ 			filterDescr = "deinterlace_v4l2m2m";
++			m_pDrmBufferQueue->SetChunkSize(2); // reserve space for both fields in the render queue
+ 		} else if (frame->format == AV_PIX_FMT_YUV420P) {
+ 			filterDescr = "bwdif=1:-1:0";
+ 		}
+@@ -210,7 +211,10 @@ void cVideoFilter::Action(void)
+ 	LOGDEBUG("video filter: thread started");
+ 
+ 	while (Running()) {
+-		if (m_frames.IsEmpty()) {
++		// The hardware deinterlacer needs two free buffers to output both fields of a frame.
++		// They may be held by the render queue and the displayed frame. Wait here, until
++		// both frames will fit in the render queue. Otherwise the deinterlacer may stall.
++		if (m_frames.IsEmpty() || m_pDrmBufferQueue->IsChunkFull()) {
+ 			usleep(1000);
+ 			continue;
+ 		}
+@@ -283,6 +287,8 @@ void cVideoFilter::PushFrame(AVFrame *frame)
+  */
+ void cVideoFilter::Stop(void)
+ {
++	m_pDrmBufferQueue->SetChunkSize(1);
++
+ 	if (!Active())
+ 		return;
+ 
+diff --git a/videorender.cpp b/videorender.cpp
+index d236ccc..295143e 100644
+--- a/videorender.cpp
++++ b/videorender.cpp
+@@ -1065,11 +1065,13 @@ static void ReleaseFrame( __attribute__ ((unused)) void *opaque, uint8_t *data)
+ /**
+  * Check, if the main render output buffer is full.
+  *
++ * It is full, if the next chunk of frames doesn't fit (e.g. both fields of a hardware deinterlacer).
++ *
+  * @retval true     render output buffer is full
+  */
+ bool cVideoRender::IsOutputBufferFull(void)
+ {
+-	return m_drmBufferQueue.IsFull();
++	return m_drmBufferQueue.IsChunkFull();
+ }
+ 
+ /**
+-- 
+2.47.3
+
