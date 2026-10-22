@@ -1,0 +1,47 @@
+From 50d3b8ce771f4e5c47b266fa644899a074bcb209 Mon Sep 17 00:00:00 2001
+From: Andreas Baierl <ichgeh@imkreisrum.de>
+Date: Thu, 22 Oct 2026 13:20:31 +0200
+Subject: [PATCH] Ignore key repeats for keys that open or close views
+
+A single short press of kInfo could open the detail view and close it
+again immediately, because remotes / CEC frequently deliver an additional
+repeat event (k_Repeat) for the same key. Since ProcessKey() masked out
+k_Repeat, this repeat was treated like a second press and closed the
+just opened detail view.
+
+Only react to the initial key press for kInfo, kBlue, kOk, kBack and kRed.
+Navigation keys keep their repeat behaviour.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+Claude-Session: https://claude.ai/code/session_01EteH3QmdLhyMzBxYeCwjve
+---
+ tvguideosd.c | 13 +++++++++++++
+ 1 file changed, 13 insertions(+)
+
+diff --git a/tvguideosd.c b/tvguideosd.c
+index d4c19c1..4c2d439 100644
+--- a/tvguideosd.c
++++ b/tvguideosd.c
+@@ -632,6 +632,19 @@ eOSState cTvGuideOsd::ProcessKey(eKeys Key) {
+     eOSState state = osContinue;
+     cPixmap::Lock();
+     bool alreadyUnlocked = false;
++    // Keys that open or close a view must only react to the initial key press.
++    // Otherwise a repeat event of the same key (sent by many remotes / CEC
++    // even for a single short press) immediately closes the just opened view
++    // or reopens a just closed one.
++    if (Key & k_Repeat) {
++        switch (Key & ~k_Repeat) {
++            case kInfo: case kBlue: case kOk: case kBack: case kRed:
++                cPixmap::Unlock();
++                return state;
++            default:
++                break;
++        }
++    }
+     if (detailView) {
+         //Detail View Key Handling
+         switch (Key & ~k_Repeat) {
+-- 
+2.43.0
+
