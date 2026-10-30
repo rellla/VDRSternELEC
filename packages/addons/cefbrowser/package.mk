@@ -99,6 +99,7 @@ addon() {
   	cp -Pr $(get_install_dir cefbrowser)/usr/local/bin/cefbrowser ${ADDON_BUILD}/${PKG_ADDON_ID}/bin
 	cp -Pr $(get_install_dir cefbrowser)/usr/local/data/* ${ADDON_BUILD}/${PKG_ADDON_ID}/data
 	cp -P  $(get_install_dir cefbrowser)/usr/local/etc/sockets.ini ${ADDON_BUILD}/${PKG_ADDON_ID}/etc/
+	cp -P  ${PKG_DIR}/config/fonts.conf ${ADDON_BUILD}/${PKG_ADDON_ID}/etc/
   	cp -P  ${PKG_DIR}/_system.d/* ${ADDON_BUILD}/${PKG_ADDON_ID}/system.d
 
   	# copy cef-at-spi2-core
