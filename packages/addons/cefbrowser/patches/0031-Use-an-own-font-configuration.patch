@@ -1,0 +1,147 @@
+From 8ae4ee970899efbf79914bd77f462390c45fe7da Mon Sep 17 00:00:00 2001
+From: Andreas Baierl <ichgeh@imkreisrum.de>
+Date: Fri, 30 Oct 2026 12:42:54 +0100
+Subject: [PATCH 31/59] Use an own font configuration
+
+libcef uses its bundled fontconfig, which is older than the one of
+current systems and doesn't understand their configuration in
+/etc/fonts. Ship a basic fonts.conf and use it unless FONTCONFIG_FILE
+is set.
+
+Co-Authored-By: Claude Opus 5.5
+---
+ distzip.sh                      |  4 +--
+ main.cpp                        | 11 +++++++
+ meson.build                     |  2 ++
+ static-content/fonts/fonts.conf | 55 +++++++++++++++++++++++++++++++++
+ 4 files changed, 70 insertions(+), 2 deletions(-)
+ create mode 100644 static-content/fonts/fonts.conf
+
+diff --git a/distzip.sh b/distzip.sh
+index 8ca7b56..2662756 100755
+--- a/distzip.sh
++++ b/distzip.sh
+@@ -12,10 +12,10 @@ mkdir -p dist-release
+ cd $1/Release
+ 
+ # executable and static content
+-tar -cvzf ../../dist-release/$2-dist-cefbrowser-exe-${REVISION}.tar.gz cefbrowser js css database application
++tar -cvzf ../../dist-release/$2-dist-cefbrowser-exe-${REVISION}.tar.gz cefbrowser js css database application fonts
+ 
+ # cef
+-tar --exclude "cefbrowser" --exclude "vdrclient" --exclude "js" --exclude "css" --exclude "database" --exclude "application" -cvzf ../../dist-release/$2-dist-cefbrowser-cef-${CEFVERSION}.tar.gz js *
++tar --exclude "cefbrowser" --exclude "vdrclient" --exclude "js" --exclude "css" --exclude "database" --exclude "application" --exclude "fonts" -cvzf ../../dist-release/$2-dist-cefbrowser-cef-${CEFVERSION}.tar.gz js *
+ 
+ echo "CEFVERSION=${CEFVERSION}" >> ../../dist-release/$2-current-version.txt
+ echo "REVISION=${REVISION}" >> ../../dist-release/$2-current-version.txt
+\ No newline at end of file
+diff --git a/main.cpp b/main.cpp
+index 0a61e83..48b53fe 100644
+--- a/main.cpp
++++ b/main.cpp
+@@ -1,6 +1,8 @@
+ #include <thread>
+ #include <csignal>
+ #include <getopt.h>
++#include <unistd.h>
++#include <cstdlib>
+ #include "mainapp.h"
+ #include "logger.h"
+ #include "mini/ini.h"
+@@ -277,6 +279,15 @@ int main(int argc, char *argv[]) {
+ 
+     parseCommandLine(argc, argv);
+ 
++    // Use an own font configuration, the bundled fontconfig of libcef may not understand
++    // the system configuration. Set before the subprocesses are started, they inherit it.
++    if (getenv("FONTCONFIG_FILE") == nullptr) {
++        std::string fontConfig = staticPath + "/fonts/fonts.conf";
++        if (access(fontConfig.c_str(), R_OK) == 0) {
++            setenv("FONTCONFIG_FILE", fontConfig.c_str(), 1);
++        }
++    }
++
+     switch (loglevel) {
+         case 0:  logger->set_level(spdlog::level::critical); break;
+         case 1:  logger->set_level(spdlog::level::err); break;
+diff --git a/meson.build b/meson.build
+index 995c1af..4edaeb9 100644
+--- a/meson.build
++++ b/meson.build
+@@ -163,10 +163,12 @@ if get_option('vdrsternelec')
+     install_subdir('static-content/css', install_dir : 'cefbrowser')
+     install_subdir('static-content/database', install_dir : 'cefbrowser')
+     install_subdir('static-content/application', install_dir : 'cefbrowser')
++    install_subdir('static-content/fonts', install_dir : 'cefbrowser')
+ else
+     install_subdir('static-content/js', install_dir : meson.current_build_dir() + '/Release')
+     install_subdir('static-content/css', install_dir : meson.current_build_dir() + '/Release')
+     install_subdir('static-content/database', install_dir : meson.current_build_dir() + '/Release')
+     install_subdir('static-content/application', install_dir : meson.current_build_dir() + '/Release')
++    install_subdir('static-content/fonts', install_dir : meson.current_build_dir() + '/Release')
+ endif
+ 
+diff --git a/static-content/fonts/fonts.conf b/static-content/fonts/fonts.conf
+new file mode 100644
+index 0000000..650b00b
+--- /dev/null
++++ b/static-content/fonts/fonts.conf
+@@ -0,0 +1,55 @@
++<?xml version="1.0"?>
++<!DOCTYPE fontconfig SYSTEM "urn:fontconfig:fonts.dtd">
++<!--
++  Font configuration for cefbrowser.
++
++  libcef contains its own (bundled) fontconfig, which is often older than the
++  fontconfig of the system. The system configuration in /etc/fonts may use
++  syntax the bundled version doesn't understand (e.g. xsi:nil, constants like
++  "emoji" or "math"), which leads to many warnings at every start.
++  This file uses only basic syntax. It is used, if FONTCONFIG_FILE is not set.
++-->
++<fontconfig>
++    <dir>/usr/share/fonts</dir>
++    <dir>/usr/local/share/fonts</dir>
++    <dir prefix="xdg">fonts</dir>
++    <dir>~/.fonts</dir>
++
++    <cachedir prefix="xdg">fontconfig</cachedir>
++    <cachedir>~/.fontconfig</cachedir>
++
++    <alias>
++        <family>sans-serif</family>
++        <prefer>
++            <family>Tiresias</family>
++            <family>DejaVu Sans</family>
++            <family>Liberation Sans</family>
++            <family>Roboto</family>
++            <family>Noto Sans</family>
++        </prefer>
++    </alias>
++
++    <alias>
++        <family>serif</family>
++        <prefer>
++            <family>DejaVu Serif</family>
++            <family>Liberation Serif</family>
++            <family>Noto Serif</family>
++        </prefer>
++    </alias>
++
++    <alias>
++        <family>monospace</family>
++        <prefer>
++            <family>DejaVu Sans Mono</family>
++            <family>Liberation Mono</family>
++            <family>Noto Sans Mono</family>
++        </prefer>
++    </alias>
++
++    <config>
++        <rescan>
++            <int>30</int>
++        </rescan>
++    </config>
++</fontconfig>
+-- 
+2.43.0
+

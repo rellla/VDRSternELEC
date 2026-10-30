@@ -1,0 +1,84 @@
+From 7b8eea032c1fe7aca3ef7268b589d2e1b7a74e2f Mon Sep 17 00:00:00 2001
+From: Andreas Baierl <ichgeh@imkreisrum.de>
+Date: Thu, 29 Oct 2026 17:00:43 +0100
+Subject: [PATCH 20/59] Use the HbbTV key codes for the media keys
+
+VK_PLAY, VK_PAUSE, VK_STOP, VK_FAST_FWD and VK_REWIND had the codes of
+the letters P, Q, S, F and R. Applications comparing with the codes of
+the specification (415, 19, 413, 417, 412) never saw these keys.
+Also define VK_PLAY_PAUSE and VK_INFO.
+
+Co-Authored-By: Claude Opus 5.5
+---
+ keycodes.cpp                    | 10 +++++-----
+ static-content/js/keyhandler.js | 24 ++++++++++++++----------
+ 2 files changed, 19 insertions(+), 15 deletions(-)
+
+diff --git a/keycodes.cpp b/keycodes.cpp
+index c996962..6d75a9e 100644
+--- a/keycodes.cpp
++++ b/keycodes.cpp
+@@ -12,11 +12,11 @@ std::unordered_map<std::string, int> keyCodes = {
+         {"VK_GREEN",     0x0194},    // green
+         {"VK_YELLOW",    0x0195},    // yellow
+         {"VK_BLUE",      0x0196},    // blue
+-        {"VK_PLAY",      0x0050},    // play
+-        {"VK_PAUSE",     0x0051},    // pause
+-        {"VK_STOP",      0x0053},    // stop
+-        {"VK_FAST_FWD",  0x0046},    // fast forward
+-        {"VK_REWIND",    0x0052},    // rewind
++        {"VK_PLAY",      0x019F},    // play
++        {"VK_PAUSE",     0x0013},    // pause
++        {"VK_STOP",      0x019D},    // stop
++        {"VK_FAST_FWD",  0x01A1},    // fast forward
++        {"VK_REWIND",    0x019C},    // rewind
+         {"VK_PAGE_UP",   0x0021},    // page up, vk_Prior
+         {"VK_PAGE_DOWN", 0x0022},    // page down, vk_Next
+         {"VK_0",         0x0030},    // 0
+diff --git a/static-content/js/keyhandler.js b/static-content/js/keyhandler.js
+index 5a70b0b..109e447 100644
+--- a/static-content/js/keyhandler.js
++++ b/static-content/js/keyhandler.js
+@@ -16,12 +16,14 @@
+     window.KeyEvent.VK_YELLOW = (typeof window.KeyEvent.VK_YELLOW !== 'undefined' ? window.KeyEvent.VK_YELLOW : 405);
+     window.KeyEvent.VK_BLUE = (typeof window.KeyEvent.VK_BLUE !== 'undefined' ? window.KeyEvent.VK_BLUE : 406);
+ 
+-    window.KeyEvent.VK_PLAY = (typeof window.KeyEvent.VK_PLAY !== 'undefined' ? window.KeyEvent.VK_PLAY : 0x50);
+-    window.KeyEvent.VK_PAUSE = (typeof window.KeyEvent.VK_PAUSE !== 'undefined' ? window.KeyEvent.VK_PAUSE : 0x51);
+-    window.KeyEvent.VK_STOP = (typeof window.KeyEvent.VK_STOP !== 'undefined' ? window.KeyEvent.VK_STOP : 0x53);
++    window.KeyEvent.VK_PLAY = (typeof window.KeyEvent.VK_PLAY !== 'undefined' ? window.KeyEvent.VK_PLAY : 415);
++    window.KeyEvent.VK_PAUSE = (typeof window.KeyEvent.VK_PAUSE !== 'undefined' ? window.KeyEvent.VK_PAUSE : 19);
++    window.KeyEvent.VK_STOP = (typeof window.KeyEvent.VK_STOP !== 'undefined' ? window.KeyEvent.VK_STOP : 413);
+ 
+-    window.KeyEvent.VK_FAST_FWD = (typeof window.KeyEvent.VK_FAST_FWD !== 'undefined' ? window.KeyEvent.VK_FAST_FWD : 0x46);
+-    window.KeyEvent.VK_REWIND = (typeof window.KeyEvent.VK_REWIND !== 'undefined' ? window.KeyEvent.VK_REWIND : 0x52);
++    window.KeyEvent.VK_FAST_FWD = (typeof window.KeyEvent.VK_FAST_FWD !== 'undefined' ? window.KeyEvent.VK_FAST_FWD : 417);
++    window.KeyEvent.VK_REWIND = (typeof window.KeyEvent.VK_REWIND !== 'undefined' ? window.KeyEvent.VK_REWIND : 412);
++    window.KeyEvent.VK_PLAY_PAUSE = (typeof window.KeyEvent.VK_PLAY_PAUSE !== 'undefined' ? window.KeyEvent.VK_PLAY_PAUSE : 402);
++    window.KeyEvent.VK_INFO = (typeof window.KeyEvent.VK_INFO !== 'undefined' ? window.KeyEvent.VK_INFO : 457);
+ 
+     window.KeyEvent.VK_PAGE_UP = (typeof window.KeyEvent.VK_PAGE_UP !== 'undefined' ? window.KeyEvent.VK_PAGE_UP : 0x21);
+     window.KeyEvent.VK_PAGE_DOWN = (typeof window.KeyEvent.VK_PAGE_DOWN !== 'undefined' ? window.KeyEvent.VK_PAGE_DOWN : 0x22);
+@@ -51,12 +53,14 @@
+     window.VK_YELLOW = (typeof window.VK_YELLOW !== 'undefined' ? window.VK_YELLOW : 405);
+     window.VK_BLUE = (typeof window.VK_BLUE !== 'undefined' ? window.VK_BLUE : 406);
+ 
+-    window.VK_PLAY = (typeof window.VK_PLAY !== 'undefined' ? window.VK_PLAY : 0x50);
+-    window.VK_PAUSE = (typeof window.VK_PAUSE !== 'undefined' ? window.VK_PAUSE : 0x51);
+-    window.VK_STOP = (typeof window.VK_STOP !== 'undefined' ? window.VK_STOP : 0x53);
++    window.VK_PLAY = (typeof window.VK_PLAY !== 'undefined' ? window.VK_PLAY : 415);
++    window.VK_PAUSE = (typeof window.VK_PAUSE !== 'undefined' ? window.VK_PAUSE : 19);
++    window.VK_STOP = (typeof window.VK_STOP !== 'undefined' ? window.VK_STOP : 413);
+ 
+-    window.VK_FAST_FWD = (typeof window.VK_FAST_FWD !== 'undefined' ? window.VK_FAST_FWD : 0x46);
+-    window.VK_REWIND = (typeof window.VK_REWIND !== 'undefined' ? window.VK_REWIND : 0x52);
++    window.VK_FAST_FWD = (typeof window.VK_FAST_FWD !== 'undefined' ? window.VK_FAST_FWD : 417);
++    window.VK_REWIND = (typeof window.VK_REWIND !== 'undefined' ? window.VK_REWIND : 412);
++    window.VK_PLAY_PAUSE = (typeof window.VK_PLAY_PAUSE !== 'undefined' ? window.VK_PLAY_PAUSE : 402);
++    window.VK_INFO = (typeof window.VK_INFO !== 'undefined' ? window.VK_INFO : 457);
+ 
+     window.VK_PAGE_UP = (typeof window.VK_PAGE_UP !== 'undefined' ? window.VK_PAGE_UP : 0x21);
+     window.VK_PAGE_DOWN = (typeof window.VK_PAGE_DOWN !== 'undefined' ? window.VK_PAGE_DOWN : 0x22);
+-- 
+2.43.0
+

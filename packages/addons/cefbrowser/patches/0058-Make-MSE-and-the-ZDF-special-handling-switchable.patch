@@ -1,0 +1,211 @@
+From 7c0b71513da1175f4e774af47f5f31e876ccdccc Mon Sep 17 00:00:00 2001
+From: Andreas Baierl <ichgeh@imkreisrum.de>
+Date: Sun, 1 Nov 2026 15:35:11 +0100
+Subject: [PATCH 58/59] Make MSE and the ZDF special handling switchable
+
+VDR sends both options with the render parameters, they apply to the
+next page. Without the ZDF special handling the ZDF applications are not
+forced to plain HTML5 videos and use their dash player.
+
+Co-Authored-By: Claude Opus 5.5
+---
+ browserclient.cpp                  |  2 +-
+ browserserver.cpp                  |  6 ++++++
+ pagemodifier.cpp                   | 12 +++++++++++-
+ static-content/js/initlast.js      |  5 +++--
+ static-content/js/videoobserver.js |  9 +++++++--
+ tools.cpp                          |  2 ++
+ tools.h                            |  9 +++++++++
+ xhrinterception.cpp                |  6 ++++--
+ 8 files changed, 43 insertions(+), 8 deletions(-)
+
+diff --git a/browserclient.cpp b/browserclient.cpp
+index 389de91..ccad4dd 100644
+--- a/browserclient.cpp
++++ b/browserclient.cpp
+@@ -355,7 +355,7 @@ CefRefPtr<CefResourceRequestHandler> BrowserClient::GetResourceRequestHandler(Ce
+     }
+ 
+     // Javascript interception
+-    if ((request->GetResourceType()) == RT_SCRIPT &&
++    if ((request->GetResourceType()) == RT_SCRIPT && browserOptions.zdfQuirks &&
+         (url.find("new-hbbtv.zdf.de/static/js/main.") != std::string::npos)) {
+         return new JSInterception(pool);
+     }
+diff --git a/browserserver.cpp b/browserserver.cpp
+index c796d60..07f77b5 100644
+--- a/browserserver.cpp
++++ b/browserserver.cpp
+@@ -411,5 +411,11 @@ void BrowserCloneFactory::releaseHandler(CommonServiceIf *handler) {
+ }
+ 
+ bool BrowserServer::SetBrowserOptions(const BrowserOptionsType &input) {
++    if (browserOptions.mse != input.mse || browserOptions.zdfQuirks != input.zdfQuirks) {
++        INFO("Browser options: MSE {}, ZDF special handling {}", input.mse ? "on" : "off", input.zdfQuirks ? "on" : "off");
++    }
++
++    browserOptions.mse = input.mse;
++    browserOptions.zdfQuirks = input.zdfQuirks;
+     return true;
+ }
+diff --git a/pagemodifier.cpp b/pagemodifier.cpp
+index 8ee53a4..f294251 100644
+--- a/pagemodifier.cpp
++++ b/pagemodifier.cpp
+@@ -1,3 +1,4 @@
++#include <vector>
+ #include "tools.h"
+ #include "pagemodifier.h"
+ 
+@@ -41,7 +42,10 @@ std::string PageModifier::getDynamicZoom() {
+ std::string PageModifier::injectAll(std::string_view source) {
+     std::string result = std::string{source};
+ 
+-    std::string preJs[] = {"simple-tinyduration.js", "mutation-summary.js", "init.js", "keyhandler.js", "mse.js" };
++    std::vector<std::string> preJs = {"simple-tinyduration.js", "mutation-summary.js", "init.js", "keyhandler.js" };
++    if (browserOptions.mse) {
++        preJs.push_back("mse.js");
++    }
+     for (const auto & file : preJs) {
+         std::string insert = "\n<script type=\"text/javascript\" src=\"http://localhost/js/" + file + "\"></script>\n";
+         result = insertAfterHead(result, insert);
+@@ -50,6 +54,12 @@ std::string PageModifier::injectAll(std::string_view source) {
+     std::string dyn1 = getDynamicJs();
+     result = insertAfterHead(result, dyn1);
+ 
++    // the options of the VDR setup, before all other scripts
++    std::string options = std::string("\n<script type=\"text/javascript\">window._vdrOptions = { mse: ") +
++                          (browserOptions.mse ? "true" : "false") + ", zdfQuirks: " +
++                          (browserOptions.zdfQuirks ? "true" : "false") + " };</script>\n";
++    result = insertAfterHead(result, options);
++
+     std::string postJs[] = { "video_quirks.js", "avcomponents.js", "videoobserver.js", "hbbtv.js", "initlast.js" };
+     for (const auto & file : postJs) {
+         std::string insert = "\n<script type=\"text/javascript\" src=\"http://localhost/js/" + file + "\"></script>\n";
+diff --git a/static-content/js/initlast.js b/static-content/js/initlast.js
+index 8b29b57..63abba3 100644
+--- a/static-content/js/initlast.js
++++ b/static-content/js/initlast.js
+@@ -59,8 +59,9 @@ document.body.style["font-family"] = "Tiresias";
+ document.body.style["overflow"] = "hidden";
+ 
+ // hack for ZDF to force HTML5 video
++const _vdrZdfHtml5 = !window._vdrOptions || window._vdrOptions.zdfQuirks !== false;
+ setTimeout(() => {
+-    if (typeof appStorage != "undefined") {
++    if (_vdrZdfHtml5 && typeof appStorage != "undefined") {
+         appStorage.getItem('config').isHbbTv = false;
+     }
+ }, 10);
+@@ -69,7 +70,7 @@ setTimeout(() => {
+ if (window.GLOBALS) {
+     let location = document.location.toString();
+     // window.GLOBALS.htmlfive = location.includes("hbbtv.zdf.de") || location.includes("tv.ardmediathek.de");
+-    window.GLOBALS.htmlfive = location.includes("hbbtv.zdf.de");
++    window.GLOBALS.htmlfive = _vdrZdfHtml5 && location.includes("hbbtv.zdf.de");
+ 
+     // ZDF (prevent pending CORS related requests)
+     if (location.includes("hbbtv.zdf.de")) {
+diff --git a/static-content/js/videoobserver.js b/static-content/js/videoobserver.js
+index 9a854b2..e01124b 100644
+--- a/static-content/js/videoobserver.js
++++ b/static-content/js/videoobserver.js
+@@ -413,6 +413,11 @@ function addNodeFunctions(node) {
+ }
+ 
+ // data of an object which is not set by this script
++// special handling of the ZDF applications (VDR setup)
++function _vdrZdfQuirks() {
++    return !window._vdrOptions || window._vdrOptions.zdfQuirks !== false;
++}
++
+ function isNewObjectData(node) {
+     let data = node.data;
+     return !!data && data !== "http://gibbet.nix" && !data.startsWith("http://localhost/movie/");
+@@ -1115,7 +1120,7 @@ function checkChangedVideoSrc(summary) {
+         return;
+     }
+ 
+-    if (!document.location.toString().includes("hbbtv.zdf.de")) {
++    if (!document.location.toString().includes("hbbtv.zdf.de") || !_vdrZdfQuirks()) {
+         return;
+     }
+ 
+@@ -1194,7 +1199,7 @@ function checkSingleObjectNode(node) {
+         console.log("Node HTML: " + node.outerHTML);
+ 
+         let location = document.location.toString();
+-        let checkVideoTag = location.includes("hbbtv.zdf.de");
++        let checkVideoTag = location.includes("hbbtv.zdf.de") && _vdrZdfQuirks();
+ 
+         if (node.nodeName.toUpperCase() === 'object'.toUpperCase()) {
+             (async() => {
+diff --git a/tools.cpp b/tools.cpp
+index 6875f63..9baf814 100644
+--- a/tools.cpp
++++ b/tools.cpp
+@@ -1,6 +1,8 @@
+ #include <fstream>
+ #include "tools.h"
+ 
++BrowserOptions browserOptions;
++
+ bool endsWith(const std::string& str, const std::string& suffix) {
+     return str.size() >= suffix.size() && 0 == str.compare(str.size()-suffix.size(), suffix.size(), suffix);
+ }
+diff --git a/tools.h b/tools.h
+index d3f179b..a4f5edf 100644
+--- a/tools.h
++++ b/tools.h
+@@ -1,6 +1,7 @@
+ #pragma once
+ 
+ #include <string>
++#include <atomic>
+ 
+ const std::string BLANK_PAGE = "http://localhost/internal/blank/page";
+ 
+@@ -44,3 +45,11 @@ bool zoomForWidth(int width, int &height, double &zoomLevel);
+ void writeZoomScript(const std::string& staticPath, int width, int height, double zoomLevel);
+ bool startsWith(const std::string& str, const std::string& prefix);
+ std::string readFile(const char *filename);
++
++// options of the VDR setup, used by the next page
++struct BrowserOptions {
++    std::atomic<bool> mse { true };          // Media Source Extensions for VDR
++    std::atomic<bool> zdfQuirks { true };    // special handling of the ZDF applications
++};
++
++extern BrowserOptions browserOptions;
+diff --git a/xhrinterception.cpp b/xhrinterception.cpp
+index 7ed0de6..d277745 100644
+--- a/xhrinterception.cpp
++++ b/xhrinterception.cpp
+@@ -1,4 +1,5 @@
+ #include "xhrinterception.h"
++#include "tools.h"
+ #include "json.hpp"
+ #include "logger.h"
+ 
+@@ -25,7 +26,8 @@ void XhrInterception::modifyResponse() {
+             TRACE("[XhrInterception] Json (flatten):\n{}", to_string(j_flat));
+         }
+ 
+-        if ((cprResponse.url.str().find("new-hbbtv.zdf.de/al/video-pages/by-canonical") != std::string::npos) && (cprResponse.url.str().find("livestreams=true") != std::string::npos)) {
++        // ZDF special handling: the video URLs are hidden from the dash player
++        if (browserOptions.zdfQuirks && (cprResponse.url.str().find("new-hbbtv.zdf.de/al/video-pages/by-canonical") != std::string::npos) && (cprResponse.url.str().find("livestreams=true") != std::string::npos)) {
+             for (auto& el : j_flat.items()) {
+                 // std::cout << "key: " << el.key() << ", value:" << el.value() << '\n';
+                 if (el.key().find("h264_aac_mp4_http_mpd_http") != std::string::npos && el.key().find("url") != std::string::npos) {
+@@ -49,7 +51,7 @@ void XhrInterception::modifyResponse() {
+         };
+ 
+         if (cprResponse.url.str().find("-hbbtv.zdf.de/ds/configuration") != std::string::npos) {
+-            if (dataJson.is_object() && dataJson.contains("dash")) {
++            if (browserOptions.zdfQuirks && dataJson.is_object() && dataJson.contains("dash")) {
+                 dataJson["dash"] = false;
+             }
+         } else if (cprResponse.url.str().find("hbbtv.zdf.de") != std::string::npos) {
+-- 
+2.43.0
+

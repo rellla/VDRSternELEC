@@ -1,0 +1,97 @@
+From 6bd8d5a4ad402bebf66de683ba30d0c9d82c60b5 Mon Sep 17 00:00:00 2001
+From: Andreas Baierl <ichgeh@imkreisrum.de>
+Date: Thu, 29 Oct 2026 17:02:15 +0100
+Subject: [PATCH 25/59] Add channel config and play state to video/broadcast
+
+getChannelConfig() was missing (TypeError in many applications), as
+were currentChannel and the play state after bindToCurrentChannel().
+
+Co-Authored-By: Claude Opus 5.5
+---
+ static-content/js/initlast.js      |  1 +
+ static-content/js/videoobserver.js | 50 ++++++++++++++++++++++++++++++
+ 2 files changed, 51 insertions(+)
+
+diff --git a/static-content/js/initlast.js b/static-content/js/initlast.js
+index 6e7ef81..8b29b57 100644
+--- a/static-content/js/initlast.js
++++ b/static-content/js/initlast.js
+@@ -15,6 +15,7 @@ function prepareElements() {
+             console.log("Init Found TV on node: " + node);
+             window.addVideoOverlay(node);
+             addNodeFunctions(node);
++            addBroadcastFunctions(node);
+ 
+             setTimeout(() => {
+                 promoteVideoSize(node);
+diff --git a/static-content/js/videoobserver.js b/static-content/js/videoobserver.js
+index 13e47bc..a1c5b96 100644
+--- a/static-content/js/videoobserver.js
++++ b/static-content/js/videoobserver.js
+@@ -105,6 +105,55 @@ async function checkMpd(nodedata) {
+     return Math.max(0, Math.floor(mpdStart));
+ }
+ 
++// video/broadcast: channel information and play state
++function addBroadcastFunctions(node) {
++    if (node._vdrBroadcast) {
++        return;
++    }
++    node._vdrBroadcast = true;
++
++    try {
++        Object.defineProperty(node, 'currentChannel', {
++            configurable: true,
++            get: () => window.HBBTV_POLYFILL_NS.currentChannel || null
++        });
++    } catch (e) {
++        console.log("currentChannel: " + e);
++    }
++
++    // 0 = unrealized, 2 = presenting
++    node.playState = 0;
++
++    const bind = node.bindToCurrentChannel;
++    node.bindToCurrentChannel = function () {
++        node.playState = 2;
++        if (typeof node.onPlayStateChange === 'function') {
++            node.onPlayStateChange(node.playState, 0);
++        }
++        let event = new Event('PlayStateChange');
++        event.state = node.playState;
++        event.error = 0;
++        node.dispatchEvent(event);
++
++        return bind ? bind.call(node) : window.HBBTV_POLYFILL_NS.currentChannel;
++    };
++
++    node.getChannelConfig = node.getChannelConfig || function () {
++        let channel = window.HBBTV_POLYFILL_NS.currentChannel;
++        let list = channel ? [channel] : [];
++
++        list.item = (i) => list[i] || null;
++        list.getChannel = (id) => list.find((c) => c.channelId === id) || null;
++        list.getChannelByTriplet = (onid, tsid, sid) => list.find((c) => c.onid === onid && c.tsid === tsid && c.sid === sid) || null;
++
++        return {
++            channelList: list,
++            favouriteLists: [],
++            currentFavouriteList: null
++        };
++    };
++}
++
+ function addNodeFunctions(node) {
+     node.bindToCurrentChannel = node.bindToCurrentChannel || function() {
+         console.log('Node bindToCurrentChannel');
+@@ -733,6 +782,7 @@ function checkSingleObjectNode(node) {
+         window.addVideoOverlay(node);
+ 
+         addNodeFunctions(node);
++        addBroadcastFunctions(node);
+         promoteVideoSize(node);
+     } else if ((node.type === 'video/mpeg4') ||             // mpeg4 video
+         (node.type === 'video/mp4') ||               // h.264 video
+-- 
+2.43.0
+

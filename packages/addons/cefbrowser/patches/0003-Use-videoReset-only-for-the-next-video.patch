@@ -1,0 +1,57 @@
+From f1134b081a7926ec930c19ab7b07cfdb3463b48d Mon Sep 17 00:00:00 2001
+From: Andreas Baierl <ichgeh@imkreisrum.de>
+Date: Thu, 29 Oct 2026 16:53:33 +0100
+Subject: [PATCH 03/59] Use videoReset only for the next video
+
+Once set, videoReset was never cleared and StartVideo was skipped for
+all following videos, even if VDR had closed its player meanwhile.
+Also make the flags shared with the stop thread atomic.
+
+Co-Authored-By: Claude Opus 5.5
+---
+ v8handler.cpp | 14 ++++++++++----
+ 1 file changed, 10 insertions(+), 4 deletions(-)
+
+diff --git a/v8handler.cpp b/v8handler.cpp
+index 4db6883..73d7f53 100644
+--- a/v8handler.cpp
++++ b/v8handler.cpp
+@@ -1,13 +1,15 @@
+ #include <chrono>
+ #include <thread>
++#include <atomic>
+ 
+ #include "v8handler.h"
+ #include "logger.h"
+ #include "browserclient.h"
+ 
+-bool startVideo;
+-bool videoReset = false;
+-bool stopVideoThreadRunning = false;
++// used by the javascript thread and the stop thread
++std::atomic<bool> startVideo(false);
++std::atomic<bool> videoReset(false);
++std::atomic<bool> stopVideoThreadRunning(false);
+ 
+ std::string videoInfo;
+ std::string oldVideoInfo;
+@@ -165,11 +167,15 @@ bool V8Handler::Execute(const CefString &name, CefRefPtr<CefV8Value> object, con
+                 std::this_thread::sleep_for(std::chrono::milliseconds(5));
+             }
+ 
+-            TRACE("VideoReset: {}", videoReset);
++            TRACE("VideoReset: {}", videoReset.load());
+ 
+             if (!videoReset) {
+                 vdrClient->StartVideo(videoInfo);
+             }
++
++            // the reset applies to this video only. The next video without a
++            // stop in between needs its own StartVideo.
++            videoReset = false;
+         }
+ 
+         std::string newVideoUrl = "http://localhost/movie/transparent-video-" + bParam.browserIp + "_" + std::to_string(bParam.browserPort) + "-" + std::to_string(now) + ".webm";
+-- 
+2.43.0
+

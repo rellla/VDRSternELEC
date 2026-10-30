@@ -1,0 +1,66 @@
+From c2a645890bcd1701112d53813906eb668b6b0d56 Mon Sep 17 00:00:00 2001
+From: Andreas Baierl <ichgeh@imkreisrum.de>
+Date: Thu, 29 Oct 2026 16:53:57 +0100
+Subject: [PATCH 06/59] Don't fail the video start in checkMpd()
+
+A manifest without timeShiftBufferDepth or Period@start (every VOD)
+or a failed fetch threw, and cefStreamVideo() was never called.
+The position is passed as int, so round it.
+
+Co-Authored-By: Claude Opus 5.5
+---
+ static-content/js/videoobserver.js | 35 ++++++++++++++++++++----------
+ 1 file changed, 23 insertions(+), 12 deletions(-)
+
+diff --git a/static-content/js/videoobserver.js b/static-content/js/videoobserver.js
+index 97e0c07..de0e4fa 100644
+--- a/static-content/js/videoobserver.js
++++ b/static-content/js/videoobserver.js
+@@ -589,21 +589,32 @@ function checkSingleObjectNode(node) {
+         let mpdStart = 0;
+ 
+         if (nodedata.endsWith(".mpd") || nodedata.indexOf("hbbtv.zdf.de/zdfm3/dyn/mpd.php") !== -1) {
+-            const mpd = await fetch(nodedata);
+-            const data = await mpd.text();
+-
+-            let parser = new DOMParser();
+-            let xmlDoc = parser.parseFromString(data, "text/xml");
+-
+-            let timeShiftBufferDepth = xmlDoc.documentElement.getAttribute("timeShiftBufferDepth");
+-            let periodStart = xmlDoc.getElementsByTagName("Period")[0].getAttribute("start");
++            // A VOD manifest has no timeShiftBufferDepth and often no Period@start.
++            // Any problem here must not prevent the start of the video.
++            try {
++                const mpd = await fetch(nodedata);
++                const data = await mpd.text();
++
++                let parser = new DOMParser();
++                let xmlDoc = parser.parseFromString(data, "text/xml");
++
++                let timeShiftBufferDepth = xmlDoc.documentElement.getAttribute("timeShiftBufferDepth");
++                let period = xmlDoc.getElementsByTagName("Period")[0];
++                let periodStart = period ? period.getAttribute("start") : null;
++
++                if (timeShiftBufferDepth) {
++                    let startTime = periodStart ? durationToSeconds(parseWithTinyDuration(periodStart)) : 0;
++                    mpdStart = durationToSeconds(parseWithTinyDuration(timeShiftBufferDepth)) - startTime;
++                }
+ 
+-            let startTime = durationToSeconds(parseWithTinyDuration(periodStart));
+-            mpdStart = durationToSeconds(parseWithTinyDuration(timeShiftBufferDepth)) - startTime;
+-            console.log("timeShiftBufferDepth: " + timeShiftBufferDepth + ", periodStart: " + periodStart + ", mpdStart: " + mpdStart);
++                console.log("timeShiftBufferDepth: " + timeShiftBufferDepth + ", periodStart: " + periodStart + ", mpdStart: " + mpdStart);
++            } catch (e) {
++                console.log("checkMpd: unable to evaluate " + nodedata + ": " + e);
++                mpdStart = 0;
++            }
+         }
+ 
+-        return mpdStart;
++        return Math.max(0, Math.floor(mpdStart));
+     }
+ 
+     if (node.type === 'video/broadcast') {
+-- 
+2.43.0
+

@@ -1,0 +1,37 @@
+From 37ad553c1819f15514932d1fb8c8ed57087a0e1d Mon Sep 17 00:00:00 2001
+From: Andreas Baierl <ichgeh@imkreisrum.de>
+Date: Thu, 29 Oct 2026 17:02:33 +0100
+Subject: [PATCH 27/59] Start applications by URL in createApplication()
+
+Only dvb://current.ait URLs were handled, http(s) URLs of broadcast
+independent applications were ignored. Also return the application
+object as specified, null on failure.
+
+Co-Authored-By: Claude Opus 5.5
+---
+ static-content/js/hbbtv.js | 7 +++++++
+ 1 file changed, 7 insertions(+)
+
+diff --git a/static-content/js/hbbtv.js b/static-content/js/hbbtv.js
+index 931b7df..de5c963 100644
+--- a/static-content/js/hbbtv.js
++++ b/static-content/js/hbbtv.js
+@@ -191,8 +191,15 @@
+                 let args = (app[3] ? app[3] : "");
+ 
+                 window.cefStartApp(channelId, appid, args);
++                return new Application(document);
+             }
++        } else if (/^https?:\/\//i.test(uri)) {
++            // broadcast independent application
++            window.cefLoadUrl(uri);
++            return new Application(document);
+         }
++
++        return null;
+     };
+ 
+     Application.prototype.destroyApplication = function () {
+-- 
+2.43.0
+

@@ -1,0 +1,186 @@
+From 1454f7d9425d75231bffd582f14ad327bb43b8f3 Mon Sep 17 00:00:00 2001
+From: Andreas Baierl <ichgeh@imkreisrum.de>
+Date: Sun, 1 Nov 2026 15:44:26 +0100
+Subject: [PATCH 59/59] Access the current browser thread-safe
+
+The UI thread, the thrift threads and the VDR check thread used the
+global browser reference without a lock. The check thread didn't test
+the main frame and the client for null. At shutdown the browser was
+released twice.
+
+Co-Authored-By: Claude Opus 5.5
+---
+ browserclient.cpp |  7 ++++---
+ browserserver.cpp |  6 +++---
+ main.cpp          |  5 ++++-
+ mainapp.cpp       | 36 ++++++++++++++++++++++++++----------
+ mainapp.h         |  4 +++-
+ 5 files changed, 40 insertions(+), 18 deletions(-)
+
+diff --git a/browserclient.cpp b/browserclient.cpp
+index ccad4dd..531c88c 100644
+--- a/browserclient.cpp
++++ b/browserclient.cpp
+@@ -1,6 +1,7 @@
+ #include <chrono>
+ #include <algorithm>
+ #include "browserclient.h"
++#include "mainapp.h"
+ #include "keycodes.h"
+ #include "database.h"
+ #include "tools.h"
+@@ -17,7 +18,6 @@
+ 
+ #define ONPAINT_MEASURE_TIME 0
+ 
+-extern scoped_refptr<CefBrowser> currentBrowser;
+ 
+ BrowserClient::BrowserClient(bool fullscreen, BrowserParameter bp) : bParam(bp) {
+     LOG_CURRENT_THREAD();
+@@ -104,8 +104,9 @@ void BrowserClient::OnBeforeClose(CefRefPtr<CefBrowser> browser) {
+     LOG_CURRENT_THREAD();
+     TRACE("BrowserClient::OnBeforeClose");
+ 
+-    if (browser->IsSame(currentBrowser)) {
+-        currentBrowser = nullptr;
++    CefRefPtr<CefBrowser> current = getCurrentBrowser();
++    if (current && browser->IsSame(current)) {
++        setCurrentBrowser(nullptr);
+     }
+ }
+ 
+diff --git a/browserserver.cpp b/browserserver.cpp
+index 07f77b5..6dbf364 100644
+--- a/browserserver.cpp
++++ b/browserserver.cpp
+@@ -17,7 +17,7 @@ std::string streamId;
+ // The thrift server runs independently of the browser: requests may arrive before the
+ // browser is created or after it has been closed. Keep a reference for the request.
+ #define GET_BROWSER(browser, result) \
+-    CefRefPtr<CefBrowser> browser = currentBrowser; \
++    CefRefPtr<CefBrowser> browser = getCurrentBrowser(); \
+     if (!browser) { \
+         ERROR("{}: browser not available", __FUNCTION__); \
+         return result; \
+@@ -306,9 +306,9 @@ bool BrowserServer::InsertChannel(const InsertChannelType &input) {
+         StopVideo(stopType);
+ 
+         lastInsertChannel = channelId;
+-    } else if (currentBrowser) {
++    } else if (CefRefPtr<CefBrowser> browser = getCurrentBrowser()) {
+         // new data of the current channel (e.g. the present programme) for the running application
+-        executeJavaScriptOnUi(currentBrowser, "window._vdrChannelUpdate && window._vdrChannelUpdate(" + input.channel + ");");
++        executeJavaScriptOnUi(browser, "window._vdrChannelUpdate && window._vdrChannelUpdate(" + input.channel + ");");
+     }
+ 
+     return database->insertChannel(input.channel);
+diff --git a/main.cpp b/main.cpp
+index 8e0ad46..bff38ac 100644
+--- a/main.cpp
++++ b/main.cpp
+@@ -83,7 +83,10 @@ void signal_handler(int signal)
+     database->shutdown();
+     delete database;
+ 
+-    currentBrowser->GetHost()->CloseBrowser(true);
++    CefRefPtr<CefBrowser> browser = getCurrentBrowser();
++    if (browser) {
++        browser->GetHost()->CloseBrowser(true);
++    }
+     app = nullptr;
+ 
+     CefQuitMessageLoop();
+diff --git a/mainapp.cpp b/mainapp.cpp
+index 3f5d068..d3584a7 100644
+--- a/mainapp.cpp
++++ b/mainapp.cpp
+@@ -1,3 +1,4 @@
++#include <mutex>
+ #include "mainapp.h"
+ #include <thread>
+ #include <algorithm>
+@@ -34,7 +35,18 @@ using namespace ::apache::thrift::server;
+ using namespace ::apache::thrift::concurrency;
+ using namespace ::common;
+ 
+-scoped_refptr<CefBrowser> currentBrowser;
++static std::mutex currentBrowserMutex;
++static CefRefPtr<CefBrowser> currentBrowser;
++
++CefRefPtr<CefBrowser> getCurrentBrowser() {
++    std::lock_guard<std::mutex> lock(currentBrowserMutex);
++    return currentBrowser;
++}
++
++void setCurrentBrowser(CefRefPtr<CefBrowser> browser) {
++    std::lock_guard<std::mutex> lock(currentBrowserMutex);
++    currentBrowser = browser;
++}
+ TThreadedServer *thriftServer;
+ 
+ void startServer(BrowserParameter bParam) {
+@@ -57,12 +69,15 @@ bool stopCheckVdrRegular = false;
+ 
+ void checkVdrRegular() {
+     while (!stopCheckVdrRegular) {
+-        if (currentBrowser != nullptr) {
+-            std::string url = currentBrowser->GetMainFrame()->GetURL().ToString();
++        CefRefPtr<CefBrowser> browser = getCurrentBrowser();
++        CefRefPtr<CefFrame> frame = browser ? browser->GetMainFrame() : nullptr;
++
++        if (frame != nullptr) {
++            std::string url = frame->GetURL().ToString();
+             if (!url.empty() && url != BLANK_PAGE) {
+-                auto c = dynamic_cast<BrowserClient *>(currentBrowser->GetHost()->GetClient().get());
+-                if (!c->IsVdrWebActive()) {
+-                    currentBrowser->GetMainFrame()->LoadURL(BLANK_PAGE);
++                auto c = dynamic_cast<BrowserClient *>(browser->GetHost()->GetClient().get());
++                if (c != nullptr && !c->IsVdrWebActive()) {
++                    frame->LoadURL(BLANK_PAGE);
+                 }
+             }
+         }
+@@ -131,7 +146,8 @@ void BrowserApp::OnContextInitialized() {
+     extra_info->SetBool("dirtyRecs", bParameter.use_dirty_recs);
+ 
+     CefRefPtr<BrowserClient> client = new BrowserClient(false, bParameter);
+-    currentBrowser = CefBrowserHost::CreateBrowserSync(window_info, client, "", browserSettings, extra_info, nullptr);
++    CefRefPtr<CefBrowser> browser = CefBrowserHost::CreateBrowserSync(window_info, client, "", browserSettings, extra_info, nullptr);
++    setCurrentBrowser(browser);
+ 
+     // read user agents if configured
+     if (!bParameter.user_agent_path.empty()) {
+@@ -139,7 +155,7 @@ void BrowserApp::OnContextInitialized() {
+     }
+ 
+     if (logger->isTraceEnabled()) {
+-        auto pref_manager = currentBrowser->GetHost()->GetRequestContext();
++        auto pref_manager = browser->GetHost()->GetRequestContext();
+ 
+         // print original values
+         if (logger->isTraceEnabled()) {
+@@ -297,7 +313,7 @@ void BrowserApp::shutdown() {
+ 
+     stopCheckVdrRegular = true;
+ 
+-    currentBrowser->Release();
+-    currentBrowser = nullptr;
++    // releases the reference, an additional Release() destroyed the browser too early
++    setCurrentBrowser(nullptr);
+ }
+ 
+diff --git a/mainapp.h b/mainapp.h
+index 361fbff..036b679 100644
+--- a/mainapp.h
++++ b/mainapp.h
+@@ -37,4 +37,6 @@ private:
+     DISALLOW_COPY_AND_ASSIGN(BrowserApp);
+ };
+ 
+-extern scoped_refptr<CefBrowser> currentBrowser;
++// the browser, used by the UI thread, the thrift threads and others
++CefRefPtr<CefBrowser> getCurrentBrowser();
++void setCurrentBrowser(CefRefPtr<CefBrowser> browser);
+-- 
+2.43.0
+

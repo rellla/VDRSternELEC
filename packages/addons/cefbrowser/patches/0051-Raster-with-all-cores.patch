@@ -1,0 +1,41 @@
+From d958bd5f5d7039ddea04168280acd3e65ae584dd Mon Sep 17 00:00:00 2001
+From: Andreas Baierl <ichgeh@imkreisrum.de>
+Date: Sun, 1 Nov 2026 09:24:33 +0100
+Subject: [PATCH 51/59] Raster with all cores
+
+The page is rastered in software. Use one raster thread per core (up
+to 4, the maximum of Chromium) unless --num-raster-threads is given.
+
+Co-Authored-By: Claude Opus 5.5
+---
+ mainapp.cpp | 9 +++++++++
+ 1 file changed, 9 insertions(+)
+
+diff --git a/mainapp.cpp b/mainapp.cpp
+index 80d962c..26f3f6f 100644
+--- a/mainapp.cpp
++++ b/mainapp.cpp
+@@ -1,4 +1,6 @@
+ #include "mainapp.h"
++#include <thread>
++#include <algorithm>
+ 
+ #include "browserserver.h"
+ #include "CefBrowser.h"
+@@ -95,6 +97,13 @@ void BrowserApp::OnBeforeCommandLineProcessing(const CefString& process_type, Ce
+         command_line->AppendSwitch("disable-gpu");
+         command_line->AppendSwitch("disable-gpu-compositing");
+         command_line->AppendSwitch("in-process-gpu");
++
++        // software raster: use all cores (Chromium uses at most 4), unless set on the command line
++        if (!command_line->HasSwitch("num-raster-threads")) {
++            unsigned int cores = std::thread::hardware_concurrency();
++            int threads = (int) std::min(4u, std::max(1u, cores));
++            command_line->AppendSwitchWithValue("num-raster-threads", std::to_string(threads));
++        }
+     }
+ }
+ 
+-- 
+2.43.0
+

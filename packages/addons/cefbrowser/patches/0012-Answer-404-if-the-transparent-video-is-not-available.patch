@@ -1,0 +1,53 @@
+From bc183a5ea5d8faf1000fd07fc193811a0ed584d9 Mon Sep 17 00:00:00 2001
+From: Andreas Baierl <ichgeh@imkreisrum.de>
+Date: Thu, 29 Oct 2026 16:55:08 +0100
+Subject: [PATCH 12/59] Answer 404 if the transparent video is not available
+
+The result of GetVideo() was ignored. An empty video produced the
+invalid range 'bytes 0--1/0' (size_t underflow). Also don't call
+the callback if the request is handled immediately.
+
+Co-Authored-By: Claude Opus 5.5
+---
+ moviestream.cpp | 16 +++++++++++++---
+ 1 file changed, 13 insertions(+), 3 deletions(-)
+
+diff --git a/moviestream.cpp b/moviestream.cpp
+index 5bafdfe..8500641 100644
+--- a/moviestream.cpp
++++ b/moviestream.cpp
+@@ -26,11 +26,14 @@ bool MovieStream::Open(CefRefPtr<CefRequest> request, bool& handle_request, CefR
+         input.filename = request->GetURL().ToString().c_str() + strlen("http://localhost/movie/");
+     }
+ 
+-    transcoderClient->GetVideo(download_data, input);
++    download_data.clear();
++    if (!transcoderClient->GetVideo(download_data, input)) {
++        ERROR("MovieStream: video {} not available", input.filename);
++        download_data.clear();
++    }
+     download_total = download_data.length();
+ 
+-    callback->Continue();
+-
++    // handled immediately, the callback must not be used in this case
+     handle_request = true;
+     return true;
+ }
+@@ -56,6 +59,13 @@ void MovieStream::GetResponseHeaders(CefRefPtr<CefResponse> response, int64_t &r
+ 
+     CefResponse::HeaderMap responseHeader;
+ 
++    if (download_total == 0) {
++        response->SetStatus(404);
++        response->SetStatusText("Not Found");
++        response_length = 0;
++        return;
++    }
++
+     response->SetStatus(206);
+     response->SetStatusText("Partial Content");
+     response->SetMimeType("video/webm");
+-- 
+2.43.0
+

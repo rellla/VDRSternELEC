@@ -1,0 +1,32 @@
+From db05de3035e63b87b33c3ef259fe86b14fa6721d Mon Sep 17 00:00:00 2001
+From: Andreas Baierl <ichgeh@imkreisrum.de>
+Date: Thu, 29 Oct 2026 16:54:50 +0100
+Subject: [PATCH 09/59] Call onPlayPositionChanged() after a seek
+
+The handler was checked, but PlayPositionChanged() was called, which
+threw a TypeError.
+
+Co-Authored-By: Claude Opus 5.5
+---
+ static-content/js/videoobserver.js | 4 ++--
+ 1 file changed, 2 insertions(+), 2 deletions(-)
+
+diff --git a/static-content/js/videoobserver.js b/static-content/js/videoobserver.js
+index dbbf6b9..b0fbcb0 100644
+--- a/static-content/js/videoobserver.js
++++ b/static-content/js/videoobserver.js
+@@ -395,9 +395,9 @@ function addVideoNodeTypeObject(node, url, originalUrl) {
+         console.log("Event seek video " + video.currentTime + ", node " + node.playPosition);
+ 
+         var pos = Math.floor(video.currentTime * 1000);
++        node.playPosition = pos;
+         if (node.onPlayPositionChanged) {
+-            node.playPosition = pos;
+-            node.PlayPositionChanged(pos);
++            node.onPlayPositionChanged(pos);
+         } else {
+             var playerEvent = new Event('PlayPositionChanged');
+             playerEvent.position = pos;
+-- 
+2.43.0
+

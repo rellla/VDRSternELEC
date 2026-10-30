@@ -1,0 +1,40 @@
+From fc0730cb93f59aab0b5b1f310c8c88b0c58a3b3c Mon Sep 17 00:00:00 2001
+From: Andreas Baierl <ichgeh@imkreisrum.de>
+Date: Fri, 30 Oct 2026 22:36:30 +0100
+Subject: [PATCH 45/59] Give fontconfig a cache directory if HOME is not set
+
+Without HOME and XDG_CACHE_HOME, e.g. in a systemd service without
+User=, fontconfig had no writable cache directory and scanned all
+fonts at every start. Use the cache directory of the browser.
+
+Co-Authored-By: Claude Opus 5.5
+---
+ main.cpp | 12 ++++++++++++
+ 1 file changed, 12 insertions(+)
+
+diff --git a/main.cpp b/main.cpp
+index 8f288f7..975fc36 100644
+--- a/main.cpp
++++ b/main.cpp
+@@ -285,6 +285,18 @@ int main(int argc, char *argv[]) {
+ 
+     parseCommandLine(argc, argv);
+ 
++    // Without HOME and XDG_CACHE_HOME (e.g. a systemd service without User=) fontconfig
++    // has no writable cache directory and scans all fonts at every start. Use the cache
++    // directory of the browser instead.
++    if (getenv("XDG_CACHE_HOME") == nullptr && getenv("HOME") == nullptr) {
++        std::string fontCache = cachePath;
++        if (fontCache.empty()) {
++            std::string exepath = getexepath();
++            fontCache = exepath.substr(0, exepath.find_last_of('/')) + "/profile";
++        }
++        setenv("XDG_CACHE_HOME", fontCache.c_str(), 1);
++    }
++
+     // Use an own font configuration, the bundled fontconfig of libcef may not understand
+     // the system configuration. Set before the subprocesses are started, they inherit it.
+     if (getenv("FONTCONFIG_FILE") == nullptr) {
+-- 
+2.43.0
+

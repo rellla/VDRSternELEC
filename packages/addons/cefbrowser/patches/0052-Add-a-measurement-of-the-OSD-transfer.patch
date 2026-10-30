@@ -1,0 +1,298 @@
+From 7ef3d90f621cd78ddc51185c12de6c9177243187 Mon Sep 17 00:00:00 2001
+From: Andreas Baierl <ichgeh@imkreisrum.de>
+Date: Sun, 1 Nov 2026 09:25:35 +0100
+Subject: [PATCH 52/59] Add a measurement of the OSD transfer
+
+With --measure the browser logs the time from a key to its first
+frame and to the arrival of the frame at VDR, and every 5 seconds
+statistics of the OSD transfer (frames, regions, size, wait and send
+time).
+
+Co-Authored-By: Claude Opus 5.5
+---
+ README.md         |  2 ++
+ browserclient.cpp |  2 +-
+ browserserver.cpp |  3 ++
+ main.cpp          |  9 +++++-
+ osdsender.cpp     | 82 ++++++++++++++++++++++++++++++++++++++++++++++-
+ osdsender.h       | 24 +++++++++++++-
+ tools.h           |  1 +
+ 7 files changed, 119 insertions(+), 4 deletions(-)
+
+diff --git a/README.md b/README.md
+index 07e9f6a..ede7e7c 100644
+--- a/README.md
++++ b/README.md
+@@ -69,6 +69,8 @@ It's up to you to decide what you want to use and test ;)
+          interesting effects if Docker/Incus/LXD is also installed.                  
+ -r / --remotedebug <port> Enables the Chromium DevTools on the given
+          port (e.g. 9222). Disabled by default.
++-m / --measure Logs (level info) the time from a key to the frame at VDR
++         and every 5 seconds statistics of the OSD transfer.
+ ```
+ 
+ ### Logging
+diff --git a/browserclient.cpp b/browserclient.cpp
+index 01a0069..9aea737 100644
+--- a/browserclient.cpp
++++ b/browserclient.cpp
+@@ -28,7 +28,7 @@ BrowserClient::BrowserClient(bool fullscreen, BrowserParameter bp) : bParam(bp)
+     // create clients
+     transcoderClient = new TranscoderClient(bParam.transcoderIp, bParam.transcoderPort);
+     vdrClient = new VdrClient(bParam.vdrIp, bParam.vdrPort);
+-    osdSender = new OsdSender(vdrClient, bParam.osdqoi == QOI);
++    osdSender = new OsdSender(vdrClient, bParam.osdqoi == QOI, bParam.measure);
+ 
+     streamId = bParam.browserIp + "_" + std::to_string(bParam.browserPort);
+ }
+diff --git a/browserserver.cpp b/browserserver.cpp
+index 9de87be..a6b620c 100644
+--- a/browserserver.cpp
++++ b/browserserver.cpp
+@@ -220,6 +220,9 @@ bool BrowserServer::ProcessKey(const ProcessKeyType &input) {
+         return false;
+     }
+ 
++    // measurement (--measure): time from the key to the frame at VDR
++    OsdSender::KeyPressed(input.key);
++
+     if ((input.key.find("VK_BACK") != std::string::npos) ||
+         (input.key.find("VK_RED") != std::string::npos) ||
+         (input.key.find("VK_GREEN") != std::string::npos) ||
+diff --git a/main.cpp b/main.cpp
+index 7cc1330..8e0ad46 100644
+--- a/main.cpp
++++ b/main.cpp
+@@ -45,6 +45,7 @@ bool use_dirty_recs;
+ 
+ bool bindAll;
+ int remoteDebuggingPort = 0;
++bool measure = false;
+ 
+ CefRefPtr<BrowserApp> app;
+ 
+@@ -108,6 +109,7 @@ void parseCommandLine(int argc, char *argv[]) {
+             { "uagent",      optional_argument, nullptr, 'u' },
+             { "browserdb",   optional_argument, nullptr, 'd' },
+             { "remotedebug", required_argument, nullptr, 'r' },
++            { "measure",     no_argument,       nullptr, 'm' },
+             { nullptr }
+     };
+ 
+@@ -124,7 +126,7 @@ void parseCommandLine(int argc, char *argv[]) {
+     staticPath = getexepath();
+     staticPath = staticPath.substr(0, staticPath.find_last_of('/'));
+ 
+-    while ((c = getopt_long(argc, argv, "qc:l:z:fp:s:bu:d:a:r:", long_options, &option_index)) != -1)
++    while ((c = getopt_long(argc, argv, "qc:l:z:fp:s:bu:d:a:r:m", long_options, &option_index)) != -1)
+     {
+         switch (c)
+         {
+@@ -204,6 +206,10 @@ void parseCommandLine(int argc, char *argv[]) {
+                 remoteDebuggingPort = atoi(optarg);
+                 break;
+ 
++            case 'm':
++                measure = true;
++                break;
++
+             default:
+                 // return;
+                 break;
+@@ -345,6 +351,7 @@ int main(int argc, char *argv[]) {
+     bParameter.use_dirty_recs = use_dirty_recs;
+     bParameter.static_path = staticPath;
+     bParameter.bindAll = bindAll;
++    bParameter.measure = measure;
+     bParameter.user_agent_path = userAgentPath;
+ 
+     // Main browser process
+diff --git a/osdsender.cpp b/osdsender.cpp
+index 8f36db4..babe4b6 100644
+--- a/osdsender.cpp
++++ b/osdsender.cpp
+@@ -11,7 +11,23 @@
+ #define VIDEO_KEY_COLOR    0xfffe2e9a
+ #define VIDEO_TRANSPARENT  0x00fe2e9a
+ 
+-OsdSender::OsdSender(VdrClient *client, bool qoi) : vdrClient(client), useQoi(qoi) {
++// measurement: the last key sent to the page
++static std::mutex keyMutex;
++static std::string keyName;
++static std::chrono::steady_clock::time_point keyTime;
++
++void OsdSender::KeyPressed(const std::string &key) {
++    std::lock_guard<std::mutex> lock(keyMutex);
++    keyName = key;
++    keyTime = std::chrono::steady_clock::now();
++}
++
++static double ms(std::chrono::steady_clock::duration d) {
++    return std::chrono::duration<double, std::milli>(d).count();
++}
++
++OsdSender::OsdSender(VdrClient *client, bool qoi, bool measure) : vdrClient(client), useQoi(qoi), measure(measure) {
++    statsStart = clock::now();
+     thread = std::thread(&OsdSender::Run, this);
+ }
+ 
+@@ -56,6 +72,21 @@ void OsdSender::Paint(const void *buffer, int width, int height, const std::vect
+     {
+         std::lock_guard<std::mutex> lock(mutex);
+ 
++        if (measure) {
++            auto now = clock::now();
++            if (dirty.empty()) {
++                firstPaint = now;
++            }
++
++            // the first frame after a key
++            std::lock_guard<std::mutex> keyLock(keyMutex);
++            if (!keyName.empty() && keyPaintName.empty()) {
++                keyPaintName = keyName;
++                keyPaint = now;
++                INFO("[measure] key {}: first frame rendered after {:.1f} ms", keyName, ms(now - keyTime));
++            }
++        }
++
+         // a new size: the whole frame is new
+         std::vector<CefRect> regions = rects;
+         if (width != frameWidth || height != frameHeight) {
+@@ -100,6 +131,7 @@ void OsdSender::Paint(const void *buffer, int width, int height, const std::vect
+ void OsdSender::Run() {
+     while (true) {
+         int width, height;
++        clock::time_point waitStart;
+         std::vector<CefRect> rects;
+         std::vector<std::string> data;
+ 
+@@ -114,6 +146,7 @@ void OsdSender::Run() {
+             rects.swap(dirty);
+             width = frameWidth;
+             height = frameHeight;
++            waitStart = firstPaint;
+ 
+             // copy the regions, the frame may change while sending
+             for (const auto &r : rects) {
+@@ -131,7 +164,54 @@ void OsdSender::Run() {
+             }
+         }
+ 
++        size_t bytes = 0;
++        for (const auto &d : data) {
++            bytes += d.size();
++        }
++
++        auto sendStart = clock::now();
+         Send(width, height, rects, data);
++
++        if (measure) {
++            Measure(waitStart, sendStart, (int) rects.size(), bytes);
++        }
++    }
++}
++
++void OsdSender::Measure(clock::time_point waitStart, clock::time_point sendStart, int rects, size_t bytes) {
++    auto now = clock::now();
++    double send = ms(now - sendStart);
++
++    // the frame of a key has arrived at VDR
++    {
++        std::lock_guard<std::mutex> lock(mutex);
++        if (!keyPaintName.empty()) {
++            std::lock_guard<std::mutex> keyLock(keyMutex);
++            INFO("[measure] key {}: frame at VDR after {:.1f} ms (sending {:.1f} ms)", keyPaintName, ms(now - keyTime), send);
++            if (keyName == keyPaintName) {
++                keyName.clear();
++            }
++            keyPaintName.clear();
++        }
++    }
++
++    statsFrames++;
++    statsRects += rects;
++    statsBytes += bytes;
++    statsWait += ms(sendStart - waitStart);
++    statsSend += send;
++    statsSendMax = std::max(statsSendMax, send);
++
++    double elapsed = ms(now - statsStart);
++    if (elapsed >= 5000) {
++        INFO("[measure] OSD: {} frames in {:.1f} s, {:.1f} regions/frame, {:.1f} MB, wait {:.1f} ms, send avg {:.1f} max {:.1f} ms",
++             statsFrames, elapsed / 1000, (double) statsRects / statsFrames, statsBytes / 1048576.0,
++             statsWait / statsFrames, statsSend / statsFrames, statsSendMax);
++
++        statsStart = now;
++        statsFrames = statsRects = 0;
++        statsBytes = 0;
++        statsWait = statsSend = statsSendMax = 0;
+     }
+ }
+ 
+diff --git a/osdsender.h b/osdsender.h
+index d3bd330..98e8065 100644
+--- a/osdsender.h
++++ b/osdsender.h
+@@ -4,6 +4,9 @@
+ #include <mutex>
+ #include <thread>
+ #include <condition_variable>
++#include <chrono>
++#include <atomic>
++#include <string>
+ #include "cef_includes.h"
+ #include "thrift-services/src-client/VdrClient.h"
+ 
+@@ -15,12 +18,15 @@
+ // latest state: frames which arrive while sending are merged.
+ class OsdSender {
+ public:
+-    OsdSender(VdrClient *client, bool qoi);
++    OsdSender(VdrClient *client, bool qoi, bool measure = false);
+     ~OsdSender();
+ 
+     // called from OnPaint()
+     void Paint(const void *buffer, int width, int height, const std::vector<CefRect> &rects);
+ 
++    // measurement: a key has been sent to the page
++    static void KeyPressed(const std::string &key);
++
+ private:
+     void Run();
+     void AddDirty(const CefRect &rect);
+@@ -39,4 +45,20 @@ private:
+     std::vector<CefRect> dirty;       // regions not sent yet
+ 
+     std::thread thread;
++
++    // measurement (--measure)
++    using clock = std::chrono::steady_clock;
++    bool measure;
++    clock::time_point firstPaint;          // first Paint() not sent yet
++    clock::time_point keyPaint;            // first Paint() after a key
++    std::string keyPaintName;
++    clock::time_point statsStart;
++    int statsFrames = 0;
++    int statsRects = 0;
++    size_t statsBytes = 0;
++    double statsWait = 0;
++    double statsSend = 0;
++    double statsSendMax = 0;
++
++    void Measure(clock::time_point waitStart, clock::time_point sendStart, int rects, size_t bytes);
+ };
+diff --git a/tools.h b/tools.h
+index 5b57681..d3f179b 100644
+--- a/tools.h
++++ b/tools.h
+@@ -30,6 +30,7 @@ typedef struct BrowserParameter {
+     std::string user_agent_path;
+ 
+     bool bindAll;
++    bool measure = false;
+ 
+     image_type_enum image_type;
+ } BrowserParameter;
+-- 
+2.43.0
+

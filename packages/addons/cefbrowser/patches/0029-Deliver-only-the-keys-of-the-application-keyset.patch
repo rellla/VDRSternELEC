@@ -1,0 +1,223 @@
+From 33ade8c7e17d0516ce34b2c6955d0547f87e51c3 Mon Sep 17 00:00:00 2001
+From: Andreas Baierl <ichgeh@imkreisrum.de>
+Date: Thu, 29 Oct 2026 17:04:27 +0100
+Subject: [PATCH 29/59] Deliver only the keys of the application keyset
+
+Applications got every key, also keys they didn't request with
+keyset.setValue(). On a TV such keys are handled by the TV itself,
+e.g. the numeric keys switch the channel. Mirror the keyset into the
+browser process and let ProcessKey() return false for keys which are
+not in the keyset.
+
+Co-Authored-By: Claude Opus 5.5
+---
+ browserclient.cpp          | 10 ++++++++++
+ browserserver.cpp          |  7 +++++++
+ keycodes.cpp               | 39 ++++++++++++++++++++++++++++++++++++++
+ keycodes.h                 | 23 ++++++++++++++++++++++
+ mainapp.cpp                |  3 +++
+ static-content/js/hbbtv.js | 21 +++++++++++++++++---
+ v8handler.cpp              |  8 ++++++++
+ 7 files changed, 108 insertions(+), 3 deletions(-)
+
+diff --git a/browserclient.cpp b/browserclient.cpp
+index a599e13..f509895 100644
+--- a/browserclient.cpp
++++ b/browserclient.cpp
+@@ -1,6 +1,7 @@
+ #include <chrono>
+ #include <algorithm>
+ #include "browserclient.h"
++#include "keycodes.h"
+ #include "database.h"
+ #include "tools.h"
+ #include "moviestream.h"
+@@ -165,6 +166,12 @@ bool BrowserClient::OnProcessMessageReceived(CefRefPtr<CefBrowser> browser, CefR
+         } else {
+             ERROR("BrowserClient::OnProcessMessageReceived: RedButton without channelId");
+         }
++    } else if (message->GetName().ToString() == "KeySet") {
++        if (message->GetArgumentList()->GetSize() == 1) {
++            currentKeySet = std::atoi(message->GetArgumentList()->GetString(0).ToString().c_str());
++            DEBUG("BrowserClient::OnProcessMessageReceived: KeySet 0x{:x}", currentKeySet.load());
++        }
++        return true;
+     } else if (message->GetName().ToString() == "DestroyApp") {
+         // A TV starts the autostart application of the channel again, unless
+         // the autostart application destroys itself.
+@@ -244,6 +251,9 @@ void BrowserClient::loadUrl(CefRefPtr<CefBrowser> browser, const std::string& ur
+     std::string reason = "BrowserClient::loadUrl";
+     transcoderClient->Stop(streamId, reason);
+ 
++    // the new page starts with the default keyset
++    currentKeySet = KEYSET_DEFAULT;
++
+     // load url
+     browser->GetMainFrame()->LoadURL(url);
+ }
+diff --git a/browserserver.cpp b/browserserver.cpp
+index f387020..5864022 100644
+--- a/browserserver.cpp
++++ b/browserserver.cpp
+@@ -150,6 +150,13 @@ bool BrowserServer::StartApplication(const StartApplicationType &input) {
+ }
+ 
+ bool BrowserServer::ProcessKey(const ProcessKeyType &input) {
++    // HbbTV: the application gets only the keys of its keyset. Returning false
++    // tells VDR to handle the key itself (e.g. the numeric keys switch the channel).
++    if ((keySetGroup(input.key) & currentKeySet) == 0) {
++        DEBUG("Key {} is not in the keyset 0x{:x} of the application", input.key, currentKeySet.load());
++        return false;
++    }
++
+     if ((input.key.find("VK_BACK") != std::string::npos) ||
+         (input.key.find("VK_RED") != std::string::npos) ||
+         (input.key.find("VK_GREEN") != std::string::npos) ||
+diff --git a/keycodes.cpp b/keycodes.cpp
+index 6d75a9e..a58d142 100644
+--- a/keycodes.cpp
++++ b/keycodes.cpp
+@@ -116,3 +116,42 @@ std::unordered_map<std::string, int> keyCodes = {
+         {"VK_NUMLOCK",   0x0090},    // NumLock
+         {"VK_SCROLL",    0x0091}     // Rollen
+ };
++
++std::atomic<int> currentKeySet(KEYSET_DEFAULT);
++
++int keySetGroup(const std::string& key) {
++    static const std::unordered_map<std::string, int> groups = {
++        {"VK_RED",        KEYSET_RED},
++        {"VK_GREEN",      KEYSET_GREEN},
++        {"VK_YELLOW",     KEYSET_YELLOW},
++        {"VK_BLUE",       KEYSET_BLUE},
++        {"VK_UP",         KEYSET_NAVIGATION},
++        {"VK_DOWN",       KEYSET_NAVIGATION},
++        {"VK_LEFT",       KEYSET_NAVIGATION},
++        {"VK_RIGHT",      KEYSET_NAVIGATION},
++        {"VK_ENTER",      KEYSET_NAVIGATION},
++        {"VK_BACK",       KEYSET_NAVIGATION},
++        {"VK_PLAY",       KEYSET_VCR},
++        {"VK_PAUSE",      KEYSET_VCR},
++        {"VK_PLAY_PAUSE", KEYSET_VCR},
++        {"VK_STOP",       KEYSET_VCR},
++        {"VK_FAST_FWD",   KEYSET_VCR},
++        {"VK_REWIND",     KEYSET_VCR},
++        {"VK_PAGE_UP",    KEYSET_SCROLL},
++        {"VK_PAGE_DOWN",  KEYSET_SCROLL},
++        {"VK_INFO",       KEYSET_INFO},
++        {"VK_0",          KEYSET_NUMERIC},
++        {"VK_1",          KEYSET_NUMERIC},
++        {"VK_2",          KEYSET_NUMERIC},
++        {"VK_3",          KEYSET_NUMERIC},
++        {"VK_4",          KEYSET_NUMERIC},
++        {"VK_5",          KEYSET_NUMERIC},
++        {"VK_6",          KEYSET_NUMERIC},
++        {"VK_7",          KEYSET_NUMERIC},
++        {"VK_8",          KEYSET_NUMERIC},
++        {"VK_9",          KEYSET_NUMERIC},
++    };
++
++    auto it = groups.find(key);
++    return it != groups.end() ? it->second : KEYSET_OTHER;
++}
+diff --git a/keycodes.h b/keycodes.h
+index 1fcf562..421f32a 100644
+--- a/keycodes.h
++++ b/keycodes.h
+@@ -4,3 +4,26 @@
+ #include <unordered_map>
+ 
+ extern std::unordered_map<std::string, int> keyCodes;
++
++#include <atomic>
++
++// HbbTV keyset of the running application (Application.privateData.keyset)
++#define KEYSET_RED          0x001
++#define KEYSET_GREEN        0x002
++#define KEYSET_YELLOW       0x004
++#define KEYSET_BLUE         0x008
++#define KEYSET_NAVIGATION   0x010
++#define KEYSET_VCR          0x020
++#define KEYSET_SCROLL       0x040
++#define KEYSET_INFO         0x080
++#define KEYSET_NUMERIC      0x100
++#define KEYSET_ALPHA        0x200
++#define KEYSET_OTHER        0x400
++
++// keys an application gets without calling keyset.setValue()
++#define KEYSET_DEFAULT      (KEYSET_RED | KEYSET_GREEN | KEYSET_YELLOW | KEYSET_BLUE | KEYSET_NAVIGATION | KEYSET_VCR | KEYSET_SCROLL | KEYSET_INFO)
++
++extern std::atomic<int> currentKeySet;
++
++// keyset group of a key like "VK_RED", KEYSET_OTHER if unknown
++int keySetGroup(const std::string& key);
+diff --git a/mainapp.cpp b/mainapp.cpp
+index 4e90099..822fb6f 100644
+--- a/mainapp.cpp
++++ b/mainapp.cpp
+@@ -225,6 +225,9 @@ void BrowserApp::OnContextCreated(CefRefPtr<CefBrowser> browser, CefRefPtr<CefFr
+     CefRefPtr<CefV8Value> redButton = CefV8Value::CreateFunction("RedButton", handler);
+     object->SetValue("cefRedButton", redButton, V8_PROPERTY_ATTRIBUTE_NONE);
+ 
++    CefRefPtr<CefV8Value> setKeySet = CefV8Value::CreateFunction("SetKeySet", handler);
++    object->SetValue("cefSetKeySet", setKeySet, V8_PROPERTY_ATTRIBUTE_NONE);
++
+     CefRefPtr<CefV8Value> destroyApp = CefV8Value::CreateFunction("DestroyApp", handler);
+     object->SetValue("cefDestroyApp", destroyApp, V8_PROPERTY_ATTRIBUTE_NONE);
+ 
+diff --git a/static-content/js/hbbtv.js b/static-content/js/hbbtv.js
+index 4bdd333..e2089b3 100644
+--- a/static-content/js/hbbtv.js
++++ b/static-content/js/hbbtv.js
+@@ -127,11 +127,26 @@
+     keyset.NUMERIC = 0x100;
+     keyset.ALPHA = 0x200;
+     keyset.OTHER = 0x400;
+-    keyset.value = 0x1f;
+-    keyset.setValue = function (value) {
+-        keyset.value = value;
++    keyset.maximumValue = 0x1ff;
++    keyset.otherKeys = [];
++    keyset.supportsPointer = false;
++
++    // Keys not in the keyset are handled by VDR (e.g. numeric keys switch the channel).
++    // Without setValue() an application gets all keys except the numeric keys.
++    keyset.value = 0xff;
++    keyset.setValue = function (value, otherKeys) {
++        keyset.value = value & keyset.maximumValue;
+         window.HBBTV_POLYFILL_NS.keysetSetValueCount++;
++        if (window.cefSetKeySet) {
++            window.cefSetKeySet(keyset.value);
++        }
++        return keyset.value;
+     };
++
++    // a new page starts with the default keyset
++    if (window.cefSetKeySet) {
++        window.cefSetKeySet(keyset.value);
++    }
+     Object.defineProperties(Application.prototype.privateData, {
+         '_document': {
+             value: null,
+diff --git a/v8handler.cpp b/v8handler.cpp
+index 158ebf6..73581ed 100644
+--- a/v8handler.cpp
++++ b/v8handler.cpp
+@@ -257,6 +257,14 @@ bool V8Handler::Execute(const CefString &name, CefRefPtr<CefV8Value> object, con
+             sendMessageToProcess("RedButton", channelId);
+         }
+ 
++        retval = CefV8Value::CreateBool(true);
++        return true;
++    } else if (name == "SetKeySet") {
++        if (!arguments.empty() && (arguments.at(0)->IsInt() || arguments.at(0)->IsUInt() || arguments.at(0)->IsDouble())) {
++            int value = static_cast<int>(arguments.at(0)->GetDoubleValue());
++            sendMessageToProcess("KeySet", std::to_string(value));
++        }
++
+         retval = CefV8Value::CreateBool(true);
+         return true;
+     } else if (name == "DestroyApp") {
+-- 
+2.43.0
+

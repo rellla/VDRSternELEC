@@ -1,0 +1,28 @@
+From 8aa0f7520559dce5b326d90197c7120bce4c796d Mon Sep 17 00:00:00 2001
+From: Andreas Baierl <ichgeh@imkreisrum.de>
+Date: Thu, 29 Oct 2026 16:54:56 +0100
+Subject: [PATCH 11/59] Fix the condition of the IPTV video quirk
+
+A misplaced parenthesis searched for 'false', the quirk never applied.
+
+Co-Authored-By: Claude Opus 5.5
+---
+ static-content/js/video_quirks.js | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/static-content/js/video_quirks.js b/static-content/js/video_quirks.js
+index b753700..94bdf99 100644
+--- a/static-content/js/video_quirks.js
++++ b/static-content/js/video_quirks.js
+@@ -76,7 +76,7 @@ function activate_quirks(isStart) {
+             document.body.style.background = '#0d1118';
+             document.getElementsByTagName('html')[0].style.setProperty('background', '#0d1118');
+         }
+-    } else if (document.location.href.search("http://127.0.0.1" > 0) && document.location.href.search("/application/iptv/index.html") > 0) {
++    } else if (document.location.href.search("http://127.0.0.1") >= 0 && document.location.href.search("/application/iptv/index.html") > 0) {
+         if (isStart) {
+             _quirk_hide_element('app_area', null, null);
+         } else {
+-- 
+2.43.0
+

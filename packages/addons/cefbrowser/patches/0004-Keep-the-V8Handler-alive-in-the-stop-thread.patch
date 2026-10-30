@@ -1,0 +1,32 @@
+From 4634731300f7a4a0684c8ba7497d4c91652dcfb2 Mon Sep 17 00:00:00 2001
+From: Andreas Baierl <ichgeh@imkreisrum.de>
+Date: Thu, 29 Oct 2026 16:53:40 +0100
+Subject: [PATCH 04/59] Keep the V8Handler alive in the stop thread
+
+The detached thread used a raw this pointer. A page change during
+the 5 seconds wait released the handler.
+
+Co-Authored-By: Claude Opus 5.5
+---
+ v8handler.cpp | 5 ++++-
+ 1 file changed, 4 insertions(+), 1 deletion(-)
+
+diff --git a/v8handler.cpp b/v8handler.cpp
+index 73d7f53..424b44c 100644
+--- a/v8handler.cpp
++++ b/v8handler.cpp
+@@ -194,7 +194,10 @@ bool V8Handler::Execute(const CefString &name, CefRefPtr<CefV8Value> object, con
+         DEBUG("V8Handler::Execute: Trancoder finished {}", name.ToString());
+ 
+         stopVideoThreadRunning = true;
+-        std::thread stopThread(&V8Handler::stopVdrVideo, this);
++
++        // the detached thread keeps a reference, the handler may be released meanwhile (page change)
++        CefRefPtr<V8Handler> self(this);
++        std::thread stopThread([self]() { self->stopVdrVideo(); });
+         stopThread.detach();
+ 
+         DEBUG("V8Handler::Execute: Thread started {}", name.ToString());
+-- 
+2.43.0
+

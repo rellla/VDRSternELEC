@@ -1,0 +1,39 @@
+From d3218f9ce350a79c4586be69df1ed163b32179de Mon Sep 17 00:00:00 2001
+From: Andreas Baierl <ichgeh@imkreisrum.de>
+Date: Fri, 30 Oct 2026 12:42:27 +0100
+Subject: [PATCH 30/59] Don't use the GPU for offscreen rendering
+
+Chromium tried to create a GLES 3.0 context, failed on the RPi4 (2.0
+only) and restarted the GPU process in software mode, with EGL, viz
+and sandbox errors at every start. Offscreen rendering needs only
+software compositing, run it inside the browser process.
+
+Co-Authored-By: Claude Opus 5.5
+---
+ mainapp.cpp | 10 ++++++++++
+ 1 file changed, 10 insertions(+)
+
+diff --git a/mainapp.cpp b/mainapp.cpp
+index 822fb6f..6a37e81 100644
+--- a/mainapp.cpp
++++ b/mainapp.cpp
+@@ -85,6 +85,16 @@ CefRefPtr<CefRenderProcessHandler> BrowserApp::GetRenderProcessHandler() {
+ 
+ void BrowserApp::OnBeforeCommandLineProcessing(const CefString& process_type, CefRefPtr<CefCommandLine> command_line) {
+     command_line->AppendSwitchWithValue("autoplay-policy", "no-user-gesture-required");
++
++    // Offscreen rendering only needs software compositing, the OSD is drawn by VDR.
++    // Without these switches Chromium tries GLES 3.0 (the RPi4 offers 2.0), the GPU
++    // process fails and is restarted in software mode. Run the remaining GPU thread
++    // inside the browser process, this saves a process and its memory.
++    if (process_type.empty()) {
++        command_line->AppendSwitch("disable-gpu");
++        command_line->AppendSwitch("disable-gpu-compositing");
++        command_line->AppendSwitch("in-process-gpu");
++    }
+ }
+ 
+ void BrowserApp::OnContextInitialized() {
+-- 
+2.43.0
+

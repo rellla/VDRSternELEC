@@ -1,0 +1,73 @@
+From f17d059ac255dabbee91e6894d74d75136446af4 Mon Sep 17 00:00:00 2001
+From: Andreas Baierl <ichgeh@imkreisrum.de>
+Date: Thu, 29 Oct 2026 16:56:37 +0100
+Subject: [PATCH 17/59] Use a thread per thrift connection
+
+TThreadPoolServer with 4 workers serves only 4 connections at once.
+All clients keep their connections open, so further clients hang.
+
+Co-Authored-By: Claude Opus 5.5
+---
+ browserserver.h |  2 +-
+ mainapp.cpp     | 16 ++++++----------
+ 2 files changed, 7 insertions(+), 11 deletions(-)
+
+diff --git a/browserserver.h b/browserserver.h
+index 75194ab..9f2019e 100644
+--- a/browserserver.h
++++ b/browserserver.h
+@@ -7,7 +7,7 @@
+ #include <thrift/transport/TSocket.h>
+ #include <thrift/protocol/TBinaryProtocol.h>
+ #include <thrift/transport/TBufferTransports.h>
+-#include <thrift/server/TThreadPoolServer.h>
++#include <thrift/server/TThreadedServer.h>
+ #include <thrift/transport/TServerSocket.h>
+ #include <thrift/transport/TBufferTransports.h>
+ 
+diff --git a/mainapp.cpp b/mainapp.cpp
+index 6a1129c..662a129 100644
+--- a/mainapp.cpp
++++ b/mainapp.cpp
+@@ -5,7 +5,7 @@
+ #include <thrift/transport/TSocket.h>
+ #include <thrift/protocol/TBinaryProtocol.h>
+ #include <thrift/transport/TBufferTransports.h>
+-#include <thrift/server/TThreadPoolServer.h>
++#include <thrift/server/TThreadedServer.h>
+ #include <thrift/transport/TServerSocket.h>
+ #include <thrift/transport/TBufferTransports.h>
+ 
+@@ -32,24 +32,20 @@ using namespace ::apache::thrift::concurrency;
+ using namespace ::common;
+ 
+ scoped_refptr<CefBrowser> currentBrowser;
+-TThreadPoolServer *thriftServer;
++TThreadedServer *thriftServer;
+ 
+ void startServer(BrowserParameter bParam) {
+     BrowserServer::setBrowserParameter(bParam);
+ 
+-    const int workerCount = 4;
+-    std::shared_ptr<ThreadManager> threadManager = ThreadManager::newSimpleThreadManager(workerCount);
+-    threadManager->threadFactory(std::make_shared<ThreadFactory>());
+-    threadManager->start();
+-
+     std::string listenIp = bParam.bindAll ? "0.0.0.0" : bParam.browserIp;
+ 
+-    thriftServer = new TThreadPoolServer(
++    // one thread per connection: the clients keep their connections open,
++    // a fixed pool of 4 workers blocks any further client
++    thriftServer = new TThreadedServer(
+             std::make_shared<CefBrowserProcessorFactory>(std::make_shared<BrowserCloneFactory>()),
+             std::make_shared<TServerSocket>(listenIp, bParam.browserPort),
+             std::make_shared<TBufferedTransportFactory>(),
+-            std::make_shared<TBinaryProtocolFactory>(),
+-            threadManager);
++            std::make_shared<TBinaryProtocolFactory>());
+ 
+     thriftServer->serve();
+ }
+-- 
+2.43.0
+

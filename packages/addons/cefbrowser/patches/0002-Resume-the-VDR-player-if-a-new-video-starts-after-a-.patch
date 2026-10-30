@@ -1,0 +1,32 @@
+From 0e4c46ae85ae0a4d9b6da293265da02449c1e215 Mon Sep 17 00:00:00 2001
+From: Andreas Baierl <ichgeh@imkreisrum.de>
+Date: Thu, 29 Oct 2026 16:53:25 +0100
+Subject: [PATCH 02/59] Resume the VDR player if a new video starts after a
+ pause
+
+The player stayed paused and dropped every packet of the new video,
+the screen stayed black.
+
+Co-Authored-By: Claude Opus 5.5
+---
+ v8handler.cpp | 4 ++++
+ 1 file changed, 4 insertions(+)
+
+diff --git a/v8handler.cpp b/v8handler.cpp
+index b736943..4db6883 100644
+--- a/v8handler.cpp
++++ b/v8handler.cpp
+@@ -117,6 +117,10 @@ bool V8Handler::Execute(const CefString &name, CefRefPtr<CefV8Value> object, con
+                 std::string reason = "Javascript StopVideo (Start after Pause)";
+                 transcoderClient->Stop(streamId, reason);
+                 videoReset = true;
++
++                // the VDR player is still paused and would drop all packets of the new video
++                vdrClient->Resume();
++                isVideoPaused = false;
+             }
+ 
+             TRACE("Video URL: {}", url.ToString());
+-- 
+2.43.0
+

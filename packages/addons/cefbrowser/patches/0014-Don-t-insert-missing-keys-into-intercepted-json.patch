@@ -1,0 +1,68 @@
+From 00e4a8c6364f9fa39ee0a21c512cdb94a1fc6e95 Mon Sep 17 00:00:00 2001
+From: Andreas Baierl <ichgeh@imkreisrum.de>
+Date: Thu, 29 Oct 2026 16:55:48 +0100
+Subject: [PATCH 14/59] Don't insert missing keys into intercepted json
+
+operator[] inserted missing keys as null, e.g. "data": null, which
+the applications don't expect. If the response was no json object,
+it threw. The ARD branch did nothing but inserting such keys.
+
+Co-Authored-By: Claude Opus 5.5
+---
+ xhrinterception.cpp | 25 ++++++++++---------------
+ 1 file changed, 10 insertions(+), 15 deletions(-)
+
+diff --git a/xhrinterception.cpp b/xhrinterception.cpp
+index 761b6a3..7ed0de6 100644
+--- a/xhrinterception.cpp
++++ b/xhrinterception.cpp
+@@ -42,36 +42,31 @@ void XhrInterception::modifyResponse() {
+             dataJson = j_flat.unflatten();
+         }
+ 
++        // Only look at existing keys: operator[] inserts missing keys as null (the
++        // application then gets e.g. "data": null) and throws if the json is no object.
++        auto isObject = [](const nlohmann::ordered_json& j, const char* key) {
++            return j.is_object() && j.contains(key) && j[key].is_object();
++        };
++
+         if (cprResponse.url.str().find("-hbbtv.zdf.de/ds/configuration") != std::string::npos) {
+-            if (dataJson.find("dash") != dataJson.end()) {
++            if (dataJson.is_object() && dataJson.contains("dash")) {
+                 dataJson["dash"] = false;
+             }
+         } else if (cprResponse.url.str().find("hbbtv.zdf.de") != std::string::npos) {
+             // Version 1
+-            if (dataJson["data"] != nullptr) {
++            if (isObject(dataJson, "data")) {
+                 dataJson["data"].erase("ageControl");
+             }
+ 
+             // Version 2
+-            if (dataJson["fsk"]["age"] != nullptr) {
+-                dataJson["fsk"].erase("age");
+-            }
+-
+-            if (dataJson["fsk"] != nullptr) {
++            if (dataJson.is_object() && dataJson.contains("fsk")) {
+                 dataJson.erase("fsk");
+             }
+ 
+             // Version 3
+-            if (dataJson.find("videoMetaData") != dataJson.end() && dataJson["videoMetaData"] != nullptr) {
++            if (isObject(dataJson, "videoMetaData")) {
+                 dataJson["videoMetaData"].erase("fsk");
+             }
+-        } else if (cprResponse.url.str().find("tv.ardmediathek.de/dyn/get?id=video") != std::string::npos) {
+-            // Version 1
+-            if (dataJson["video"]["meta"]["maturityContentRating"] != nullptr) {
+-                // dataJson["video"]["meta"].erase("maturityContentRating");
+-                // dataJson["video"]["meta"]["maturityContentRating"]["age"] = "6";
+-                // dataJson["video"]["meta"]["maturityContentRating"]["isBlocked"] = false;
+-            }
+         }
+     } else {
+         DEBUG("[XhrInterception] Error {}, Code {}, Text {} in {} ms", cprResponse.url.str(), cprResponse.status_code, cprResponse.status_line, cprResponse.elapsed);
+-- 
+2.43.0
+

@@ -1,0 +1,33 @@
+From edf3c062031d7d11c5ac59350177c51c8e15bbcc Mon Sep 17 00:00:00 2001
+From: Andreas Baierl <ichgeh@imkreisrum.de>
+Date: Thu, 29 Oct 2026 16:54:02 +0100
+Subject: [PATCH 07/59] Prepend a scheme to the decoded ZDF url only if missing
+
+'http:' was always prepended. An absolute url became 'http:https://'
+and a scheme relative one was forced to http.
+
+Co-Authored-By: Claude Opus 5.5
+---
+ static-content/js/videoobserver.js | 6 +++++-
+ 1 file changed, 5 insertions(+), 1 deletion(-)
+
+diff --git a/static-content/js/videoobserver.js b/static-content/js/videoobserver.js
+index de0e4fa..348dd44 100644
+--- a/static-content/js/videoobserver.js
++++ b/static-content/js/videoobserver.js
+@@ -658,7 +658,11 @@ function checkSingleObjectNode(node) {
+                 // the final url is base64 encoded, to prevent starting a dash player
+                 if (node.src.includes("http://localhost/encoded/")) {
+                     let url = node.src.substring(node.src.indexOf("http://localhost/encoded/") + "http://localhost/encoded/".length);
+-                    url = "http:" + atob(url.substring(0, url.length - 4));
++                    url = atob(url.substring(0, url.length - 4));
++                    if (url.startsWith("//")) {
++                        // scheme relative url
++                        url = document.location.protocol + url;
++                    }
+                     node.data = node.src;
+                     node.src = url;
+                 }
+-- 
+2.43.0
+

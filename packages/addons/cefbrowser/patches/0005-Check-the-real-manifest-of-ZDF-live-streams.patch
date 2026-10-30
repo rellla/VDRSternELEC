@@ -1,0 +1,31 @@
+From 44cf6f54c0119e1dce321938eadb0346240a8667 Mon Sep 17 00:00:00 2001
+From: Andreas Baierl <ichgeh@imkreisrum.de>
+Date: Thu, 29 Oct 2026 16:53:47 +0100
+Subject: [PATCH 05/59] Check the real manifest of ZDF live streams
+
+checkMpd() got the encoded localhost url (ending in .mp4) instead of
+the decoded manifest url. The start position of ZDF live streams was
+always 0.
+
+Co-Authored-By: Claude Opus 5.5
+---
+ static-content/js/videoobserver.js | 3 ++-
+ 1 file changed, 2 insertions(+), 1 deletion(-)
+
+diff --git a/static-content/js/videoobserver.js b/static-content/js/videoobserver.js
+index b73c4fc..97e0c07 100644
+--- a/static-content/js/videoobserver.js
++++ b/static-content/js/videoobserver.js
+@@ -662,7 +662,8 @@ function checkSingleObjectNode(node) {
+                     // addVideoNodeTypeVideo(node, node.src, node.src);
+                 } else if (node.data !== undefined) {
+                     console.log("window.cefStreamVideo()");
+-                    let mpdStart = await checkMpd(node.data);
++                    // node.data is the encoded localhost url, the manifest is node.src
++                    let mpdStart = await checkMpd(node.src);
+                     let newUrl = window.cefStreamVideo(node.src, document.cookie, document.referrer, navigator.userAgent, mpdStart);
+                     addVideoNodeTypeVideo(node, newUrl, node.src);
+                     promoteVideoSize(node);
+-- 
+2.43.0
+

@@ -1,0 +1,44 @@
+From 129d790703fa8c6c7b77f67f4c226cbd46235488 Mon Sep 17 00:00:00 2001
+From: Andreas Baierl <ichgeh@imkreisrum.de>
+Date: Fri, 30 Oct 2026 12:44:34 +0100
+Subject: [PATCH 35/59] Write the URL parameter as string into _dynamic.js
+
+For the URL application the url was written unquoted, e.g.
+'paramBody = http://...'. The script was invalid, so currentChannel
+was not set either.
+
+Co-Authored-By: Claude Opus 5.5
+---
+ browserserver.cpp | 8 +++++++-
+ 1 file changed, 7 insertions(+), 1 deletion(-)
+
+diff --git a/browserserver.cpp b/browserserver.cpp
+index b306642..cc96874 100644
+--- a/browserserver.cpp
++++ b/browserserver.cpp
+@@ -6,6 +6,7 @@
+ #include "database.h"
+ #include "browserclient.h"
+ #include "keycodes.h"
++#include "json.hpp"
+ 
+ std::string lastInsertChannel = "";
+ std::string streamId;
+@@ -124,8 +125,13 @@ bool BrowserServer::StartApplication(const StartApplicationType &input) {
+ 
+     if (input.url.empty()) {
+         _dynamic << "window.HBBTV_POLYFILL_NS.paramBody = '';" << std::endl;
++    } else if (input.appId == "M3U") {
++        // the m3u catalogue is a json object
++        _dynamic << "window.HBBTV_POLYFILL_NS.paramBody = " << input.url << ";" << std::endl;
+     } else {
+-        _dynamic << "window.HBBTV_POLYFILL_NS.paramBody = " << input.url << std::endl;
++        // an url must be a string literal, otherwise the whole script is invalid
++        // and currentChannel is not set either
++        _dynamic << "window.HBBTV_POLYFILL_NS.paramBody = " << nlohmann::json(input.url).dump() << ";" << std::endl;
+     }
+ 
+     _dynamic.close();
+-- 
+2.43.0
+

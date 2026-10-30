@@ -1,0 +1,128 @@
+From 3d8de41287195dfee7242a624a530502a672423b Mon Sep 17 00:00:00 2001
+From: Andreas Baierl <ichgeh@imkreisrum.de>
+Date: Sun, 1 Nov 2026 09:24:30 +0100
+Subject: [PATCH 50/59] Use a larger thrift transport buffer
+
+TBufferedTransport reads at most its buffer of 512 bytes per read()
+from the socket. An OSD frame or a TS chunk needed thousands of system
+calls. Use a buffer of 256 KB, the data on the wire doesn't change.
+
+Co-Authored-By: Claude Opus 5.5
+---
+ mainapp.cpp                                     |  3 ++-
+ thrift-services/src-client/BrowserClient.cpp    |  3 ++-
+ thrift-services/src-client/TranscoderClient.cpp |  3 ++-
+ thrift-services/src-client/TransportBuffer.h    | 16 ++++++++++++++++
+ thrift-services/src-client/VdrClient.cpp        |  3 ++-
+ 5 files changed, 24 insertions(+), 4 deletions(-)
+ create mode 100644 thrift-services/src-client/TransportBuffer.h
+
+diff --git a/mainapp.cpp b/mainapp.cpp
+index 50a19e3..80d962c 100644
+--- a/mainapp.cpp
++++ b/mainapp.cpp
+@@ -2,6 +2,7 @@
+ 
+ #include "browserserver.h"
+ #include "CefBrowser.h"
++#include "TransportBuffer.h"
+ #include <thrift/transport/TSocket.h>
+ #include <thrift/protocol/TBinaryProtocol.h>
+ #include <thrift/transport/TBufferTransports.h>
+@@ -44,7 +45,7 @@ void startServer(BrowserParameter bParam) {
+     thriftServer = new TThreadedServer(
+             std::make_shared<CefBrowserProcessorFactory>(std::make_shared<BrowserCloneFactory>()),
+             std::make_shared<TServerSocket>(listenIp, bParam.browserPort),
+-            std::make_shared<TBufferedTransportFactory>(),
++            std::make_shared<TLargeBufferedTransportFactory>(),
+             std::make_shared<TBinaryProtocolFactory>());
+ 
+     thriftServer->serve();
+diff --git a/thrift-services/src-client/BrowserClient.cpp b/thrift-services/src-client/BrowserClient.cpp
+index 807cd74..ded9f97 100644
+--- a/thrift-services/src-client/BrowserClient.cpp
++++ b/thrift-services/src-client/BrowserClient.cpp
+@@ -4,6 +4,7 @@
+ 
+ #include "debuglog.h"
+ #include "BrowserClient.h"
++#include "TransportBuffer.h"
+ 
+ using namespace apache::thrift;
+ using namespace apache::thrift::protocol;
+@@ -22,7 +23,7 @@ BrowserClient::BrowserClient(std::string vdrIp, int vdrPort) {
+     socket->setConnTimeout(3000);
+     socket->setSendTimeout(10000);
+     socket->setRecvTimeout(10000);
+-    transport = static_cast<const std::shared_ptr<TTransport>>(new TBufferedTransport(socket));
++    transport = static_cast<const std::shared_ptr<TTransport>>(new TBufferedTransport(socket, THRIFT_TRANSPORT_BUFFER_SIZE, THRIFT_TRANSPORT_BUFFER_SIZE));
+     std::shared_ptr<TProtocol> protocol(new TBinaryProtocol(transport));
+ 
+     client = new CefBrowserClient(protocol);
+diff --git a/thrift-services/src-client/TranscoderClient.cpp b/thrift-services/src-client/TranscoderClient.cpp
+index 3715647..4fdb2d9 100644
+--- a/thrift-services/src-client/TranscoderClient.cpp
++++ b/thrift-services/src-client/TranscoderClient.cpp
+@@ -4,6 +4,7 @@
+ 
+ #include "debuglog.h"
+ #include "TranscoderClient.h"
++#include "TransportBuffer.h"
+ 
+ using namespace apache::thrift;
+ using namespace apache::thrift::protocol;
+@@ -22,7 +23,7 @@ TranscoderClient::TranscoderClient(std::string vdrIp, int vdrPort) {
+     socket->setConnTimeout(3000);
+     socket->setSendTimeout(10000);
+     socket->setRecvTimeout(60000);   // Probe of a slow stream can take a while
+-    transport = static_cast<const std::shared_ptr<TTransport>>(new TBufferedTransport(socket));
++    transport = static_cast<const std::shared_ptr<TTransport>>(new TBufferedTransport(socket, THRIFT_TRANSPORT_BUFFER_SIZE, THRIFT_TRANSPORT_BUFFER_SIZE));
+     std::shared_ptr<TProtocol> protocol(new TBinaryProtocol(transport));
+ 
+     client = new RemoteTranscoderClient(protocol);
+diff --git a/thrift-services/src-client/TransportBuffer.h b/thrift-services/src-client/TransportBuffer.h
+new file mode 100644
+index 0000000..8151da5
+--- /dev/null
++++ b/thrift-services/src-client/TransportBuffer.h
+@@ -0,0 +1,16 @@
++#pragma once
++
++#include <memory>
++#include <thrift/transport/TBufferTransports.h>
++
++// TBufferedTransport reads at most its buffer size (default 512 bytes) per read() from the
++// socket. An OSD frame or a TS chunk needed thousands of system calls. A larger buffer
++// doesn't change the data on the wire.
++#define THRIFT_TRANSPORT_BUFFER_SIZE (256 * 1024)
++
++class TLargeBufferedTransportFactory : public apache::thrift::transport::TTransportFactory {
++public:
++    std::shared_ptr<apache::thrift::transport::TTransport> getTransport(std::shared_ptr<apache::thrift::transport::TTransport> trans) override {
++        return std::make_shared<apache::thrift::transport::TBufferedTransport>(trans, THRIFT_TRANSPORT_BUFFER_SIZE, THRIFT_TRANSPORT_BUFFER_SIZE);
++    }
++};
+diff --git a/thrift-services/src-client/VdrClient.cpp b/thrift-services/src-client/VdrClient.cpp
+index bd2fc6d..27adbb0 100644
+--- a/thrift-services/src-client/VdrClient.cpp
++++ b/thrift-services/src-client/VdrClient.cpp
+@@ -3,6 +3,7 @@
+ 
+ #include "debuglog.h"
+ #include "VdrClient.h"
++#include "TransportBuffer.h"
+ 
+ using namespace apache::thrift;
+ using namespace apache::thrift::protocol;
+@@ -22,7 +23,7 @@ VdrClient::VdrClient(std::string vdrIp, int vdrPort) {
+     socket->setConnTimeout(3000);
+     socket->setSendTimeout(10000);
+     socket->setRecvTimeout(10000);   // ProcessTSPacket may wait up to 5s for the device
+-    transport = static_cast<const std::shared_ptr<TTransport>>(new TBufferedTransport(socket));
++    transport = static_cast<const std::shared_ptr<TTransport>>(new TBufferedTransport(socket, THRIFT_TRANSPORT_BUFFER_SIZE, THRIFT_TRANSPORT_BUFFER_SIZE));
+     std::shared_ptr<TProtocol> protocol(new TBinaryProtocol(transport));
+ 
+     client = new VdrPluginWebClient(protocol);
+-- 
+2.43.0
+

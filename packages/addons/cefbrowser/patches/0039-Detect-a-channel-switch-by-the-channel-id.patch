@@ -1,0 +1,48 @@
+From fb81a34d01c08db5297fc878d7676c363d682b64 Mon Sep 17 00:00:00 2001
+From: Andreas Baierl <ichgeh@imkreisrum.de>
+Date: Fri, 30 Oct 2026 13:09:32 +0100
+Subject: [PATCH 39/59] Detect a channel switch by the channel id
+
+InsertChannel compared the whole channel json. Any change of the
+channel data stopped the running video.
+
+Co-Authored-By: Claude Opus 5.5
+---
+ browserserver.cpp | 16 ++++++++++++----
+ 1 file changed, 12 insertions(+), 4 deletions(-)
+
+diff --git a/browserserver.cpp b/browserserver.cpp
+index af0be39..2da69b0 100644
+--- a/browserserver.cpp
++++ b/browserserver.cpp
+@@ -286,15 +286,23 @@ bool BrowserServer::InsertHbbtv(const InsertHbbtvType &input) {
+ bool BrowserServer::InsertChannel(const InsertChannelType &input) {
+     // TRACE("InsertChannel: {}", body);
+ 
+-    if (input.channel != lastInsertChannel) {
+-        // in case of channel switch always stop playing videos
+-        std::string reason = "ChannelSwitch";
++    // VDR sends the channel again if its data changes (e.g. the current programme).
++    // Only a different channel is a channel switch.
++    std::string channelId;
++    try {
++        channelId = nlohmann::json::parse(input.channel).value("channelId", "");
++    } catch (nlohmann::json::exception &e) {
++        ERROR("InsertChannel: invalid json: {}", e.what());
++        return false;
++    }
+ 
++    if (channelId != lastInsertChannel) {
++        // in case of channel switch always stop playing videos
+         StopVideoType stopType;
+         stopType.reason = "ChannelSwitch";
+         StopVideo(stopType);
+ 
+-        lastInsertChannel = input.channel;
++        lastInsertChannel = channelId;
+     }
+ 
+     return database->insertChannel(input.channel);
+-- 
+2.43.0
+

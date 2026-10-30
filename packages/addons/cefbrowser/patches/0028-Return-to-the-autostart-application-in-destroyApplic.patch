@@ -1,0 +1,120 @@
+From 0fff1938d21e072f26c13aac179f98b086603b92 Mon Sep 17 00:00:00 2001
+From: Andreas Baierl <ichgeh@imkreisrum.de>
+Date: Thu, 29 Oct 2026 17:02:41 +0100
+Subject: [PATCH 28/59] Return to the autostart application in
+ destroyApplication()
+
+The page was only emptied, the stopped application stayed as blank
+page. A TV starts the autostart application of the current channel
+again, unless the autostart application destroys itself.
+
+Co-Authored-By: Claude Opus 5.5
+---
+ browserclient.cpp          | 26 ++++++++++++++++++++++++++
+ mainapp.cpp                |  3 +++
+ static-content/js/hbbtv.js | 15 ++++++++++-----
+ v8handler.cpp              | 11 +++++++++++
+ 4 files changed, 50 insertions(+), 5 deletions(-)
+
+diff --git a/browserclient.cpp b/browserclient.cpp
+index da45e07..a599e13 100644
+--- a/browserclient.cpp
++++ b/browserclient.cpp
+@@ -165,6 +165,32 @@ bool BrowserClient::OnProcessMessageReceived(CefRefPtr<CefBrowser> browser, CefR
+         } else {
+             ERROR("BrowserClient::OnProcessMessageReceived: RedButton without channelId");
+         }
++    } else if (message->GetName().ToString() == "DestroyApp") {
++        // A TV starts the autostart application of the channel again, unless
++        // the autostart application destroys itself.
++        std::string channelId;
++        if (message->GetArgumentList()->GetSize() == 1) {
++            channelId = message->GetArgumentList()->GetString(0).ToString();
++        }
++
++        std::string url = channelId.empty() ? "" : database->getRedButtonUrl(channelId);
++        std::string current = browser->GetMainFrame() ? browser->GetMainFrame()->GetURL().ToString() : "";
++
++        if (url.empty() || current.rfind(url, 0) == 0) {
++            DEBUG("BrowserClient::OnProcessMessageReceived: DestroyApp -> blank page");
++            loadUrl(browser, BLANK_PAGE);
++        } else {
++            DEBUG("BrowserClient::OnProcessMessageReceived: DestroyApp -> autostart application {}", url);
++
++            std::string channel = database->getChannel(channelId);
++            std::ofstream _dynamic;
++            _dynamic.open (bParam.static_path + "/js/_dynamic.js", std::ios_base::trunc);
++            _dynamic << "window.HBBTV_POLYFILL_NS = window.HBBTV_POLYFILL_NS || {}; window.HBBTV_POLYFILL_NS.currentChannel = " << channel << std::endl;
++            _dynamic.close();
++
++            loadUrl(browser, url);
++        }
++        return true;
+     } else if (message->GetName().ToString() == "LoadUrl") {
+         if (message->GetArgumentList()->GetSize() == 1) {
+             std::string url = message->GetArgumentList()->GetString(0).ToString();
+diff --git a/mainapp.cpp b/mainapp.cpp
+index 662a129..4e90099 100644
+--- a/mainapp.cpp
++++ b/mainapp.cpp
+@@ -225,6 +225,9 @@ void BrowserApp::OnContextCreated(CefRefPtr<CefBrowser> browser, CefRefPtr<CefFr
+     CefRefPtr<CefV8Value> redButton = CefV8Value::CreateFunction("RedButton", handler);
+     object->SetValue("cefRedButton", redButton, V8_PROPERTY_ATTRIBUTE_NONE);
+ 
++    CefRefPtr<CefV8Value> destroyApp = CefV8Value::CreateFunction("DestroyApp", handler);
++    object->SetValue("cefDestroyApp", destroyApp, V8_PROPERTY_ATTRIBUTE_NONE);
++
+     CefRefPtr<CefV8Value> loadUrl = CefV8Value::CreateFunction("LoadUrl", handler);
+     object->SetValue("cefLoadUrl", loadUrl, V8_PROPERTY_ATTRIBUTE_NONE);
+ 
+diff --git a/static-content/js/hbbtv.js b/static-content/js/hbbtv.js
+index de5c963..4bdd333 100644
+--- a/static-content/js/hbbtv.js
++++ b/static-content/js/hbbtv.js
+@@ -205,11 +205,16 @@
+     Application.prototype.destroyApplication = function () {
+         delete this._applicationUrl;
+ 
+-        // destroy the whole page and set a flag
+-        document.body.innerText = "";
+-        document.head.innerText = "";
+-
+-        // signalCef("DESTROY_APP");
++        // Like a TV: the application ends and the autostart application of the
++        // current channel is started again (it shows usually only the red button hint).
++        let channel = window.HBBTV_POLYFILL_NS.currentChannel;
++        if (window.cefDestroyApp) {
++            window.cefDestroyApp(channel && channel.channelId ? channel.channelId : "");
++        } else {
++            // destroy the whole page
++            document.body.innerText = "";
++            document.head.innerText = "";
++        }
+     };
+ 
+     window.Application = Application;
+diff --git a/v8handler.cpp b/v8handler.cpp
+index 424b44c..158ebf6 100644
+--- a/v8handler.cpp
++++ b/v8handler.cpp
+@@ -257,6 +257,17 @@ bool V8Handler::Execute(const CefString &name, CefRefPtr<CefV8Value> object, con
+             sendMessageToProcess("RedButton", channelId);
+         }
+ 
++        retval = CefV8Value::CreateBool(true);
++        return true;
++    } else if (name == "DestroyApp") {
++        std::string channelId;
++        if (!arguments.empty() && arguments.at(0)->IsString()) {
++            channelId = arguments.at(0)->GetStringValue().ToString();
++        }
++
++        DEBUG("V8Handler::Execute DestroyApp ChannelId {}", channelId);
++        sendMessageToProcess("DestroyApp", channelId);
++
+         retval = CefV8Value::CreateBool(true);
+         return true;
+     } else if (name == "LoadUrl") {
+-- 
+2.43.0
+

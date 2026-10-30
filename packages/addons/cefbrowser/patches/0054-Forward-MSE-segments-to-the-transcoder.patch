@@ -1,0 +1,338 @@
+From 5c46f0a4ccb911362bbbdd716425481d4ad399cd Mon Sep 17 00:00:00 2001
+From: Andreas Baierl <ichgeh@imkreisrum.de>
+Date: Sun, 1 Nov 2026 13:31:45 +0100
+Subject: [PATCH 54/59] Forward MSE segments to the transcoder
+
+cefMseStart() starts a MSE stream like cefStreamVideo(). The segments
+are posted to <origin>/__vdrmse__/ and forwarded to the transcoder
+without leaving the browser. VDR keeps the data of a MSE stream
+during a pause.
+
+Co-Authored-By: Claude Opus 5.5
+---
+ browserclient.cpp |   6 +++
+ mainapp.cpp       |   3 ++
+ meson.build       |   2 +-
+ mserequest.cpp    | 100 ++++++++++++++++++++++++++++++++++++++++++++++
+ mserequest.h      |  43 ++++++++++++++++++++
+ v8handler.cpp     |  68 +++++++++++++++++++++++++++++--
+ 6 files changed, 218 insertions(+), 4 deletions(-)
+ create mode 100644 mserequest.cpp
+ create mode 100644 mserequest.h
+
+diff --git a/browserclient.cpp b/browserclient.cpp
+index 9aea737..389de91 100644
+--- a/browserclient.cpp
++++ b/browserclient.cpp
+@@ -10,6 +10,7 @@
+ #include "jsinterception.h"
+ #include "trackinginterception.h"
+ #include "statichandler.h"
++#include "mserequest.h"
+ 
+ #define QOI_IMPLEMENTATION
+ #include "qoi.h"
+@@ -235,6 +236,11 @@ CefRefPtr<CefResourceRequestHandler> BrowserClient::GetResourceRequestHandler(Ce
+ 
+     std::string url = request->GetURL().ToString();
+ 
++    /* MSE segments of the page, never sent to the server */
++    if (MseRequest::IsMseRequest(url)) {
++        return new MseRequest(bParam);
++    }
++
+     bool blockThis = TrackingInterception::IsTracker(url);
+ 
+     if (logger->isTraceEnabled() && !blockThis) {
+diff --git a/mainapp.cpp b/mainapp.cpp
+index 26f3f6f..3f5d068 100644
+--- a/mainapp.cpp
++++ b/mainapp.cpp
+@@ -274,6 +274,9 @@ void BrowserApp::OnContextCreated(CefRefPtr<CefBrowser> browser, CefRefPtr<CefFr
+ 
+     CefRefPtr<CefV8Value> streamEventFilter = CefV8Value::CreateFunction("StreamEventFilter", handler);
+     object->SetValue("cefStreamEventFilter", streamEventFilter, V8_PROPERTY_ATTRIBUTE_NONE);
++
++    CefRefPtr<CefV8Value> mseStart = CefV8Value::CreateFunction("MseStart", handler);
++    object->SetValue("cefMseStart", mseStart, V8_PROPERTY_ATTRIBUTE_NONE);
+ }
+ 
+ void BrowserApp::OnContextReleased(CefRefPtr<CefBrowser> browser, CefRefPtr<CefFrame> frame, CefRefPtr<CefV8Context> context) {
+diff --git a/meson.build b/meson.build
+index a55e7ad..c02116e 100644
+--- a/meson.build
++++ b/meson.build
+@@ -128,7 +128,7 @@ if get_option('debug_thrift')
+ endif
+ 
+ sources = ['cefbrowser', 'main.cpp', 'mainapp.cpp', 'logger.cpp',
+-           'browserclient.cpp', 'osdsender.cpp', 'browserserver.cpp', 'moviestream.cpp',
++           'browserclient.cpp', 'osdsender.cpp', 'browserserver.cpp', 'moviestream.cpp', 'mserequest.cpp',
+            'httpinterception.cpp', 'keycodes.cpp', 'trackinginterception.cpp', 'statichandler.cpp', 'jsinterception.cpp',
+            'v8handler.cpp', 'tools.cpp', 'database.cpp', 'xhrinterception.cpp', 'pagemodifier.cpp', 'baseinterception.cpp',
+            'thrift-services/src-client/VdrClient.cpp', 'thrift-services/src-client/TranscoderClient.cpp',
+diff --git a/mserequest.cpp b/mserequest.cpp
+new file mode 100644
+index 0000000..fa673c1
+--- /dev/null
++++ b/mserequest.cpp
+@@ -0,0 +1,100 @@
++#include <cstring>
++#include <thread>
++#include <mutex>
++#include <vector>
++#include "mserequest.h"
++#include "logger.h"
++#include "thrift-services/src-client/TranscoderClient.h"
++
++#define MSE_PATH "/__vdrmse__/"
++
++// one connection for all requests, they are sent one after another
++static std::mutex transcoderMutex;
++static TranscoderClient *transcoderClient = nullptr;
++
++MseRequest::MseRequest(const BrowserParameter &bParam) : bParam(bParam), status(500) {
++}
++
++bool MseRequest::IsMseRequest(const std::string &url) {
++    return url.find(MSE_PATH) != std::string::npos;
++}
++
++bool MseRequest::Open(CefRefPtr<CefRequest> request, bool &handle_request, CefRefPtr<CefCallback> callback) {
++    std::string url = request->GetURL().ToString();
++    std::string path = url.substr(url.find(MSE_PATH) + strlen(MSE_PATH));
++
++    std::string op = path.substr(0, path.find_first_of("/?"));
++    int track = -1;
++    if (op == "append") {
++        try {
++            track = std::stoi(path.substr(strlen("append/")));
++        } catch (...) {
++            track = -1;
++        }
++    }
++
++    std::string data;
++    CefRefPtr<CefPostData> postData = request->GetPostData();
++    if (postData != nullptr) {
++        CefPostData::ElementVector elements;
++        postData->GetElements(elements);
++
++        for (const auto &e : elements) {
++            if (e->GetType() == PDE_TYPE_BYTES) {
++                size_t count = e->GetBytesCount();
++                size_t offset = data.size();
++                data.resize(offset + count);
++                e->GetBytes(count, data.data() + offset);
++            }
++        }
++    }
++
++    // the thrift call shall not block the IO thread
++    CefRefPtr<MseRequest> self(this);
++    std::thread([self, callback, op, track, data = std::move(data)]() {
++        self->status = self->process(op, track, data) ? 200 : (op == "append" ? 507 : 500);
++        callback->Continue();
++    }).detach();
++
++    handle_request = false;
++    return true;
++}
++
++bool MseRequest::process(const std::string &op, int track, const std::string &data) {
++    std::lock_guard<std::mutex> lock(transcoderMutex);
++
++    if (transcoderClient == nullptr) {
++        transcoderClient = new TranscoderClient(bParam.transcoderIp, bParam.transcoderPort);
++    }
++
++    std::string streamId = bParam.browserIp + "_" + std::to_string(bParam.browserPort);
++
++    if (op == "append" && track >= 0) {
++        return transcoderClient->MseAppend(streamId, track, data);
++    } else if (op == "reset") {
++        return transcoderClient->MseReset(streamId);
++    } else if (op == "end") {
++        return transcoderClient->MseEndOfStream(streamId);
++    }
++
++    ERROR("MseRequest: unknown request {}", op);
++    return false;
++}
++
++bool MseRequest::Read(void *data_out, int bytes_to_read, int &bytes_read, CefRefPtr<CefResourceReadCallback> callback) {
++    bytes_read = 0;
++    return false;
++}
++
++void MseRequest::GetResponseHeaders(CefRefPtr<CefResponse> response, int64_t &response_length, CefString &redirectUrl) {
++    int s = status;
++    response->SetStatus(s);
++    response->SetStatusText(s == 200 ? "OK" : s == 507 ? "Insufficient Storage" : "Internal Server Error");
++    response->SetMimeType("text/plain");
++
++    CefResponse::HeaderMap header;
++    header.insert(std::make_pair("Cache-Control", "no-store"));
++    response->SetHeaderMap(header);
++
++    response_length = 0;
++}
+diff --git a/mserequest.h b/mserequest.h
+new file mode 100644
+index 0000000..6db3929
+--- /dev/null
++++ b/mserequest.h
+@@ -0,0 +1,43 @@
++#pragma once
++
++#include <string>
++#include <atomic>
++#include "cef_includes.h"
++#include "tools.h"
++
++// Media Source Extensions: the segments appended by the player of the page.
++//
++// The javascript MediaSource sends the data with fetch() to the origin of the page
++// (no CORS, no mixed content), the request never leaves the browser:
++//   POST <origin>/__vdrmse__/append/<SourceBuffer index>   body: the segment
++//   POST <origin>/__vdrmse__/reset                         a seek
++//   POST <origin>/__vdrmse__/end                           end of stream
++// The answer is 200, or 507 if the transcoder has no space left.
++class MseRequest : public CefResourceRequestHandler,
++                   public CefResourceHandler {
++public:
++    explicit MseRequest(const BrowserParameter &bParam);
++
++    static bool IsMseRequest(const std::string &url);
++
++    // CefResourceRequestHandler
++    CefRefPtr<CefResourceHandler> GetResourceHandler(CefRefPtr<CefBrowser> browser, CefRefPtr<CefFrame> frame,
++                                                     CefRefPtr<CefRequest> request) override {
++        return this;
++    }
++
++    // CefResourceHandler
++    bool Open(CefRefPtr<CefRequest> request, bool &handle_request, CefRefPtr<CefCallback> callback) override;
++    bool Read(void *data_out, int bytes_to_read, int &bytes_read, CefRefPtr<CefResourceReadCallback> callback) override;
++    void GetResponseHeaders(CefRefPtr<CefResponse> response, int64_t &response_length, CefString &redirectUrl) override;
++    void Cancel() override {}
++
++private:
++    bool process(const std::string &op, int track, const std::string &data);
++
++    BrowserParameter bParam;
++    std::atomic<int> status;
++
++private:
++    IMPLEMENT_REFCOUNTING(MseRequest);
++};
+diff --git a/v8handler.cpp b/v8handler.cpp
+index 6fa1d81..b2629d5 100644
+--- a/v8handler.cpp
++++ b/v8handler.cpp
+@@ -14,6 +14,9 @@ std::atomic<bool> stopVideoThreadRunning(false);
+ std::string videoInfo;
+ std::string oldVideoInfo;
+ 
++// the current video is a MSE stream
++std::atomic<bool> videoMse(false);
++
+ void V8Handler::stopVdrVideo() {
+     int waitTime = 10; // ms
+     int count = 5000 / waitTime;
+@@ -26,7 +29,7 @@ void V8Handler::stopVdrVideo() {
+     if (startVideo) {
+         DEBUG("Thread stopVdrVideo, resetVideo");
+ 
+-        vdrClient->ResetVideo(videoInfo);
++        vdrClient->ResetVideo(videoInfo, videoMse);
+         videoReset = true;
+     } else {
+         DEBUG("Thread stopVdrVideo, stopVideo");
+@@ -96,6 +99,7 @@ bool V8Handler::Execute(const CefString &name, CefRefPtr<CefV8Value> object, con
+     std::string streamId = bParam.browserIp + "_" + std::to_string(bParam.browserPort);
+ 
+     if (name == "StreamVideo") {
++        videoMse = false;
+         startVideo = true;
+ 
+         if (!arguments.empty()) {
+@@ -182,6 +186,58 @@ bool V8Handler::Execute(const CefString &name, CefRefPtr<CefV8Value> object, con
+ 
+         TRACE("Javascript return new Video URL: {}", newVideoUrl);
+ 
++        retval = CefV8Value::CreateString(newVideoUrl);
++        return true;
++    } else if (name == "MseStart") {
++        // Media Source Extensions: the segments of the player follow by http requests
++        videoMse = true;
++        startVideo = true;
++
++        std::vector<std::string> tracks;
++        std::string duration = "N/A";
++
++        if (!arguments.empty() && arguments.at(0)->IsArray()) {
++            for (int i = 0; i < arguments.at(0)->GetArrayLength(); ++i) {
++                tracks.push_back(arguments.at(0)->GetValue(i)->GetStringValue().ToString());
++            }
++        }
++
++        if (arguments.size() >= 2 && arguments.at(1)->IsString()) {
++            duration = arguments.at(1)->GetStringValue().ToString();
++        }
++
++        if (isVideoPaused) {
++            std::string reason = "Javascript StopVideo (Start after Pause)";
++            transcoderClient->Stop(streamId, reason);
++            videoReset = true;
++
++            // the VDR player is still paused and would drop all packets of the new video
++            vdrClient->Resume();
++            isVideoPaused = false;
++        }
++
++        oldVideoInfo = videoInfo;
++        videoInfo.clear();
++        if (tracks.empty() || !transcoderClient->MseStart(videoInfo, bParam.browserIp, std::to_string(bParam.browserPort), bParam.vdrIp, std::to_string(bParam.vdrPort), std::to_string(now), duration, tracks)) {
++            videoInfo.clear();
++        }
++
++        if (videoInfo.empty()) {
++            ERROR("MseStart failed: Transcoder not available or another error.");
++            retval = CefV8Value::CreateNull();
++            return true;
++        }
++
++        while (stopVideoThreadRunning) {
++            std::this_thread::sleep_for(std::chrono::milliseconds(5));
++        }
++
++        if (!videoReset) {
++            vdrClient->StartVideo(videoInfo, true);
++        }
++        videoReset = false;
++
++        std::string newVideoUrl = "http://localhost/movie/transparent-video-" + bParam.browserIp + "_" + std::to_string(bParam.browserPort) + "-" + std::to_string(now) + ".webm";
+         retval = CefV8Value::CreateString(newVideoUrl);
+         return true;
+     } else if (name == "StopVideo") {
+@@ -207,8 +263,14 @@ bool V8Handler::Execute(const CefString &name, CefRefPtr<CefV8Value> object, con
+     } else if (name == "PauseVideo") {
+         isVideoPaused = true;
+ 
+-        vdrClient->Pause();
+-        transcoderClient->Pause(streamId);
++        if (videoMse) {
++            // the transcoder stops sending first, VDR keeps the data of a MSE stream
++            transcoderClient->Pause(streamId);
++            vdrClient->Pause();
++        } else {
++            vdrClient->Pause();
++            transcoderClient->Pause(streamId);
++        }
+ 
+         retval = CefV8Value::CreateBool(true);
+         return true;
+-- 
+2.43.0
+

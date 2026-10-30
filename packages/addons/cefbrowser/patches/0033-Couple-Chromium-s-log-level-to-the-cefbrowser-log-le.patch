@@ -1,0 +1,40 @@
+From 28fa690cf805d36a48735d8b779257d842242ee9 Mon Sep 17 00:00:00 2001
+From: Andreas Baierl <ichgeh@imkreisrum.de>
+Date: Fri, 30 Oct 2026 12:43:40 +0100
+Subject: [PATCH 33/59] Couple Chromium's log level to the cefbrowser log level
+
+Chromium logged warnings and errors of unused features (D-Bus, GPU,
+Alloy deprecation) at every start, independent of --loglevel. Show
+them from level 2 (errors) and 3 (warnings) on.
+
+Co-Authored-By: Claude Opus 5.5
+---
+ main.cpp | 12 ++++++++++++
+ 1 file changed, 12 insertions(+)
+
+diff --git a/main.cpp b/main.cpp
+index 3a94d97..8f288f7 100644
+--- a/main.cpp
++++ b/main.cpp
+@@ -343,6 +343,18 @@ int main(int argc, char *argv[]) {
+     CefSettings settings;
+     settings.windowless_rendering_enabled = true;
+     settings.no_sandbox = true;
++    // Chromium's own log follows the log level of cefbrowser. With the default level
++    // (errors only) Chromium logs only fatal errors, its other messages concern
++    // features cefbrowser doesn't use (e.g. D-Bus, GPU, deprecations).
++    switch (loglevel) {
++        case 0:  settings.log_severity = LOGSEVERITY_DISABLE; break;
++        case 1:  settings.log_severity = LOGSEVERITY_FATAL; break;
++        case 2:  settings.log_severity = LOGSEVERITY_ERROR; break;
++        case 3:  settings.log_severity = LOGSEVERITY_WARNING; break;
++        case 4:  settings.log_severity = LOGSEVERITY_VERBOSE; break;
++        default: settings.log_severity = LOGSEVERITY_FATAL; break;
++    }
++
+     // remote debugging (DevTools) only on request, it costs memory and opens a port
+     settings.remote_debugging_port = remoteDebuggingPort;
+ 
+-- 
+2.43.0
+
