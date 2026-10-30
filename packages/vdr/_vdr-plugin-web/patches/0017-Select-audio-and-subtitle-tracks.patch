@@ -1,0 +1,127 @@
+From 011faacb16ccc1744f7f8ffdfd034a90a3322b1e Mon Sep 17 00:00:00 2001
+From: Andreas Baierl <ichgeh@imkreisrum.de>
+Date: Fri, 30 Oct 2026 13:08:29 +0100
+Subject: [PATCH 17/34] Select audio and subtitle tracks
+
+SelectAudioTrack was a TODO. Select the track by its index in the PID
+ordered track list of the device, which matches the order reported
+by the transcoder. Works for web videos and live TV.
+
+Co-Authored-By: Claude Opus 5.5
+---
+ videocontrol.cpp | 47 ++++++++++++++++++++++++++++++++++++++++++++---
+ videocontrol.h   |  2 +-
+ web.cpp          | 15 +++++++--------
+ 3 files changed, 52 insertions(+), 12 deletions(-)
+
+diff --git a/videocontrol.cpp b/videocontrol.cpp
+index 783fcdd..5181e0d 100644
+--- a/videocontrol.cpp
++++ b/videocontrol.cpp
+@@ -1,5 +1,7 @@
+ #include <chrono>
+ #include <thread>
++#include <vector>
++#include <algorithm>
+ #include "BrowserClient.h"
+ #include "videocontrol.h"
+ 
+@@ -177,7 +179,46 @@ bool VideoPlayer::PlayData(uint8_t *data, int len) {
+     return true;
+ }
+ 
+-void VideoPlayer::SelectAudioTrack(std::string track) {
+-    // TODO: Wie wechselt man den Audiotrack?
+-    // printf("Anzahl der Audio-Tracks: %d\n", cDevice::PrimaryDevice()->NumAudioTracks());
++// Select a track by its index in the list of audio (subtitle) tracks ordered by PID.
++// The transcoder and the channel list (live TV) report the tracks in this order.
++// Works for the web video player and for live TV, the tracks belong to the device.
++bool VideoPlayer::SelectTrack(bool subtitle, int index) {
++    cDevice *device = cDevice::PrimaryDevice();
++
++    if (subtitle && index < 0) {
++        return device->SetCurrentSubtitleTrack(ttNone, true);
++    }
++
++    std::vector<std::pair<uint16_t, eTrackType>> tracks;
++
++    if (subtitle) {
++        for (int t = ttSubtitleFirst; t <= ttSubtitleLast; ++t) {
++            const tTrackId *track = device->GetTrack(eTrackType(t));
++            if (track && track->id) {
++                tracks.emplace_back(track->id, eTrackType(t));
++            }
++        }
++    } else {
++        for (int t = ttAudioFirst; t <= ttDolbyLast; ++t) {
++            const tTrackId *track = device->GetTrack(eTrackType(t));
++            if (track && track->id) {
++                tracks.emplace_back(track->id, eTrackType(t));
++            }
++        }
++    }
++
++    std::sort(tracks.begin(), tracks.end());
++
++    if (index < 0 || index >= (int)tracks.size()) {
++        esyslog("[vdrweb] %s track %d not available (%d tracks)", subtitle ? "subtitle" : "audio", index, (int)tracks.size());
++        return false;
++    }
++
++    dsyslog("[vdrweb] select %s track %d, pid %d", subtitle ? "subtitle" : "audio", index, tracks[index].first);
++
++    if (subtitle) {
++        return device->SetCurrentSubtitleTrack(tracks[index].second, true);
++    }
++
++    return device->SetCurrentAudioTrack(tracks[index].second);
+ }
+diff --git a/videocontrol.h b/videocontrol.h
+index 0e69039..de7413a 100644
+--- a/videocontrol.h
++++ b/videocontrol.h
+@@ -17,7 +17,7 @@ public:
+     static void setVideoFullscreen();
+ 
+     void ResetVideo();
+-    void SelectAudioTrack(std::string track);
++    static bool SelectTrack(bool subtitle, int index);
+ 
+     bool hasTsError() { return tsError; };
+ 
+diff --git a/web.cpp b/web.cpp
+index d3a461f..92d90c3 100644
+--- a/web.cpp
++++ b/web.cpp
+@@ -383,12 +383,8 @@ bool VdrPluginWebServer::SelectAudioTrack(const SelectAudioTrackType &input) {
+ 
+     std::lock_guard<std::recursive_mutex> lock(playerMutex);
+ 
+-    if (videoPlayer != nullptr) {
+-        auto track = input.audioTrack;
+-        videoPlayer->SelectAudioTrack(track);
+-    }
+-
+-    return true;
++    // also for live TV (video/broadcast), the tracks belong to the device
++    return VideoPlayer::SelectTrack(false, atoi(input.audioTrack.c_str()));
+ }
+ 
+ bool VdrPluginWebServer::IsWebActive() {
+@@ -397,8 +393,11 @@ bool VdrPluginWebServer::IsWebActive() {
+ }
+ 
+ bool VdrPluginWebServer::SelectSubtitleTrack(const SelectSubtitleTrackType &input) {
+-    // not supported yet
+-    return false;
++    dsyslog("[vdrweb] SelectSubtitleTrack received");
++
++    std::lock_guard<std::recursive_mutex> lock(playerMutex);
++
++    return VideoPlayer::SelectTrack(true, atoi(input.subtitleTrack.c_str()));
+ }
+ 
+ bool VdrPluginWebServer::EndOfStream() {
+-- 
+2.43.0
+

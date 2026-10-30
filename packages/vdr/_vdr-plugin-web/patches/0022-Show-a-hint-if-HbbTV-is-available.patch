@@ -1,0 +1,455 @@
+From c3a78c377023d936c62c71f2c2b9368c350230ae Mon Sep 17 00:00:00 2001
+From: Andreas Baierl <ichgeh@imkreisrum.de>
+Date: Sat, 31 Oct 2026 18:49:24 +0100
+Subject: [PATCH 22/34] Show a hint if HbbTV is available
+
+Like a TV, show a hint after a channel switch if the channel signals
+an HbbTV autostart application, as soon as no other OSD is open. Adds
+a setup page to enable it and to set duration and position.
+
+Co-Authored-By: Claude Opus 5.5
+---
+ Makefile      |   2 +-
+ README.md     |  17 +++++
+ ait.cpp       |   7 ++
+ hbbtvhint.cpp | 179 ++++++++++++++++++++++++++++++++++++++++++++++++++
+ hbbtvhint.h   |  60 +++++++++++++++++
+ po/de_DE.po   |  24 +++++++
+ status.cpp    |   4 ++
+ web.cpp       |  21 ++++--
+ 8 files changed, 309 insertions(+), 5 deletions(-)
+ create mode 100644 hbbtvhint.cpp
+ create mode 100644 hbbtvhint.h
+
+diff --git a/Makefile b/Makefile
+index 05c1c19..98ac17e 100644
+--- a/Makefile
++++ b/Makefile
+@@ -97,7 +97,7 @@ DEFINES += -DPLUGIN_NAME_I18N='"$(PLUGIN)"' $(CONFIG)
+ 
+ ### The object files (add further files here):
+ 
+-OBJS = $(PLUGIN).o webosdpage.o status.o ait.o videocontrol.o backtrace.o streamevent.o \
++OBJS = $(PLUGIN).o webosdpage.o status.o ait.o videocontrol.o backtrace.o hbbtvhint.o streamevent.o \
+ 	   thrift-services/src-gen/CommonService.o thrift-services/src-gen/common_types.o \
+ 	   thrift-services/src-gen/VdrPluginWeb.o thrift-services/src-gen/pluginweb_types.o \
+ 	   thrift-services/src-gen/CefBrowser.o thrift-services/src-gen/cefbrowser_types.o \
+diff --git a/README.md b/README.md
+index 0159603..ae6ae33 100644
+--- a/README.md
++++ b/README.md
+@@ -55,6 +55,23 @@ If set, then bind the internal HTTP server to all available network devices. Oth
+ ### - / --name
+ If set, then the menu entry will have a different name. Instead default ```web``` another name can be choosed.
+ 
++## Setup
++
++### HbbTV hint
++Like a TV, a small hint "HbbTV available" is shown after a channel switch, if the channel
++signals an HbbTV application which starts automatically (AIT control code AUTOSTART).
++The hint waits until other OSDs (e.g. the channel display) are closed and disappears
++after the configured time, on the next channel switch or if a menu is opened.
++
++VDR uses the red key itself. To start HbbTV with a key, map it to the plugin in
++`keymacros.conf`, e.g. `Red @web`.
++
++| Setup entry              | Default      | Description                    |
++|--------------------------|--------------|--------------------------------|
++| Show HbbTV hint          | yes          | Enables the hint               |
++| HbbTV hint duration (s)  | 7            | Display time in seconds (1-60) |
++| HbbTV hint position      | bottom right | Corner of the OSD area         |
++
+ ## Logging
+ Uses the VDR logging mechanism. Log entries can be found in ```/var/log/syslog``` with ```[vdrweb]``` prefix.
+ 
+diff --git a/ait.cpp b/ait.cpp
+index 2cd5345..c3fd0fc 100644
+--- a/ait.cpp
++++ b/ait.cpp
+@@ -15,6 +15,7 @@
+ #include "status.h"
+ #include "web.h"
+ #include "jsonescape.h"
++#include "hbbtvhint.h"
+ #include "streamevent.h"
+ 
+ #define PMT_SCAN_IDLE     5 // 60 //300    // seconds
+@@ -154,6 +155,12 @@ cAIT::cAIT(const u_char *Data, u_short Pid) : SI::AIT(Data, true) {
+             continue;
+         }
+ 
++        // an HbbTV application which starts automatically: show the HbbTV hint.
++        // The highest bit of the application type is the test application flag.
++        if ((getApplicationType() & 0x7FFF) == 0x0010 && aitApp.getControlCode() == acc_Autostart) {
++            cHbbtvHint::AutostartApplicationFound();
++        }
++
+         const char* buffer = toHbbtvJson(currentChannel->GetChannelID().ToString(), currentChannel->Name(), aitApp.getApplicationId(), aitApp.getControlCode(), nameBuffer, URLBaseBuffer, URLLocBuffer, URLExtBuffer);
+         if (browserClient != nullptr) {
+             browserClient->InsertHbbtv(buffer);
+diff --git a/hbbtvhint.cpp b/hbbtvhint.cpp
+new file mode 100644
+index 0000000..76e4a19
+--- /dev/null
++++ b/hbbtvhint.cpp
+@@ -0,0 +1,179 @@
++/*
++ * hbbtvhint.cpp: shows "HbbTV available" after a channel switch,
++ *                if the channel signals an HbbTV autostart application
++ *
++ * See the README file for copyright information and how to reach the author.
++ */
++
++#include <vdr/player.h>
++#include <vdr/i18n.h>
++#include "hbbtvhint.h"
++#include "webosdpage.h"
++#include "videocontrol.h"
++
++// above the subtitles, VDR menus (level 0) are not affected
++#define HBBTVHINT_OSD_LEVEL  (OSD_LEVEL_SUBTITLES + 1)
++
++// how long to wait for a possibility to show the hint after the channel switch, e.g.
++// while the channel display of VDR is open
++#define HBBTVHINT_PENDING_MS 15000
++
++cHbbtvHintSetup hbbtvHintSetup;
++
++cMutex cHbbtvHint::mutex;
++bool cHbbtvHint::pending = false;
++bool cHbbtvHint::shown = false;
++bool cHbbtvHint::hideRequest = false;
++cTimeMs cHbbtvHint::pendingTimeout;
++cTimeMs cHbbtvHint::showTimeout;
++cOsd *cHbbtvHint::osd = nullptr;
++
++void cHbbtvHint::ChannelSwitch() {
++    cMutexLock lock(&mutex);
++    pending = false;
++    shown = false;
++    hideRequest = true;
++}
++
++void cHbbtvHint::AutostartApplicationFound() {
++    cMutexLock lock(&mutex);
++
++    // the AIT is repeated, show the hint only once per channel switch
++    if (!hbbtvHintSetup.enabled || shown || pending) {
++        return;
++    }
++
++    pending = true;
++    pendingTimeout.Set(HBBTVHINT_PENDING_MS);
++}
++
++void cHbbtvHint::Hide() {
++    cMutexLock lock(&mutex);
++    pending = false;
++    hideRequest = true;
++}
++
++void cHbbtvHint::Close() {
++    if (osd != nullptr) {
++        delete osd;
++        osd = nullptr;
++    }
++}
++
++// true if something else uses the screen: a VDR menu, the web page, a replay or a video
++static bool screenBusy() {
++    if (cOsd::IsOpen() || WebOSDPage::IsOpen() || videoPlayer != nullptr) {
++        return true;
++    }
++
++    // Only a visible control (e.g. a replay) uses the screen. Plugins may keep a hidden
++    // control running during live TV.
++    cMutexLock controlLock;
++    return cControl::Control(controlLock, false) != nullptr;
++}
++
++void cHbbtvHint::Draw() {
++    const cFont *font = cFont::GetFont(fontOsd);
++
++    const char *text = tr("HbbTV available");
++
++    int lineHeight = font->Height();
++    int padding = lineHeight / 2;
++    int width = padding + font->Width(text) + padding;
++    int height = lineHeight + padding;
++
++    // position inside the OSD area with a small margin
++    int margin = lineHeight;
++    int left = cOsd::OsdLeft() + margin;
++    int top = cOsd::OsdTop() + margin;
++    int right = cOsd::OsdLeft() + cOsd::OsdWidth() - margin - width;
++    int bottom = cOsd::OsdTop() + cOsd::OsdHeight() - margin - height;
++
++    int x = (hbbtvHintSetup.position == 0 || hbbtvHintSetup.position == 2) ? right : left;
++    int y = (hbbtvHintSetup.position <= 1) ? bottom : top;
++
++    osd = cOsdProvider::NewOsd(x, y, HBBTVHINT_OSD_LEVEL);
++    if (osd == nullptr) {
++        return;
++    }
++
++    tArea area = { 0, 0, width - 1, height - 1, 32 };
++    if (osd->CanHandleAreas(&area, 1) != oeOk) {
++        area.bpp = 8;
++    }
++
++    if (osd->SetAreas(&area, 1) != oeOk) {
++        esyslog("[vdrweb] HbbTV hint: unable to set the OSD area");
++        Close();
++        return;
++    }
++
++    const tColor clrBack = 0xD0202020;
++    int radius = height / 2;
++
++    // background with rounded ends
++    osd->DrawRectangle(0, 0, width - 1, height - 1, clrTransparent);
++    osd->DrawRectangle(radius, 0, width - 1 - radius, height - 1, clrBack);
++    osd->DrawEllipse(0, 0, radius - 1, height - 1, clrBack, 7);                       // left half
++    osd->DrawEllipse(width - radius, 0, width - 1, height - 1, clrBack, 5);           // right half
++
++    // the text
++    osd->DrawText(padding, padding / 2, text, clrWhite, clrBack, font,
++                  font->Width(text), lineHeight, taLeft);
++
++    osd->Flush();
++}
++
++void cHbbtvHint::Process() {
++    cMutexLock lock(&mutex);
++
++    if (osd != nullptr) {
++        // hide after the timeout, on a channel switch, if the hint is disabled meanwhile
++        // or if anything else (menu, web page, replay) is opened
++        if (hideRequest || !hbbtvHintSetup.enabled || showTimeout.TimedOut() || screenBusy()) {
++            Close();
++        }
++    }
++
++    hideRequest = false;
++
++    if (!pending) {
++        return;
++    }
++
++    if (!hbbtvHintSetup.enabled || pendingTimeout.TimedOut()) {
++        pending = false;
++        return;
++    }
++
++    if (osd == nullptr && !screenBusy()) {
++        pending = false;
++        shown = true;
++
++        Draw();
++        showTimeout.Set(hbbtvHintSetup.duration * 1000);
++    }
++}
++
++// --- setup -------------------------------------------------------------
++
++cMenuSetupWeb::cMenuSetupWeb() {
++    data = hbbtvHintSetup;
++
++    positions[0] = tr("bottom right");
++    positions[1] = tr("bottom left");
++    positions[2] = tr("top right");
++    positions[3] = tr("top left");
++
++    Add(new cMenuEditBoolItem(tr("Show HbbTV hint"), &data.enabled));
++    Add(new cMenuEditIntItem(tr("HbbTV hint duration (s)"), &data.duration, 1, 60));
++    Add(new cMenuEditStraItem(tr("HbbTV hint position"), &data.position, 4, positions));
++}
++
++void cMenuSetupWeb::Store() {
++    hbbtvHintSetup = data;
++
++    SetupStore("HbbtvHint", hbbtvHintSetup.enabled);
++    SetupStore("HbbtvHintDuration", hbbtvHintSetup.duration);
++    SetupStore("HbbtvHintPosition", hbbtvHintSetup.position);
++}
+diff --git a/hbbtvhint.h b/hbbtvhint.h
+new file mode 100644
+index 0000000..d114ff0
+--- /dev/null
++++ b/hbbtvhint.h
+@@ -0,0 +1,60 @@
++/*
++ * hbbtvhint.h: shows "HbbTV available" after a channel switch,
++ *              if the channel signals an HbbTV autostart application
++ *
++ * See the README file for copyright information and how to reach the author.
++ */
++
++#pragma once
++
++#include <vdr/osd.h>
++#include <vdr/thread.h>
++#include <vdr/tools.h>
++#include <vdr/menuitems.h>
++
++struct cHbbtvHintSetup {
++    int enabled = 1;    // show the hint at all
++    int duration = 7;   // seconds
++    int position = 0;   // 0 = bottom right, 1 = bottom left, 2 = top right, 3 = top left
++};
++
++extern cHbbtvHintSetup hbbtvHintSetup;
++
++class cHbbtvHint {
++private:
++    static cMutex mutex;
++    static bool pending;          // an autostart application has been found after the last switch
++    static bool shown;            // the hint has been shown for the current channel
++    static bool hideRequest;
++    static cTimeMs pendingTimeout;
++    static cTimeMs showTimeout;
++    static cOsd *osd;
++
++    static void Draw();
++    static void Close();
++
++public:
++    // called by cStatus::ChannelSwitch
++    static void ChannelSwitch();
++
++    // called by the AIT filter
++    static void AutostartApplicationFound();
++
++    // e.g. the user opened the web page
++    static void Hide();
++
++    // must be called from the main thread (MainThreadHook)
++    static void Process();
++};
++
++class cMenuSetupWeb : public cMenuSetupPage {
++private:
++    cHbbtvHintSetup data;
++    const char *positions[4];
++
++protected:
++    void Store() override;
++
++public:
++    cMenuSetupWeb();
++};
+diff --git a/po/de_DE.po b/po/de_DE.po
+index 5e0c4ac..da69853 100644
+--- a/po/de_DE.po
++++ b/po/de_DE.po
+@@ -20,5 +20,29 @@ msgstr ""
+ msgid "Browser not available"
+ msgstr "Der Browser ist nicht verfügbar"
+ 
++msgid "HbbTV available"
++msgstr "HbbTV verfügbar"
++
++msgid "bottom right"
++msgstr "unten rechts"
++
++msgid "bottom left"
++msgstr "unten links"
++
++msgid "top right"
++msgstr "oben rechts"
++
++msgid "top left"
++msgstr "oben links"
++
++msgid "Show HbbTV hint"
++msgstr "Hinweis \"HbbTV verfügbar\" anzeigen"
++
++msgid "HbbTV hint duration (s)"
++msgstr "Anzeigedauer des Hinweises (s)"
++
++msgid "HbbTV hint position"
++msgstr "Position des Hinweises"
++
+ #~ msgid "RedButton Application not available"
+ #~ msgstr "RedButton Applikation ist nicht verfügbar"
+diff --git a/status.cpp b/status.cpp
+index 4a80b9e..f72a846 100644
+--- a/status.cpp
++++ b/status.cpp
+@@ -16,6 +16,7 @@
+ #include "BrowserClient.h"
+ #include "webosdpage.h"
+ #include "jsonescape.h"
++#include "hbbtvhint.h"
+ #include "streamevent.h"
+ 
+ const char *channelJson = R"(
+@@ -180,6 +181,9 @@ void cHbbtvDeviceStatus::ChannelSwitch(const cDevice * vdrDevice, int channelNum
+    // otherwise ChannelNumber is the number of the channel that has been switched to.
+    // LiveView tells whether this channel switch is for live viewing.
+    if (LiveView) {
++      // a new channel needs its own HbbTV hint
++      cHbbtvHint::ChannelSwitch();
++
+       // stream events belong to the channel
+       StreamEventsChannelSwitch(nullptr);
+ 
+diff --git a/web.cpp b/web.cpp
+index 5e94d0b..a3e5f0f 100644
+--- a/web.cpp
++++ b/web.cpp
+@@ -23,6 +23,7 @@
+ #include "videocontrol.h"
+ #include "dummyosd.h"
+ #include "debuglog.h"
++#include "hbbtvhint.h"
+ #include "streamevent.h"
+ 
+ #define TSDIR  "%s/web/%s/%4d-%02d-%02d.%02d.%02d.%d-%d.rec"
+@@ -628,6 +629,7 @@ void cPluginWeb::Housekeeping() {
+ void cPluginWeb::MainThreadHook() {
+     // Perform actions in the context of the main program thread.
+     // WARNING: Use with great care - see PLUGINS.html!
++    cHbbtvHint::Process();
+ }
+ 
+ cString cPluginWeb::Active() {
+@@ -643,6 +645,9 @@ time_t cPluginWeb::WakeupTime() {
+ cOsdObject *cPluginWeb::MainMenuAction() {
+     dsyslog("[vdrweb] MainMenuAction: command = %d\n", (int)nextOsdCommand);
+ 
++    // the application is started, the hint is not needed anymore
++    cHbbtvHint::Hide();
++
+     if (nextOsdCommand == CLOSE) {
+         nextOsdCommand = OPEN;
+ 
+@@ -686,13 +691,21 @@ cOsdObject *cPluginWeb::MainMenuAction() {
+ }
+ 
+ cMenuSetupPage *cPluginWeb::SetupMenu() {
+-    // Return a setup menu in case the plugin supports one.
+-    return nullptr;
++    return new cMenuSetupWeb();
+ }
+ 
+ bool cPluginWeb::SetupParse(const char *Name, const char *Value) {
+-    // Parse your own setup parameters and store their values.
+-    return false;
++    if (!strcasecmp(Name, "HbbtvHint")) {
++        hbbtvHintSetup.enabled = atoi(Value);
++    } else if (!strcasecmp(Name, "HbbtvHintDuration")) {
++        hbbtvHintSetup.duration = constrain(atoi(Value), 1, 60);
++    } else if (!strcasecmp(Name, "HbbtvHintPosition")) {
++        hbbtvHintSetup.position = constrain(atoi(Value), 0, 3);
++    } else {
++        return false;
++    }
++
++    return true;
+ }
+ 
+ bool cPluginWeb::Service(const char *Id, void *Data = nullptr) {
+-- 
+2.43.0
+

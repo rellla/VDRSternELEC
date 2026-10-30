@@ -1,0 +1,63 @@
+From 42e0ecfe6116693bf1e48cf913e8d9a50d6a1ccb Mon Sep 17 00:00:00 2001
+From: Andreas Baierl <ichgeh@imkreisrum.de>
+Date: Thu, 29 Oct 2026 16:39:12 +0100
+Subject: [PATCH 11/34] Set timeouts for the thrift clients
+
+Without timeouts a hanging peer blocks the caller forever.
+
+Co-Authored-By: Claude Opus 5.5
+---
+ thrift-services/src-client/BrowserClient.cpp    | 3 +++
+ thrift-services/src-client/TranscoderClient.cpp | 5 ++++-
+ thrift-services/src-client/VdrClient.cpp        | 5 ++++-
+ 3 files changed, 11 insertions(+), 2 deletions(-)
+
+diff --git a/thrift-services/src-client/BrowserClient.cpp b/thrift-services/src-client/BrowserClient.cpp
+index 61a4284..f1e0524 100644
+--- a/thrift-services/src-client/BrowserClient.cpp
++++ b/thrift-services/src-client/BrowserClient.cpp
+@@ -19,6 +19,9 @@ BrowserClient::BrowserClient(std::string vdrIp, int vdrPort) {
+     DEBUGLOG("Construct BrowserClient");
+ 
+     socket = std::make_shared<TSocket>(vdrIp, vdrPort);
++    socket->setConnTimeout(3000);
++    socket->setSendTimeout(10000);
++    socket->setRecvTimeout(10000);
+     transport = static_cast<const std::shared_ptr<TTransport>>(new TBufferedTransport(socket));
+     std::shared_ptr<TProtocol> protocol(new TBinaryProtocol(transport));
+ 
+diff --git a/thrift-services/src-client/TranscoderClient.cpp b/thrift-services/src-client/TranscoderClient.cpp
+index fcc38f5..49fe947 100644
+--- a/thrift-services/src-client/TranscoderClient.cpp
++++ b/thrift-services/src-client/TranscoderClient.cpp
+@@ -18,7 +18,10 @@ void transcoderClientOutputFunction(const char* msg) {
+ TranscoderClient::TranscoderClient(std::string vdrIp, int vdrPort) {
+     DEBUGLOG("Construct TranscoderClient");
+ 
+-    std::shared_ptr<TTransport> socket(new TSocket(vdrIp, vdrPort));
++    std::shared_ptr<TSocket> socket(new TSocket(vdrIp, vdrPort));
++    socket->setConnTimeout(3000);
++    socket->setSendTimeout(10000);
++    socket->setRecvTimeout(60000);   // Probe of a slow stream can take a while
+     transport = static_cast<const std::shared_ptr<TTransport>>(new TBufferedTransport(socket));
+     std::shared_ptr<TProtocol> protocol(new TBinaryProtocol(transport));
+ 
+diff --git a/thrift-services/src-client/VdrClient.cpp b/thrift-services/src-client/VdrClient.cpp
+index 679a597..542dda6 100644
+--- a/thrift-services/src-client/VdrClient.cpp
++++ b/thrift-services/src-client/VdrClient.cpp
+@@ -18,7 +18,10 @@ void vdrClientOutputFunction(const char* msg) {
+ VdrClient::VdrClient(std::string vdrIp, int vdrPort) {
+     DEBUGLOG("Construct VdrClient");
+ 
+-    std::shared_ptr<TTransport> socket(new TSocket(vdrIp, vdrPort));
++    std::shared_ptr<TSocket> socket(new TSocket(vdrIp, vdrPort));
++    socket->setConnTimeout(3000);
++    socket->setSendTimeout(10000);
++    socket->setRecvTimeout(10000);   // ProcessTSPacket may wait up to 5s for the device
+     transport = static_cast<const std::shared_ptr<TTransport>>(new TBufferedTransport(socket));
+     std::shared_ptr<TProtocol> protocol(new TBinaryProtocol(transport));
+ 
+-- 
+2.43.0
+

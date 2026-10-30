@@ -1,0 +1,37 @@
+From 62697fd2579ece779d1c4c2e5cb24e6d21f750d2 Mon Sep 17 00:00:00 2001
+From: Andreas Baierl <ichgeh@imkreisrum.de>
+Date: Thu, 29 Oct 2026 16:38:16 +0100
+Subject: [PATCH 06/34] Clear the device on resume only if the player was
+ paused
+
+cefbrowser calls ResumeVideo also to unfreeze the device on every
+'playing' event (ZDF). This cleared the decoder in the middle of the
+running stream.
+
+Co-Authored-By: Claude Opus 5.5
+---
+ videocontrol.cpp | 8 ++++++--
+ 1 file changed, 6 insertions(+), 2 deletions(-)
+
+diff --git a/videocontrol.cpp b/videocontrol.cpp
+index 6b14778..783fcdd 100644
+--- a/videocontrol.cpp
++++ b/videocontrol.cpp
+@@ -40,8 +40,12 @@ void VideoPlayer::Pause() {
+ }
+ 
+ void VideoPlayer::Resume() {
+-    ResetVideo();
+-    bufsize = 0;
++    // Only after a pause a new stream follows. Otherwise (e.g. unfreeze while
++    // playing) clearing the device would throw away the running stream.
++    if (pause) {
++        ResetVideo();
++        bufsize = 0;
++    }
+ 
+     DevicePlay();
+     pause = false;
+-- 
+2.43.0
+

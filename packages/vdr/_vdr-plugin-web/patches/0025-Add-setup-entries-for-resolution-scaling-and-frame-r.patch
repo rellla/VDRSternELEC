@@ -1,0 +1,340 @@
+From 6e0aebf677737cc31b9b7a016e47095c56cb24ba Mon Sep 17 00:00:00 2001
+From: Andreas Baierl <ichgeh@imkreisrum.de>
+Date: Sun, 1 Nov 2026 09:01:00 +0100
+Subject: [PATCH 25/34] Add setup entries for resolution, scaling and frame
+ rate
+
+The browser resolution and frame rate could only be set on its
+command line, the scaling by the output device only with -f. Make them
+setup entries and send resolution and frame rate to the browser. The
+setup page moves into its own file.
+
+Co-Authored-By: Claude Opus 5.5
+---
+ Makefile       |  2 +-
+ README.md      |  9 ++++++
+ hbbtvhint.cpp  | 23 ---------------
+ hbbtvhint.h    | 13 ---------
+ po/de_DE.po    | 12 ++++++++
+ setup.cpp      | 77 ++++++++++++++++++++++++++++++++++++++++++++++++++
+ setup.h        | 39 +++++++++++++++++++++++++
+ web.cpp        | 19 +++++++++++++
+ webosdpage.cpp |  2 ++
+ 9 files changed, 159 insertions(+), 37 deletions(-)
+ create mode 100644 setup.cpp
+ create mode 100644 setup.h
+
+diff --git a/Makefile b/Makefile
+index 98ac17e..136d617 100644
+--- a/Makefile
++++ b/Makefile
+@@ -97,7 +97,7 @@ DEFINES += -DPLUGIN_NAME_I18N='"$(PLUGIN)"' $(CONFIG)
+ 
+ ### The object files (add further files here):
+ 
+-OBJS = $(PLUGIN).o webosdpage.o status.o ait.o videocontrol.o backtrace.o hbbtvhint.o streamevent.o \
++OBJS = $(PLUGIN).o webosdpage.o status.o ait.o videocontrol.o backtrace.o hbbtvhint.o streamevent.o setup.o \
+ 	   thrift-services/src-gen/CommonService.o thrift-services/src-gen/common_types.o \
+ 	   thrift-services/src-gen/VdrPluginWeb.o thrift-services/src-gen/pluginweb_types.o \
+ 	   thrift-services/src-gen/CefBrowser.o thrift-services/src-gen/cefbrowser_types.o \
+diff --git a/README.md b/README.md
+index ae6ae33..1f5459e 100644
+--- a/README.md
++++ b/README.md
+@@ -72,6 +72,15 @@ VDR uses the red key itself. To start HbbTV with a key, map it to the plugin in
+ | HbbTV hint duration (s)  | 7            | Display time in seconds (1-60) |
+ | HbbTV hint position      | bottom right | Corner of the OSD area         |
+ 
++### Display
++| Setup entry             | Default         | Description |
++|-------------------------|-----------------|-------------|
++| Browser resolution      | browser default | Size of the page rendered by the browser. 1280x720 is the native size of HbbTV applications and the fastest one. Use it together with scaling by the output device. |
++| Scale by output device  | command line -f | Only if built with `ENABLE_FAST_SCALE=1`. Scales the OSD of the browser with the output device (e.g. by the GPU) instead of GraphicsMagick. |
++| Browser frame rate      | browser default | Frame rate of the browser (25, 30, 50, 60). A higher rate reacts faster to keys, but needs more CPU. |
++
++"browser default" keeps the values the browser was started with (`--zoom`, 25 fps).
++
+ ## Logging
+ Uses the VDR logging mechanism. Log entries can be found in ```/var/log/syslog``` with ```[vdrweb]``` prefix.
+ 
+diff --git a/hbbtvhint.cpp b/hbbtvhint.cpp
+index 76e4a19..ac8f659 100644
+--- a/hbbtvhint.cpp
++++ b/hbbtvhint.cpp
+@@ -154,26 +154,3 @@ void cHbbtvHint::Process() {
+         showTimeout.Set(hbbtvHintSetup.duration * 1000);
+     }
+ }
+-
+-// --- setup -------------------------------------------------------------
+-
+-cMenuSetupWeb::cMenuSetupWeb() {
+-    data = hbbtvHintSetup;
+-
+-    positions[0] = tr("bottom right");
+-    positions[1] = tr("bottom left");
+-    positions[2] = tr("top right");
+-    positions[3] = tr("top left");
+-
+-    Add(new cMenuEditBoolItem(tr("Show HbbTV hint"), &data.enabled));
+-    Add(new cMenuEditIntItem(tr("HbbTV hint duration (s)"), &data.duration, 1, 60));
+-    Add(new cMenuEditStraItem(tr("HbbTV hint position"), &data.position, 4, positions));
+-}
+-
+-void cMenuSetupWeb::Store() {
+-    hbbtvHintSetup = data;
+-
+-    SetupStore("HbbtvHint", hbbtvHintSetup.enabled);
+-    SetupStore("HbbtvHintDuration", hbbtvHintSetup.duration);
+-    SetupStore("HbbtvHintPosition", hbbtvHintSetup.position);
+-}
+diff --git a/hbbtvhint.h b/hbbtvhint.h
+index d114ff0..a5340e0 100644
+--- a/hbbtvhint.h
++++ b/hbbtvhint.h
+@@ -10,7 +10,6 @@
+ #include <vdr/osd.h>
+ #include <vdr/thread.h>
+ #include <vdr/tools.h>
+-#include <vdr/menuitems.h>
+ 
+ struct cHbbtvHintSetup {
+     int enabled = 1;    // show the hint at all
+@@ -46,15 +45,3 @@ public:
+     // must be called from the main thread (MainThreadHook)
+     static void Process();
+ };
+-
+-class cMenuSetupWeb : public cMenuSetupPage {
+-private:
+-    cHbbtvHintSetup data;
+-    const char *positions[4];
+-
+-protected:
+-    void Store() override;
+-
+-public:
+-    cMenuSetupWeb();
+-};
+diff --git a/po/de_DE.po b/po/de_DE.po
+index da69853..8787fdd 100644
+--- a/po/de_DE.po
++++ b/po/de_DE.po
+@@ -46,3 +46,15 @@ msgstr "Position des Hinweises"
+ 
+ #~ msgid "RedButton Application not available"
+ #~ msgstr "RedButton Applikation ist nicht verfügbar"
++
++msgid "Browser resolution"
++msgstr "Auflösung des Browsers"
++
++msgid "Scale by output device"
++msgstr "Skalierung durch Ausgabegerät"
++
++msgid "Browser frame rate"
++msgstr "Bildrate des Browsers"
++
++msgid "browser default"
++msgstr "Vorgabe des Browsers"
+diff --git a/setup.cpp b/setup.cpp
+new file mode 100644
+index 0000000..8d0e755
+--- /dev/null
++++ b/setup.cpp
+@@ -0,0 +1,77 @@
++/*
++ * setup.cpp: setup of the web plugin
++ *
++ * See the README file for copyright information and how to reach the author.
++ */
++
++#include <vdr/i18n.h>
++#include "setup.h"
++#include "web.h"
++
++cWebSetup webSetup;
++
++extern bool useOutputDeviceScale;
++
++int cWebSetup::Width() const {
++    static const int widths[] = { 0, 1280, 1920, 2560, 3840 };
++    return (resolution >= 0 && resolution <= 4) ? widths[resolution] : 0;
++}
++
++int cWebSetup::FrameRate() const {
++    static const int rates[] = { 0, 25, 30, 50, 60 };
++    return (frameRate >= 0 && frameRate <= 4) ? rates[frameRate] : 0;
++}
++
++void SendRenderParameters() {
++    if (browserClient != nullptr && (webSetup.Width() > 0 || webSetup.FrameRate() > 0)) {
++        browserClient->SetRenderParameters(webSetup.Width(), webSetup.FrameRate());
++    }
++}
++
++cMenuSetupWeb::cMenuSetupWeb() {
++    hint = hbbtvHintSetup;
++    web = webSetup;
++
++    positions[0] = tr("bottom right");
++    positions[1] = tr("bottom left");
++    positions[2] = tr("top right");
++    positions[3] = tr("top left");
++
++    resolutions[0] = tr("browser default");
++    resolutions[1] = "1280x720";
++    resolutions[2] = "1920x1080";
++    resolutions[3] = "2560x1440";
++    resolutions[4] = "3840x2160";
++
++    frameRates[0] = tr("browser default");
++    frameRates[1] = "25";
++    frameRates[2] = "30";
++    frameRates[3] = "50";
++    frameRates[4] = "60";
++
++    Add(new cMenuEditBoolItem(tr("Show HbbTV hint"), &hint.enabled));
++    Add(new cMenuEditIntItem(tr("HbbTV hint duration (s)"), &hint.duration, 1, 60));
++    Add(new cMenuEditStraItem(tr("HbbTV hint position"), &hint.position, 4, positions));
++
++    Add(new cMenuEditStraItem(tr("Browser resolution"), &web.resolution, 5, resolutions));
++#ifdef ENABLE_FAST_SCALE
++    Add(new cMenuEditBoolItem(tr("Scale by output device"), &web.deviceScale));
++#endif
++    Add(new cMenuEditStraItem(tr("Browser frame rate"), &web.frameRate, 5, frameRates));
++}
++
++void cMenuSetupWeb::Store() {
++    hbbtvHintSetup = hint;
++    webSetup = web;
++    useOutputDeviceScale = webSetup.deviceScale != 0;
++
++    SetupStore("HbbtvHint", hbbtvHintSetup.enabled);
++    SetupStore("HbbtvHintDuration", hbbtvHintSetup.duration);
++    SetupStore("HbbtvHintPosition", hbbtvHintSetup.position);
++
++    SetupStore("Resolution", webSetup.resolution);
++    SetupStore("DeviceScale", webSetup.deviceScale);
++    SetupStore("FrameRate", webSetup.frameRate);
++
++    SendRenderParameters();
++}
+diff --git a/setup.h b/setup.h
+new file mode 100644
+index 0000000..6bdacad
+--- /dev/null
++++ b/setup.h
+@@ -0,0 +1,39 @@
++/*
++ * setup.h: setup of the web plugin
++ *
++ * See the README file for copyright information and how to reach the author.
++ */
++
++#pragma once
++
++#include <vdr/menuitems.h>
++#include "hbbtvhint.h"
++
++struct cWebSetup {
++    int resolution = 0;    // width of the page: 0 = browser default, 1 = 1280, 2 = 1920, 3 = 2560, 4 = 3840
++    int deviceScale = -1;  // scale by the output device, -1 = command line (-f)
++    int frameRate = 0;     // 0 = browser default, 1 = 25, 2 = 30, 3 = 50, 4 = 60
++
++    int Width() const;
++    int FrameRate() const;
++};
++
++extern cWebSetup webSetup;
++
++// tell the browser resolution and frame rate
++void SendRenderParameters();
++
++class cMenuSetupWeb : public cMenuSetupPage {
++private:
++    cHbbtvHintSetup hint;
++    cWebSetup web;
++    const char *positions[4];
++    const char *resolutions[5];
++    const char *frameRates[5];
++
++protected:
++    void Store() override;
++
++public:
++    cMenuSetupWeb();
++};
+diff --git a/web.cpp b/web.cpp
+index fc58ad4..3266349 100644
+--- a/web.cpp
++++ b/web.cpp
+@@ -24,6 +24,7 @@
+ #include "dummyosd.h"
+ #include "debuglog.h"
+ #include "hbbtvhint.h"
++#include "setup.h"
+ #include "streamevent.h"
+ 
+ #define TSDIR  "%s/web/%s/%4d-%02d-%02d.%02d.%02d.%d-%d.rec"
+@@ -599,6 +600,11 @@ bool cPluginWeb::Initialize() {
+ }
+ 
+ bool cPluginWeb::Start() {
++    // without a setup entry the command line option -f decides
++    if (webSetup.deviceScale < 0) {
++        webSetup.deviceScale = useOutputDeviceScale ? 1 : 0;
++    }
++
+     isyslog("[vdrweb] Start hbbtv url collector");
+     hbbtvDeviceStatus = new cHbbtvDeviceStatus();
+ 
+@@ -686,6 +692,11 @@ cOsdObject *cPluginWeb::MainMenuAction() {
+ 
+     WebOSDPage* page = WebOSDPage::Create(useOutputDeviceScale, OSD);
+ 
++    // resolution and frame rate from the setup, the browser may have been restarted
++    if (nextOsdCommand != REOPEN) {
++        SendRenderParameters();
++    }
++
+     if (nextOsdCommand == OPEN) {
+         if (!browserClient->RedButton(*currentChannel->GetChannelID().ToString())) {
+             Skins.QueueMessage(mtInfo, tr("Browser not available"));
+@@ -716,6 +727,14 @@ bool cPluginWeb::SetupParse(const char *Name, const char *Value) {
+         hbbtvHintSetup.duration = constrain(atoi(Value), 1, 60);
+     } else if (!strcasecmp(Name, "HbbtvHintPosition")) {
+         hbbtvHintSetup.position = constrain(atoi(Value), 0, 3);
++    } else if (!strcasecmp(Name, "Resolution")) {
++        webSetup.resolution = constrain(atoi(Value), 0, 4);
++    } else if (!strcasecmp(Name, "DeviceScale")) {
++        // overrides the command line option -f
++        webSetup.deviceScale = atoi(Value) ? 1 : 0;
++        useOutputDeviceScale = webSetup.deviceScale;
++    } else if (!strcasecmp(Name, "FrameRate")) {
++        webSetup.frameRate = constrain(atoi(Value), 0, 4);
+     } else {
+         return false;
+     }
+diff --git a/webosdpage.cpp b/webosdpage.cpp
+index 9224828..78fc8dc 100644
+--- a/webosdpage.cpp
++++ b/webosdpage.cpp
+@@ -57,6 +57,7 @@ WebOSDPage *WebOSDPage::Create(bool useOutputDeviceScale, OSD_MODE osdMode) {
+             if (webOsdPage == nullptr) {
+                 webOsdPage = new WebOSDPage(useOutputDeviceScale, osdMode);
+             }
++            webOsdPage->useOutputDeviceScale = useOutputDeviceScale;
+             currentOsdMode = OSD;
+             return webOsdPage;
+ 
+@@ -64,6 +65,7 @@ WebOSDPage *WebOSDPage::Create(bool useOutputDeviceScale, OSD_MODE osdMode) {
+             if (playerWebOsdPage == nullptr) {
+                 playerWebOsdPage = new WebOSDPage(useOutputDeviceScale, osdMode);
+             }
++            playerWebOsdPage->useOutputDeviceScale = useOutputDeviceScale;
+             currentOsdMode = PLAYER;
+             return playerWebOsdPage;
+ 
+-- 
+2.43.0
+

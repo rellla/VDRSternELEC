@@ -1,0 +1,2378 @@
+From 453f5d73e0ede7cc7f97190cbaa50674025dbb8f Mon Sep 17 00:00:00 2001
+From: Andreas Baierl <ichgeh@imkreisrum.de>
+Date: Sun, 1 Nov 2026 08:58:14 +0100
+Subject: [PATCH 23/34] Extend the thrift interface for the OSD
+
+Add ProcessOsdFrame to VDR, which transfers all regions of a frame at
+once, and SetRenderParameters to the browser.
+
+Co-Authored-By: Claude Opus 5.5
+---
+ thrift-services/cefbrowser.thrift             |   8 +-
+ thrift-services/pluginweb.thrift              |  18 +-
+ thrift-services/src-client/BrowserClient.cpp  |  12 +
+ thrift-services/src-client/BrowserClient.h    |   1 +
+ thrift-services/src-client/VdrClient.cpp      |  12 +
+ thrift-services/src-client/VdrClient.h        |   1 +
+ thrift-services/src-gen/CefBrowser.cpp        | 418 +++++++++++++++
+ thrift-services/src-gen/CefBrowser.h          | 120 +++++
+ .../src-gen/CefBrowser_server.skeleton.cpp    |   5 +
+ thrift-services/src-gen/VdrPluginWeb.cpp      | 418 +++++++++++++++
+ thrift-services/src-gen/VdrPluginWeb.h        | 120 +++++
+ .../src-gen/VdrPluginWeb_server.skeleton.cpp  |   5 +
+ thrift-services/src-gen/cefbrowser_types.cpp  | 149 +++++-
+ thrift-services/src-gen/cefbrowser_types.h    |  42 ++
+ thrift-services/src-gen/pluginweb_types.cpp   | 484 ++++++++++++++++--
+ thrift-services/src-gen/pluginweb_types.h     | 104 ++++
+ web.cpp                                       |   5 +
+ web.h                                         |   1 +
+ 18 files changed, 1859 insertions(+), 64 deletions(-)
+
+diff --git a/thrift-services/cefbrowser.thrift b/thrift-services/cefbrowser.thrift
+index a6559af..d57c0ce 100644
+--- a/thrift-services/cefbrowser.thrift
++++ b/thrift-services/cefbrowser.thrift
+@@ -46,6 +46,11 @@ struct PlayerStatusType {
+     2: i32 state               // 0 = playing, 1 = paused, 2 = buffering, 3 = ended
+ }
+ 
++struct RenderParametersType {
++    1: i32 width,              // width of the page: 1280, 1920, 2560 or 3840, 0 = unchanged
++    2: i32 frameRate           // frames per second, 0 = unchanged
++}
++
+ struct StreamEventType {
+     1: i32 componentTag,
+     2: i32 eventId,
+@@ -64,5 +69,6 @@ service CefBrowser extends common.CommonService {
+     bool InsertChannel(1: InsertChannelType input) throws (1:common.OperationFailed err),
+     bool StopVideo(1: StopVideoType input) throws (1:common.OperationFailed err),
+     bool PlayerStatus(1: PlayerStatusType input) throws (1:common.OperationFailed err),
+-    bool StreamEvent(1: StreamEventType input) throws (1:common.OperationFailed err)
++    bool StreamEvent(1: StreamEventType input) throws (1:common.OperationFailed err),
++    bool SetRenderParameters(1: RenderParametersType input) throws (1:common.OperationFailed err)
+ }
+\ No newline at end of file
+diff --git a/thrift-services/pluginweb.thrift b/thrift-services/pluginweb.thrift
+index 762c835..11629c4 100644
+--- a/thrift-services/pluginweb.thrift
++++ b/thrift-services/pluginweb.thrift
+@@ -22,6 +22,21 @@ struct ProcessOsdUpdateQOIType {
+     5: binary image_data
+ }
+ 
++struct OsdRectType {
++    1: i32 x,
++    2: i32 y,
++    3: i32 width,
++    4: i32 height,
++    5: binary data        // BGRA, QOI encoded if qoi is set
++}
++
++struct ProcessOsdFrameType {
++    1: i32 render_width,  // width of page
++    2: i32 render_height, // height of page
++    3: bool qoi,
++    4: list<OsdRectType> rects
++}
++
+ struct ProcessTSPacketType {
+     1: binary ts;
+ }
+@@ -70,5 +85,6 @@ service VdrPluginWeb extends common.CommonService {
+     bool IsWebActive() throws (1:common.OperationFailed err),
+     bool SelectSubtitleTrack(1: SelectSubtitleTrackType input) throws (1:common.OperationFailed err),
+     bool EndOfStream() throws (1:common.OperationFailed err),
+-    bool StreamEventFilter(1: StreamEventFilterType input) throws (1:common.OperationFailed err)
++    bool StreamEventFilter(1: StreamEventFilterType input) throws (1:common.OperationFailed err),
++    bool ProcessOsdFrame(1: ProcessOsdFrameType input) throws (1:common.OperationFailed err)
+ }
+diff --git a/thrift-services/src-client/BrowserClient.cpp b/thrift-services/src-client/BrowserClient.cpp
+index 25265a5..807cd74 100644
+--- a/thrift-services/src-client/BrowserClient.cpp
++++ b/thrift-services/src-client/BrowserClient.cpp
+@@ -251,3 +251,15 @@ bool BrowserClient::StreamEvent(int componentTag, int eventId, const std::string
+         return client->StreamEvent(input);
+     });
+ }
++
++bool BrowserClient::SetRenderParameters(int width, int frameRate) {
++    DEBUGLOG("BrowserClient::SetRenderParameters: width %d, frame rate %d", width, frameRate);
++
++    return processInternal([&]() -> bool {
++        RenderParametersType input;
++        input.width = width;
++        input.frameRate = frameRate;
++
++        return client->SetRenderParameters(input);
++    });
++}
+diff --git a/thrift-services/src-client/BrowserClient.h b/thrift-services/src-client/BrowserClient.h
+index cb7336d..beb7235 100644
+--- a/thrift-services/src-client/BrowserClient.h
++++ b/thrift-services/src-client/BrowserClient.h
+@@ -32,6 +32,7 @@ public:
+     bool StopVideo(const std::string& reason);
+     bool PlayerStatus(int64_t position, int state);
+     bool StreamEvent(int componentTag, int eventId, const std::string& privateData, const std::string& status);
++    bool SetRenderParameters(int width, int frameRate);
+ 
+ private:
+     bool connect();
+diff --git a/thrift-services/src-client/VdrClient.cpp b/thrift-services/src-client/VdrClient.cpp
+index 8f7953d..bd2fc6d 100644
+--- a/thrift-services/src-client/VdrClient.cpp
++++ b/thrift-services/src-client/VdrClient.cpp
+@@ -231,6 +231,18 @@ bool VdrClient::SelectAudioTrack(std::string& nr) {
+     });
+ }
+ 
++bool VdrClient::ProcessOsdFrame(int render_width, int render_height, bool qoi, const std::vector<OsdRectType>& rects) {
++    return processInternal([&]() -> bool {
++        ProcessOsdFrameType input;
++        input.render_width = render_width;
++        input.render_height = render_height;
++        input.qoi = qoi;
++        input.rects = rects;
++
++        return client->ProcessOsdFrame(input);
++    });
++}
++
+ bool VdrClient::SelectSubtitleTrack(const std::string& nr) {
+     DEBUGLOG("VdrClient::SelectSubtitleTrack");
+ 
+diff --git a/thrift-services/src-client/VdrClient.h b/thrift-services/src-client/VdrClient.h
+index d187c6d..92edcca 100644
+--- a/thrift-services/src-client/VdrClient.h
++++ b/thrift-services/src-client/VdrClient.h
+@@ -26,6 +26,7 @@ public:
+     bool ProcessOsdUpdate(int disp_width, int disp_height, int x, int y, int width, int height, std::string& data);
+     bool ProcessOsdUpdateQoi(int disp_width, int disp_height, int x, int y, const std::string& imageQoi);
+     bool ProcessTSPacket(std::string& packets);
++    bool ProcessOsdFrame(int render_width, int render_height, bool qoi, const std::vector<OsdRectType>& rects);
+ 
+     bool StartVideo(std::string& videoInfo);
+     bool StopVideo();
+diff --git a/thrift-services/src-gen/CefBrowser.cpp b/thrift-services/src-gen/CefBrowser.cpp
+index 0300010..396de6b 100644
+--- a/thrift-services/src-gen/CefBrowser.cpp
++++ b/thrift-services/src-gen/CefBrowser.cpp
+@@ -2319,6 +2319,218 @@ uint32_t CefBrowser_StreamEvent_presult::read(::apache::thrift::protocol::TProto
+   return xfer;
+ }
+ 
++
++CefBrowser_SetRenderParameters_args::~CefBrowser_SetRenderParameters_args() noexcept {
++}
++
++CefBrowser_SetRenderParameters_args::CefBrowser_SetRenderParameters_args() noexcept {
++}
++
++uint32_t CefBrowser_SetRenderParameters_args::read(::apache::thrift::protocol::TProtocol* iprot) {
++
++  ::apache::thrift::protocol::TInputRecursionTracker tracker(*iprot);
++  uint32_t xfer = 0;
++  std::string fname;
++  ::apache::thrift::protocol::TType ftype;
++  int16_t fid;
++
++  xfer += iprot->readStructBegin(fname);
++
++  using ::apache::thrift::protocol::TProtocolException;
++
++
++  while (true)
++  {
++    xfer += iprot->readFieldBegin(fname, ftype, fid);
++    if (ftype == ::apache::thrift::protocol::T_STOP) {
++      break;
++    }
++    switch (fid)
++    {
++      case 1:
++        if (ftype == ::apache::thrift::protocol::T_STRUCT) {
++          xfer += this->input.read(iprot);
++          this->__isset.input = true;
++        } else {
++          xfer += iprot->skip(ftype);
++        }
++        break;
++      default:
++        xfer += iprot->skip(ftype);
++        break;
++    }
++    xfer += iprot->readFieldEnd();
++  }
++
++  xfer += iprot->readStructEnd();
++
++  return xfer;
++}
++
++uint32_t CefBrowser_SetRenderParameters_args::write(::apache::thrift::protocol::TProtocol* oprot) const {
++  uint32_t xfer = 0;
++  ::apache::thrift::protocol::TOutputRecursionTracker tracker(*oprot);
++  xfer += oprot->writeStructBegin("CefBrowser_SetRenderParameters_args");
++
++  xfer += oprot->writeFieldBegin("input", ::apache::thrift::protocol::T_STRUCT, 1);
++  xfer += this->input.write(oprot);
++  xfer += oprot->writeFieldEnd();
++
++  xfer += oprot->writeFieldStop();
++  xfer += oprot->writeStructEnd();
++  return xfer;
++}
++
++
++CefBrowser_SetRenderParameters_pargs::~CefBrowser_SetRenderParameters_pargs() noexcept {
++}
++
++
++uint32_t CefBrowser_SetRenderParameters_pargs::write(::apache::thrift::protocol::TProtocol* oprot) const {
++  uint32_t xfer = 0;
++  ::apache::thrift::protocol::TOutputRecursionTracker tracker(*oprot);
++  xfer += oprot->writeStructBegin("CefBrowser_SetRenderParameters_pargs");
++
++  xfer += oprot->writeFieldBegin("input", ::apache::thrift::protocol::T_STRUCT, 1);
++  xfer += (*(this->input)).write(oprot);
++  xfer += oprot->writeFieldEnd();
++
++  xfer += oprot->writeFieldStop();
++  xfer += oprot->writeStructEnd();
++  return xfer;
++}
++
++
++CefBrowser_SetRenderParameters_result::~CefBrowser_SetRenderParameters_result() noexcept {
++}
++
++CefBrowser_SetRenderParameters_result::CefBrowser_SetRenderParameters_result() noexcept
++   : success(0) {
++}
++
++uint32_t CefBrowser_SetRenderParameters_result::read(::apache::thrift::protocol::TProtocol* iprot) {
++
++  ::apache::thrift::protocol::TInputRecursionTracker tracker(*iprot);
++  uint32_t xfer = 0;
++  std::string fname;
++  ::apache::thrift::protocol::TType ftype;
++  int16_t fid;
++
++  xfer += iprot->readStructBegin(fname);
++
++  using ::apache::thrift::protocol::TProtocolException;
++
++
++  while (true)
++  {
++    xfer += iprot->readFieldBegin(fname, ftype, fid);
++    if (ftype == ::apache::thrift::protocol::T_STOP) {
++      break;
++    }
++    switch (fid)
++    {
++      case 0:
++        if (ftype == ::apache::thrift::protocol::T_BOOL) {
++          xfer += iprot->readBool(this->success);
++          this->__isset.success = true;
++        } else {
++          xfer += iprot->skip(ftype);
++        }
++        break;
++      case 1:
++        if (ftype == ::apache::thrift::protocol::T_STRUCT) {
++          xfer += this->err.read(iprot);
++          this->__isset.err = true;
++        } else {
++          xfer += iprot->skip(ftype);
++        }
++        break;
++      default:
++        xfer += iprot->skip(ftype);
++        break;
++    }
++    xfer += iprot->readFieldEnd();
++  }
++
++  xfer += iprot->readStructEnd();
++
++  return xfer;
++}
++
++uint32_t CefBrowser_SetRenderParameters_result::write(::apache::thrift::protocol::TProtocol* oprot) const {
++
++  uint32_t xfer = 0;
++
++  xfer += oprot->writeStructBegin("CefBrowser_SetRenderParameters_result");
++
++  if (this->__isset.success) {
++    xfer += oprot->writeFieldBegin("success", ::apache::thrift::protocol::T_BOOL, 0);
++    xfer += oprot->writeBool(this->success);
++    xfer += oprot->writeFieldEnd();
++  } else if (this->__isset.err) {
++    xfer += oprot->writeFieldBegin("err", ::apache::thrift::protocol::T_STRUCT, 1);
++    xfer += this->err.write(oprot);
++    xfer += oprot->writeFieldEnd();
++  }
++  xfer += oprot->writeFieldStop();
++  xfer += oprot->writeStructEnd();
++  return xfer;
++}
++
++
++CefBrowser_SetRenderParameters_presult::~CefBrowser_SetRenderParameters_presult() noexcept {
++}
++
++
++uint32_t CefBrowser_SetRenderParameters_presult::read(::apache::thrift::protocol::TProtocol* iprot) {
++
++  ::apache::thrift::protocol::TInputRecursionTracker tracker(*iprot);
++  uint32_t xfer = 0;
++  std::string fname;
++  ::apache::thrift::protocol::TType ftype;
++  int16_t fid;
++
++  xfer += iprot->readStructBegin(fname);
++
++  using ::apache::thrift::protocol::TProtocolException;
++
++
++  while (true)
++  {
++    xfer += iprot->readFieldBegin(fname, ftype, fid);
++    if (ftype == ::apache::thrift::protocol::T_STOP) {
++      break;
++    }
++    switch (fid)
++    {
++      case 0:
++        if (ftype == ::apache::thrift::protocol::T_BOOL) {
++          xfer += iprot->readBool((*(this->success)));
++          this->__isset.success = true;
++        } else {
++          xfer += iprot->skip(ftype);
++        }
++        break;
++      case 1:
++        if (ftype == ::apache::thrift::protocol::T_STRUCT) {
++          xfer += this->err.read(iprot);
++          this->__isset.err = true;
++        } else {
++          xfer += iprot->skip(ftype);
++        }
++        break;
++      default:
++        xfer += iprot->skip(ftype);
++        break;
++    }
++    xfer += iprot->readFieldEnd();
++  }
++
++  xfer += iprot->readStructEnd();
++
++  return xfer;
++}
++
+ bool CefBrowserClient::LoadUrl(const LoadUrlType& input)
+ {
+   send_LoadUrl(input);
+@@ -2989,6 +3201,67 @@ bool CefBrowserClient::recv_StreamEvent()
+   throw ::apache::thrift::TApplicationException(::apache::thrift::TApplicationException::MISSING_RESULT, "StreamEvent failed: unknown result");
+ }
+ 
++bool CefBrowserClient::SetRenderParameters(const RenderParametersType& input)
++{
++  send_SetRenderParameters(input);
++  return recv_SetRenderParameters();
++}
++
++void CefBrowserClient::send_SetRenderParameters(const RenderParametersType& input)
++{
++  int32_t cseqid = 0;
++  oprot_->writeMessageBegin("SetRenderParameters", ::apache::thrift::protocol::T_CALL, cseqid);
++
++  CefBrowser_SetRenderParameters_pargs args;
++  args.input = &input;
++  args.write(oprot_);
++
++  oprot_->writeMessageEnd();
++  oprot_->getTransport()->writeEnd();
++  oprot_->getTransport()->flush();
++}
++
++bool CefBrowserClient::recv_SetRenderParameters()
++{
++
++  int32_t rseqid = 0;
++  std::string fname;
++  ::apache::thrift::protocol::TMessageType mtype;
++
++  iprot_->readMessageBegin(fname, mtype, rseqid);
++  if (mtype == ::apache::thrift::protocol::T_EXCEPTION) {
++    ::apache::thrift::TApplicationException x;
++    x.read(iprot_);
++    iprot_->readMessageEnd();
++    iprot_->getTransport()->readEnd();
++    throw x;
++  }
++  if (mtype != ::apache::thrift::protocol::T_REPLY) {
++    iprot_->skip(::apache::thrift::protocol::T_STRUCT);
++    iprot_->readMessageEnd();
++    iprot_->getTransport()->readEnd();
++  }
++  if (fname.compare("SetRenderParameters") != 0) {
++    iprot_->skip(::apache::thrift::protocol::T_STRUCT);
++    iprot_->readMessageEnd();
++    iprot_->getTransport()->readEnd();
++  }
++  bool _return;
++  CefBrowser_SetRenderParameters_presult result;
++  result.success = &_return;
++  result.read(iprot_);
++  iprot_->readMessageEnd();
++  iprot_->getTransport()->readEnd();
++
++  if (result.__isset.success) {
++    return _return;
++  }
++  if (result.__isset.err) {
++    throw result.err;
++  }
++  throw ::apache::thrift::TApplicationException(::apache::thrift::TApplicationException::MISSING_RESULT, "SetRenderParameters failed: unknown result");
++}
++
+ bool CefBrowserProcessor::dispatchCall(::apache::thrift::protocol::TProtocol* iprot, ::apache::thrift::protocol::TProtocol* oprot, const std::string& fname, int32_t seqid, void* callContext) {
+   ProcessMap::iterator pfn;
+   pfn = processMap_.find(fname);
+@@ -3626,6 +3899,63 @@ void CefBrowserProcessor::process_StreamEvent(int32_t seqid, ::apache::thrift::p
+   }
+ }
+ 
++void CefBrowserProcessor::process_SetRenderParameters(int32_t seqid, ::apache::thrift::protocol::TProtocol* iprot, ::apache::thrift::protocol::TProtocol* oprot, void* callContext)
++{
++  void* ctx = nullptr;
++  if (this->eventHandler_.get() != nullptr) {
++    ctx = this->eventHandler_->getContext("CefBrowser.SetRenderParameters", callContext);
++  }
++  ::apache::thrift::TProcessorContextFreer freer(this->eventHandler_.get(), ctx, "CefBrowser.SetRenderParameters");
++
++  if (this->eventHandler_.get() != nullptr) {
++    this->eventHandler_->preRead(ctx, "CefBrowser.SetRenderParameters");
++  }
++
++  CefBrowser_SetRenderParameters_args args;
++  args.read(iprot);
++  iprot->readMessageEnd();
++  uint32_t bytes = iprot->getTransport()->readEnd();
++
++  if (this->eventHandler_.get() != nullptr) {
++    this->eventHandler_->postRead(ctx, "CefBrowser.SetRenderParameters", bytes);
++  }
++
++  CefBrowser_SetRenderParameters_result result;
++  try {
++    result.success = iface_->SetRenderParameters(args.input);
++    result.__isset.success = true;
++  } catch ( ::common::OperationFailed &err) {
++    result.err = std::move(err);
++    result.__isset.err = true;
++  } catch (const std::exception& e) {
++    if (this->eventHandler_.get() != nullptr) {
++      this->eventHandler_->handlerError(ctx, "CefBrowser.SetRenderParameters");
++    }
++
++    ::apache::thrift::TApplicationException x(e.what());
++    oprot->writeMessageBegin("SetRenderParameters", ::apache::thrift::protocol::T_EXCEPTION, seqid);
++    x.write(oprot);
++    oprot->writeMessageEnd();
++    oprot->getTransport()->writeEnd();
++    oprot->getTransport()->flush();
++    return;
++  }
++
++  if (this->eventHandler_.get() != nullptr) {
++    this->eventHandler_->preWrite(ctx, "CefBrowser.SetRenderParameters");
++  }
++
++  oprot->writeMessageBegin("SetRenderParameters", ::apache::thrift::protocol::T_REPLY, seqid);
++  result.write(oprot);
++  oprot->writeMessageEnd();
++  bytes = oprot->getTransport()->writeEnd();
++  oprot->getTransport()->flush();
++
++  if (this->eventHandler_.get() != nullptr) {
++    this->eventHandler_->postWrite(ctx, "CefBrowser.SetRenderParameters", bytes);
++  }
++}
++
+ ::std::shared_ptr< ::apache::thrift::TProcessor > CefBrowserProcessorFactory::getProcessor(const ::apache::thrift::TConnectionInfo& connInfo) {
+   ::apache::thrift::ReleaseHandler< CefBrowserIfFactory > cleanup(handlerFactory_);
+   ::std::shared_ptr< CefBrowserIf > handler(handlerFactory_->getHandler(connInfo), cleanup);
+@@ -4600,5 +4930,93 @@ bool CefBrowserConcurrentClient::recv_StreamEvent(const int32_t seqid)
+   } // end while(true)
+ }
+ 
++bool CefBrowserConcurrentClient::SetRenderParameters(const RenderParametersType& input)
++{
++  int32_t seqid = send_SetRenderParameters(input);
++  return recv_SetRenderParameters(seqid);
++}
++
++int32_t CefBrowserConcurrentClient::send_SetRenderParameters(const RenderParametersType& input)
++{
++  int32_t cseqid = this->sync_->generateSeqId();
++  ::apache::thrift::async::TConcurrentSendSentry sentry(this->sync_.get());
++  oprot_->writeMessageBegin("SetRenderParameters", ::apache::thrift::protocol::T_CALL, cseqid);
++
++  CefBrowser_SetRenderParameters_pargs args;
++  args.input = &input;
++  args.write(oprot_);
++
++  oprot_->writeMessageEnd();
++  oprot_->getTransport()->writeEnd();
++  oprot_->getTransport()->flush();
++
++  sentry.commit();
++  return cseqid;
++}
++
++bool CefBrowserConcurrentClient::recv_SetRenderParameters(const int32_t seqid)
++{
++
++  int32_t rseqid = 0;
++  std::string fname;
++  ::apache::thrift::protocol::TMessageType mtype;
++
++  // the read mutex gets dropped and reacquired as part of waitForWork()
++  // The destructor of this sentry wakes up other clients
++  ::apache::thrift::async::TConcurrentRecvSentry sentry(this->sync_.get(), seqid);
++
++  while(true) {
++    if(!this->sync_->getPending(fname, mtype, rseqid)) {
++      iprot_->readMessageBegin(fname, mtype, rseqid);
++    }
++    if(seqid == rseqid) {
++      if (mtype == ::apache::thrift::protocol::T_EXCEPTION) {
++        ::apache::thrift::TApplicationException x;
++        x.read(iprot_);
++        iprot_->readMessageEnd();
++        iprot_->getTransport()->readEnd();
++        sentry.commit();
++        throw x;
++      }
++      if (mtype != ::apache::thrift::protocol::T_REPLY) {
++        iprot_->skip(::apache::thrift::protocol::T_STRUCT);
++        iprot_->readMessageEnd();
++        iprot_->getTransport()->readEnd();
++      }
++      if (fname.compare("SetRenderParameters") != 0) {
++        iprot_->skip(::apache::thrift::protocol::T_STRUCT);
++        iprot_->readMessageEnd();
++        iprot_->getTransport()->readEnd();
++
++        // in a bad state, don't commit
++        using ::apache::thrift::protocol::TProtocolException;
++        throw TProtocolException(TProtocolException::INVALID_DATA);
++      }
++      bool _return;
++      CefBrowser_SetRenderParameters_presult result;
++      result.success = &_return;
++      result.read(iprot_);
++      iprot_->readMessageEnd();
++      iprot_->getTransport()->readEnd();
++
++      if (result.__isset.success) {
++        sentry.commit();
++        return _return;
++      }
++      if (result.__isset.err) {
++        sentry.commit();
++        throw result.err;
++      }
++      // in a bad state, don't commit
++      throw ::apache::thrift::TApplicationException(::apache::thrift::TApplicationException::MISSING_RESULT, "SetRenderParameters failed: unknown result");
++    }
++    // seqid != rseqid
++    this->sync_->updatePending(fname, mtype, rseqid);
++
++    // this will temporarily unlock the readMutex, and let other clients get work done
++    this->sync_->waitForWork(seqid);
++  } // end while(true)
++}
++
+ } // namespace
+ 
+diff --git a/thrift-services/src-gen/CefBrowser.h b/thrift-services/src-gen/CefBrowser.h
+index 84d97c1..847e064 100644
+--- a/thrift-services/src-gen/CefBrowser.h
++++ b/thrift-services/src-gen/CefBrowser.h
+@@ -34,6 +34,7 @@ class CefBrowserIf : virtual public  ::common::CommonServiceIf {
+   virtual bool StopVideo(const StopVideoType& input) = 0;
+   virtual bool PlayerStatus(const PlayerStatusType& input) = 0;
+   virtual bool StreamEvent(const StreamEventType& input) = 0;
++  virtual bool SetRenderParameters(const RenderParametersType& input) = 0;
+ };
+ 
+ class CefBrowserIfFactory : virtual public  ::common::CommonServiceIfFactory {
+@@ -107,6 +108,10 @@ class CefBrowserNull : virtual public CefBrowserIf , virtual public  ::common::C
+     bool _return = false;
+     return _return;
+   }
++  bool SetRenderParameters(const RenderParametersType& /* input */) override {
++    bool _return = false;
++    return _return;
++  }
+ };
+ 
+ typedef struct _CefBrowser_LoadUrl_args__isset {
+@@ -1177,6 +1182,104 @@ class CefBrowser_StreamEvent_presult {
+ 
+ };
+ 
++typedef struct _CefBrowser_SetRenderParameters_args__isset {
++  _CefBrowser_SetRenderParameters_args__isset() : input(false) {}
++  bool input :1;
++} _CefBrowser_SetRenderParameters_args__isset;
++
++class CefBrowser_SetRenderParameters_args {
++ public:
++
++  CefBrowser_SetRenderParameters_args(const CefBrowser_SetRenderParameters_args&) noexcept;
++  CefBrowser_SetRenderParameters_args& operator=(const CefBrowser_SetRenderParameters_args&) noexcept;
++  CefBrowser_SetRenderParameters_args() noexcept;
++
++  virtual ~CefBrowser_SetRenderParameters_args() noexcept;
++  RenderParametersType input;
++
++  _CefBrowser_SetRenderParameters_args__isset __isset;
++
++  void __set_input(const RenderParametersType& val);
++
++  bool operator == (const CefBrowser_SetRenderParameters_args & rhs) const;
++  bool operator != (const CefBrowser_SetRenderParameters_args &rhs) const {
++    return !(*this == rhs);
++  }
++
++  bool operator < (const CefBrowser_SetRenderParameters_args & ) const;
++
++  uint32_t read(::apache::thrift::protocol::TProtocol* iprot);
++  uint32_t write(::apache::thrift::protocol::TProtocol* oprot) const;
++
++};
++
++
++class CefBrowser_SetRenderParameters_pargs {
++ public:
++
++
++  virtual ~CefBrowser_SetRenderParameters_pargs() noexcept;
++  const RenderParametersType* input;
++
++  uint32_t write(::apache::thrift::protocol::TProtocol* oprot) const;
++
++};
++
++typedef struct _CefBrowser_SetRenderParameters_result__isset {
++  _CefBrowser_SetRenderParameters_result__isset() : success(false), err(false) {}
++  bool success :1;
++  bool err :1;
++} _CefBrowser_SetRenderParameters_result__isset;
++
++class CefBrowser_SetRenderParameters_result {
++ public:
++
++  CefBrowser_SetRenderParameters_result(const CefBrowser_SetRenderParameters_result&);
++  CefBrowser_SetRenderParameters_result& operator=(const CefBrowser_SetRenderParameters_result&);
++  CefBrowser_SetRenderParameters_result() noexcept;
++
++  virtual ~CefBrowser_SetRenderParameters_result() noexcept;
++  bool success;
++   ::common::OperationFailed err;
++
++  _CefBrowser_SetRenderParameters_result__isset __isset;
++
++  void __set_success(const bool val);
++
++  void __set_err(const  ::common::OperationFailed& val);
++
++  bool operator == (const CefBrowser_SetRenderParameters_result & rhs) const;
++  bool operator != (const CefBrowser_SetRenderParameters_result &rhs) const {
++    return !(*this == rhs);
++  }
++
++  bool operator < (const CefBrowser_SetRenderParameters_result & ) const;
++
++  uint32_t read(::apache::thrift::protocol::TProtocol* iprot);
++  uint32_t write(::apache::thrift::protocol::TProtocol* oprot) const;
++
++};
++
++typedef struct _CefBrowser_SetRenderParameters_presult__isset {
++  _CefBrowser_SetRenderParameters_presult__isset() : success(false), err(false) {}
++  bool success :1;
++  bool err :1;
++} _CefBrowser_SetRenderParameters_presult__isset;
++
++class CefBrowser_SetRenderParameters_presult {
++ public:
++
++
++  virtual ~CefBrowser_SetRenderParameters_presult() noexcept;
++  bool* success;
++   ::common::OperationFailed err;
++
++  _CefBrowser_SetRenderParameters_presult__isset __isset;
++
++  uint32_t read(::apache::thrift::protocol::TProtocol* iprot);
++
++};
++
+ class CefBrowserClient : virtual public CefBrowserIf, public  ::common::CommonServiceClient {
+  public:
+   CefBrowserClient(std::shared_ptr< ::apache::thrift::protocol::TProtocol> prot) :
+@@ -1221,6 +1324,9 @@ class CefBrowserClient : virtual public CefBrowserIf, public  ::common::CommonSe
+   bool StreamEvent(const StreamEventType& input) override;
+   void send_StreamEvent(const StreamEventType& input);
+   bool recv_StreamEvent();
++  bool SetRenderParameters(const RenderParametersType& input) override;
++  void send_SetRenderParameters(const RenderParametersType& input);
++  bool recv_SetRenderParameters();
+ };
+ 
+ class CefBrowserProcessor : public  ::common::CommonServiceProcessor {
+@@ -1242,6 +1348,7 @@ class CefBrowserProcessor : public  ::common::CommonServiceProcessor {
+   void process_StopVideo(int32_t seqid, ::apache::thrift::protocol::TProtocol* iprot, ::apache::thrift::protocol::TProtocol* oprot, void* callContext);
+   void process_PlayerStatus(int32_t seqid, ::apache::thrift::protocol::TProtocol* iprot, ::apache::thrift::protocol::TProtocol* oprot, void* callContext);
+   void process_StreamEvent(int32_t seqid, ::apache::thrift::protocol::TProtocol* iprot, ::apache::thrift::protocol::TProtocol* oprot, void* callContext);
++  void process_SetRenderParameters(int32_t seqid, ::apache::thrift::protocol::TProtocol* iprot, ::apache::thrift::protocol::TProtocol* oprot, void* callContext);
+  public:
+   CefBrowserProcessor(::std::shared_ptr<CefBrowserIf> iface) :
+      ::common::CommonServiceProcessor(iface),
+@@ -1257,6 +1364,7 @@ class CefBrowserProcessor : public  ::common::CommonServiceProcessor {
+     processMap_["StopVideo"] = &CefBrowserProcessor::process_StopVideo;
+     processMap_["PlayerStatus"] = &CefBrowserProcessor::process_PlayerStatus;
+     processMap_["StreamEvent"] = &CefBrowserProcessor::process_StreamEvent;
++    processMap_["SetRenderParameters"] = &CefBrowserProcessor::process_SetRenderParameters;
+   }
+ 
+   virtual ~CefBrowserProcessor() {}
+@@ -1389,6 +1497,15 @@ class CefBrowserMultiface : virtual public CefBrowserIf, public  ::common::Commo
+     return ifaces_[i]->StreamEvent(input);
+   }
+ 
++  bool SetRenderParameters(const RenderParametersType& input) override {
++    size_t sz = ifaces_.size();
++    size_t i = 0;
++    for (; i < (sz - 1); ++i) {
++      ifaces_[i]->SetRenderParameters(input);
++    }
++    return ifaces_[i]->SetRenderParameters(input);
++  }
++
+ };
+ 
+ // The 'concurrent' client is a thread safe client that correctly handles
+@@ -1438,6 +1555,9 @@ class CefBrowserConcurrentClient : virtual public CefBrowserIf, public  ::common
+   bool StreamEvent(const StreamEventType& input) override;
+   int32_t send_StreamEvent(const StreamEventType& input);
+   bool recv_StreamEvent(const int32_t seqid);
++  bool SetRenderParameters(const RenderParametersType& input) override;
++  int32_t send_SetRenderParameters(const RenderParametersType& input);
++  bool recv_SetRenderParameters(const int32_t seqid);
+ };
+ 
+ #ifdef _MSC_VER
+diff --git a/thrift-services/src-gen/CefBrowser_server.skeleton.cpp b/thrift-services/src-gen/CefBrowser_server.skeleton.cpp
+index b8887df..0ad8358 100644
+--- a/thrift-services/src-gen/CefBrowser_server.skeleton.cpp
++++ b/thrift-services/src-gen/CefBrowser_server.skeleton.cpp
+@@ -75,6 +75,11 @@ class CefBrowserHandler : virtual public CefBrowserIf {
+     printf("StreamEvent\n");
+   }
+ 
++  bool SetRenderParameters(const RenderParametersType& input) {
++    // Your implementation goes here
++    printf("SetRenderParameters\n");
++  }
++
+ };
+ 
+ int main(int argc, char **argv) {
+diff --git a/thrift-services/src-gen/VdrPluginWeb.cpp b/thrift-services/src-gen/VdrPluginWeb.cpp
+index add4c27..4ba103b 100644
+--- a/thrift-services/src-gen/VdrPluginWeb.cpp
++++ b/thrift-services/src-gen/VdrPluginWeb.cpp
+@@ -3253,6 +3253,218 @@ uint32_t VdrPluginWeb_StreamEventFilter_presult::read(::apache::thrift::protocol
+   return xfer;
+ }
+ 
++
++VdrPluginWeb_ProcessOsdFrame_args::~VdrPluginWeb_ProcessOsdFrame_args() noexcept {
++}
++
++VdrPluginWeb_ProcessOsdFrame_args::VdrPluginWeb_ProcessOsdFrame_args() noexcept {
++}
++
++uint32_t VdrPluginWeb_ProcessOsdFrame_args::read(::apache::thrift::protocol::TProtocol* iprot) {
++
++  ::apache::thrift::protocol::TInputRecursionTracker tracker(*iprot);
++  uint32_t xfer = 0;
++  std::string fname;
++  ::apache::thrift::protocol::TType ftype;
++  int16_t fid;
++
++  xfer += iprot->readStructBegin(fname);
++
++  using ::apache::thrift::protocol::TProtocolException;
++
++
++  while (true)
++  {
++    xfer += iprot->readFieldBegin(fname, ftype, fid);
++    if (ftype == ::apache::thrift::protocol::T_STOP) {
++      break;
++    }
++    switch (fid)
++    {
++      case 1:
++        if (ftype == ::apache::thrift::protocol::T_STRUCT) {
++          xfer += this->input.read(iprot);
++          this->__isset.input = true;
++        } else {
++          xfer += iprot->skip(ftype);
++        }
++        break;
++      default:
++        xfer += iprot->skip(ftype);
++        break;
++    }
++    xfer += iprot->readFieldEnd();
++  }
++
++  xfer += iprot->readStructEnd();
++
++  return xfer;
++}
++
++uint32_t VdrPluginWeb_ProcessOsdFrame_args::write(::apache::thrift::protocol::TProtocol* oprot) const {
++  uint32_t xfer = 0;
++  ::apache::thrift::protocol::TOutputRecursionTracker tracker(*oprot);
++  xfer += oprot->writeStructBegin("VdrPluginWeb_ProcessOsdFrame_args");
++
++  xfer += oprot->writeFieldBegin("input", ::apache::thrift::protocol::T_STRUCT, 1);
++  xfer += this->input.write(oprot);
++  xfer += oprot->writeFieldEnd();
++
++  xfer += oprot->writeFieldStop();
++  xfer += oprot->writeStructEnd();
++  return xfer;
++}
++
++
++VdrPluginWeb_ProcessOsdFrame_pargs::~VdrPluginWeb_ProcessOsdFrame_pargs() noexcept {
++}
++
++
++uint32_t VdrPluginWeb_ProcessOsdFrame_pargs::write(::apache::thrift::protocol::TProtocol* oprot) const {
++  uint32_t xfer = 0;
++  ::apache::thrift::protocol::TOutputRecursionTracker tracker(*oprot);
++  xfer += oprot->writeStructBegin("VdrPluginWeb_ProcessOsdFrame_pargs");
++
++  xfer += oprot->writeFieldBegin("input", ::apache::thrift::protocol::T_STRUCT, 1);
++  xfer += (*(this->input)).write(oprot);
++  xfer += oprot->writeFieldEnd();
++
++  xfer += oprot->writeFieldStop();
++  xfer += oprot->writeStructEnd();
++  return xfer;
++}
++
++
++VdrPluginWeb_ProcessOsdFrame_result::~VdrPluginWeb_ProcessOsdFrame_result() noexcept {
++}
++
++VdrPluginWeb_ProcessOsdFrame_result::VdrPluginWeb_ProcessOsdFrame_result() noexcept
++   : success(0) {
++}
++
++uint32_t VdrPluginWeb_ProcessOsdFrame_result::read(::apache::thrift::protocol::TProtocol* iprot) {
++
++  ::apache::thrift::protocol::TInputRecursionTracker tracker(*iprot);
++  uint32_t xfer = 0;
++  std::string fname;
++  ::apache::thrift::protocol::TType ftype;
++  int16_t fid;
++
++  xfer += iprot->readStructBegin(fname);
++
++  using ::apache::thrift::protocol::TProtocolException;
++
++
++  while (true)
++  {
++    xfer += iprot->readFieldBegin(fname, ftype, fid);
++    if (ftype == ::apache::thrift::protocol::T_STOP) {
++      break;
++    }
++    switch (fid)
++    {
++      case 0:
++        if (ftype == ::apache::thrift::protocol::T_BOOL) {
++          xfer += iprot->readBool(this->success);
++          this->__isset.success = true;
++        } else {
++          xfer += iprot->skip(ftype);
++        }
++        break;
++      case 1:
++        if (ftype == ::apache::thrift::protocol::T_STRUCT) {
++          xfer += this->err.read(iprot);
++          this->__isset.err = true;
++        } else {
++          xfer += iprot->skip(ftype);
++        }
++        break;
++      default:
++        xfer += iprot->skip(ftype);
++        break;
++    }
++    xfer += iprot->readFieldEnd();
++  }
++
++  xfer += iprot->readStructEnd();
++
++  return xfer;
++}
++
++uint32_t VdrPluginWeb_ProcessOsdFrame_result::write(::apache::thrift::protocol::TProtocol* oprot) const {
++
++  uint32_t xfer = 0;
++
++  xfer += oprot->writeStructBegin("VdrPluginWeb_ProcessOsdFrame_result");
++
++  if (this->__isset.success) {
++    xfer += oprot->writeFieldBegin("success", ::apache::thrift::protocol::T_BOOL, 0);
++    xfer += oprot->writeBool(this->success);
++    xfer += oprot->writeFieldEnd();
++  } else if (this->__isset.err) {
++    xfer += oprot->writeFieldBegin("err", ::apache::thrift::protocol::T_STRUCT, 1);
++    xfer += this->err.write(oprot);
++    xfer += oprot->writeFieldEnd();
++  }
++  xfer += oprot->writeFieldStop();
++  xfer += oprot->writeStructEnd();
++  return xfer;
++}
++
++
++VdrPluginWeb_ProcessOsdFrame_presult::~VdrPluginWeb_ProcessOsdFrame_presult() noexcept {
++}
++
++
++uint32_t VdrPluginWeb_ProcessOsdFrame_presult::read(::apache::thrift::protocol::TProtocol* iprot) {
++
++  ::apache::thrift::protocol::TInputRecursionTracker tracker(*iprot);
++  uint32_t xfer = 0;
++  std::string fname;
++  ::apache::thrift::protocol::TType ftype;
++  int16_t fid;
++
++  xfer += iprot->readStructBegin(fname);
++
++  using ::apache::thrift::protocol::TProtocolException;
++
++
++  while (true)
++  {
++    xfer += iprot->readFieldBegin(fname, ftype, fid);
++    if (ftype == ::apache::thrift::protocol::T_STOP) {
++      break;
++    }
++    switch (fid)
++    {
++      case 0:
++        if (ftype == ::apache::thrift::protocol::T_BOOL) {
++          xfer += iprot->readBool((*(this->success)));
++          this->__isset.success = true;
++        } else {
++          xfer += iprot->skip(ftype);
++        }
++        break;
++      case 1:
++        if (ftype == ::apache::thrift::protocol::T_STRUCT) {
++          xfer += this->err.read(iprot);
++          this->__isset.err = true;
++        } else {
++          xfer += iprot->skip(ftype);
++        }
++        break;
++      default:
++        xfer += iprot->skip(ftype);
++        break;
++    }
++    xfer += iprot->readFieldEnd();
++  }
++
++  xfer += iprot->readStructEnd();
++
++  return xfer;
++}
++
+ bool VdrPluginWebClient::ProcessOsdUpdate(const ProcessOsdUpdateType& input)
+ {
+   send_ProcessOsdUpdate(input);
+@@ -4222,6 +4434,67 @@ bool VdrPluginWebClient::recv_StreamEventFilter()
+   throw ::apache::thrift::TApplicationException(::apache::thrift::TApplicationException::MISSING_RESULT, "StreamEventFilter failed: unknown result");
+ }
+ 
++bool VdrPluginWebClient::ProcessOsdFrame(const ProcessOsdFrameType& input)
++{
++  send_ProcessOsdFrame(input);
++  return recv_ProcessOsdFrame();
++}
++
++void VdrPluginWebClient::send_ProcessOsdFrame(const ProcessOsdFrameType& input)
++{
++  int32_t cseqid = 0;
++  oprot_->writeMessageBegin("ProcessOsdFrame", ::apache::thrift::protocol::T_CALL, cseqid);
++
++  VdrPluginWeb_ProcessOsdFrame_pargs args;
++  args.input = &input;
++  args.write(oprot_);
++
++  oprot_->writeMessageEnd();
++  oprot_->getTransport()->writeEnd();
++  oprot_->getTransport()->flush();
++}
++
++bool VdrPluginWebClient::recv_ProcessOsdFrame()
++{
++
++  int32_t rseqid = 0;
++  std::string fname;
++  ::apache::thrift::protocol::TMessageType mtype;
++
++  iprot_->readMessageBegin(fname, mtype, rseqid);
++  if (mtype == ::apache::thrift::protocol::T_EXCEPTION) {
++    ::apache::thrift::TApplicationException x;
++    x.read(iprot_);
++    iprot_->readMessageEnd();
++    iprot_->getTransport()->readEnd();
++    throw x;
++  }
++  if (mtype != ::apache::thrift::protocol::T_REPLY) {
++    iprot_->skip(::apache::thrift::protocol::T_STRUCT);
++    iprot_->readMessageEnd();
++    iprot_->getTransport()->readEnd();
++  }
++  if (fname.compare("ProcessOsdFrame") != 0) {
++    iprot_->skip(::apache::thrift::protocol::T_STRUCT);
++    iprot_->readMessageEnd();
++    iprot_->getTransport()->readEnd();
++  }
++  bool _return;
++  VdrPluginWeb_ProcessOsdFrame_presult result;
++  result.success = &_return;
++  result.read(iprot_);
++  iprot_->readMessageEnd();
++  iprot_->getTransport()->readEnd();
++
++  if (result.__isset.success) {
++    return _return;
++  }
++  if (result.__isset.err) {
++    throw result.err;
++  }
++  throw ::apache::thrift::TApplicationException(::apache::thrift::TApplicationException::MISSING_RESULT, "ProcessOsdFrame failed: unknown result");
++}
++
+ bool VdrPluginWebProcessor::dispatchCall(::apache::thrift::protocol::TProtocol* iprot, ::apache::thrift::protocol::TProtocol* oprot, const std::string& fname, int32_t seqid, void* callContext) {
+   ProcessMap::iterator pfn;
+   pfn = processMap_.find(fname);
+@@ -5144,6 +5417,63 @@ void VdrPluginWebProcessor::process_StreamEventFilter(int32_t seqid, ::apache::t
+   }
+ }
+ 
++void VdrPluginWebProcessor::process_ProcessOsdFrame(int32_t seqid, ::apache::thrift::protocol::TProtocol* iprot, ::apache::thrift::protocol::TProtocol* oprot, void* callContext)
++{
++  void* ctx = nullptr;
++  if (this->eventHandler_.get() != nullptr) {
++    ctx = this->eventHandler_->getContext("VdrPluginWeb.ProcessOsdFrame", callContext);
++  }
++  ::apache::thrift::TProcessorContextFreer freer(this->eventHandler_.get(), ctx, "VdrPluginWeb.ProcessOsdFrame");
++
++  if (this->eventHandler_.get() != nullptr) {
++    this->eventHandler_->preRead(ctx, "VdrPluginWeb.ProcessOsdFrame");
++  }
++
++  VdrPluginWeb_ProcessOsdFrame_args args;
++  args.read(iprot);
++  iprot->readMessageEnd();
++  uint32_t bytes = iprot->getTransport()->readEnd();
++
++  if (this->eventHandler_.get() != nullptr) {
++    this->eventHandler_->postRead(ctx, "VdrPluginWeb.ProcessOsdFrame", bytes);
++  }
++
++  VdrPluginWeb_ProcessOsdFrame_result result;
++  try {
++    result.success = iface_->ProcessOsdFrame(args.input);
++    result.__isset.success = true;
++  } catch ( ::common::OperationFailed &err) {
++    result.err = std::move(err);
++    result.__isset.err = true;
++  } catch (const std::exception& e) {
++    if (this->eventHandler_.get() != nullptr) {
++      this->eventHandler_->handlerError(ctx, "VdrPluginWeb.ProcessOsdFrame");
++    }
++
++    ::apache::thrift::TApplicationException x(e.what());
++    oprot->writeMessageBegin("ProcessOsdFrame", ::apache::thrift::protocol::T_EXCEPTION, seqid);
++    x.write(oprot);
++    oprot->writeMessageEnd();
++    oprot->getTransport()->writeEnd();
++    oprot->getTransport()->flush();
++    return;
++  }
++
++  if (this->eventHandler_.get() != nullptr) {
++    this->eventHandler_->preWrite(ctx, "VdrPluginWeb.ProcessOsdFrame");
++  }
++
++  oprot->writeMessageBegin("ProcessOsdFrame", ::apache::thrift::protocol::T_REPLY, seqid);
++  result.write(oprot);
++  oprot->writeMessageEnd();
++  bytes = oprot->getTransport()->writeEnd();
++  oprot->getTransport()->flush();
++
++  if (this->eventHandler_.get() != nullptr) {
++    this->eventHandler_->postWrite(ctx, "VdrPluginWeb.ProcessOsdFrame", bytes);
++  }
++}
++
+ ::std::shared_ptr< ::apache::thrift::TProcessor > VdrPluginWebProcessorFactory::getProcessor(const ::apache::thrift::TConnectionInfo& connInfo) {
+   ::apache::thrift::ReleaseHandler< VdrPluginWebIfFactory > cleanup(handlerFactory_);
+   ::std::shared_ptr< VdrPluginWebIf > handler(handlerFactory_->getHandler(connInfo), cleanup);
+@@ -6552,5 +6882,93 @@ bool VdrPluginWebConcurrentClient::recv_StreamEventFilter(const int32_t seqid)
+   } // end while(true)
+ }
+ 
++bool VdrPluginWebConcurrentClient::ProcessOsdFrame(const ProcessOsdFrameType& input)
++{
++  int32_t seqid = send_ProcessOsdFrame(input);
++  return recv_ProcessOsdFrame(seqid);
++}
++
++int32_t VdrPluginWebConcurrentClient::send_ProcessOsdFrame(const ProcessOsdFrameType& input)
++{
++  int32_t cseqid = this->sync_->generateSeqId();
++  ::apache::thrift::async::TConcurrentSendSentry sentry(this->sync_.get());
++  oprot_->writeMessageBegin("ProcessOsdFrame", ::apache::thrift::protocol::T_CALL, cseqid);
++
++  VdrPluginWeb_ProcessOsdFrame_pargs args;
++  args.input = &input;
++  args.write(oprot_);
++
++  oprot_->writeMessageEnd();
++  oprot_->getTransport()->writeEnd();
++  oprot_->getTransport()->flush();
++
++  sentry.commit();
++  return cseqid;
++}
++
++bool VdrPluginWebConcurrentClient::recv_ProcessOsdFrame(const int32_t seqid)
++{
++
++  int32_t rseqid = 0;
++  std::string fname;
++  ::apache::thrift::protocol::TMessageType mtype;
++
++  // the read mutex gets dropped and reacquired as part of waitForWork()
++  // The destructor of this sentry wakes up other clients
++  ::apache::thrift::async::TConcurrentRecvSentry sentry(this->sync_.get(), seqid);
++
++  while(true) {
++    if(!this->sync_->getPending(fname, mtype, rseqid)) {
++      iprot_->readMessageBegin(fname, mtype, rseqid);
++    }
++    if(seqid == rseqid) {
++      if (mtype == ::apache::thrift::protocol::T_EXCEPTION) {
++        ::apache::thrift::TApplicationException x;
++        x.read(iprot_);
++        iprot_->readMessageEnd();
++        iprot_->getTransport()->readEnd();
++        sentry.commit();
++        throw x;
++      }
++      if (mtype != ::apache::thrift::protocol::T_REPLY) {
++        iprot_->skip(::apache::thrift::protocol::T_STRUCT);
++        iprot_->readMessageEnd();
++        iprot_->getTransport()->readEnd();
++      }
++      if (fname.compare("ProcessOsdFrame") != 0) {
++        iprot_->skip(::apache::thrift::protocol::T_STRUCT);
++        iprot_->readMessageEnd();
++        iprot_->getTransport()->readEnd();
++
++        // in a bad state, don't commit
++        using ::apache::thrift::protocol::TProtocolException;
++        throw TProtocolException(TProtocolException::INVALID_DATA);
++      }
++      bool _return;
++      VdrPluginWeb_ProcessOsdFrame_presult result;
++      result.success = &_return;
++      result.read(iprot_);
++      iprot_->readMessageEnd();
++      iprot_->getTransport()->readEnd();
++
++      if (result.__isset.success) {
++        sentry.commit();
++        return _return;
++      }
++      if (result.__isset.err) {
++        sentry.commit();
++        throw result.err;
++      }
++      // in a bad state, don't commit
++      throw ::apache::thrift::TApplicationException(::apache::thrift::TApplicationException::MISSING_RESULT, "ProcessOsdFrame failed: unknown result");
++    }
++    // seqid != rseqid
++    this->sync_->updatePending(fname, mtype, rseqid);
++
++    // this will temporarily unlock the readMutex, and let other clients get work done
++    this->sync_->waitForWork(seqid);
++  } // end while(true)
++}
++
+ } // namespace
+ 
+diff --git a/thrift-services/src-gen/VdrPluginWeb.h b/thrift-services/src-gen/VdrPluginWeb.h
+index fada9ec..27c7d77 100644
+--- a/thrift-services/src-gen/VdrPluginWeb.h
++++ b/thrift-services/src-gen/VdrPluginWeb.h
+@@ -39,6 +39,7 @@ class VdrPluginWebIf : virtual public  ::common::CommonServiceIf {
+   virtual bool SelectSubtitleTrack(const SelectSubtitleTrackType& input) = 0;
+   virtual bool EndOfStream() = 0;
+   virtual bool StreamEventFilter(const StreamEventFilterType& input) = 0;
++  virtual bool ProcessOsdFrame(const ProcessOsdFrameType& input) = 0;
+ };
+ 
+ class VdrPluginWebIfFactory : virtual public  ::common::CommonServiceIfFactory {
+@@ -132,6 +133,10 @@ class VdrPluginWebNull : virtual public VdrPluginWebIf , virtual public  ::commo
+     bool _return = false;
+     return _return;
+   }
++  bool ProcessOsdFrame(const ProcessOsdFrameType& /* input */) override {
++    bool _return = false;
++    return _return;
++  }
+ };
+ 
+ typedef struct _VdrPluginWeb_ProcessOsdUpdate_args__isset {
+@@ -1632,6 +1637,104 @@ class VdrPluginWeb_StreamEventFilter_presult {
+ 
+ };
+ 
++typedef struct _VdrPluginWeb_ProcessOsdFrame_args__isset {
++  _VdrPluginWeb_ProcessOsdFrame_args__isset() : input(false) {}
++  bool input :1;
++} _VdrPluginWeb_ProcessOsdFrame_args__isset;
++
++class VdrPluginWeb_ProcessOsdFrame_args {
++ public:
++
++  VdrPluginWeb_ProcessOsdFrame_args(const VdrPluginWeb_ProcessOsdFrame_args&);
++  VdrPluginWeb_ProcessOsdFrame_args& operator=(const VdrPluginWeb_ProcessOsdFrame_args&);
++  VdrPluginWeb_ProcessOsdFrame_args() noexcept;
++
++  virtual ~VdrPluginWeb_ProcessOsdFrame_args() noexcept;
++  ProcessOsdFrameType input;
++
++  _VdrPluginWeb_ProcessOsdFrame_args__isset __isset;
++
++  void __set_input(const ProcessOsdFrameType& val);
++
++  bool operator == (const VdrPluginWeb_ProcessOsdFrame_args & rhs) const;
++  bool operator != (const VdrPluginWeb_ProcessOsdFrame_args &rhs) const {
++    return !(*this == rhs);
++  }
++
++  bool operator < (const VdrPluginWeb_ProcessOsdFrame_args & ) const;
++
++  uint32_t read(::apache::thrift::protocol::TProtocol* iprot);
++  uint32_t write(::apache::thrift::protocol::TProtocol* oprot) const;
++
++};
++
++
++class VdrPluginWeb_ProcessOsdFrame_pargs {
++ public:
++
++
++  virtual ~VdrPluginWeb_ProcessOsdFrame_pargs() noexcept;
++  const ProcessOsdFrameType* input;
++
++  uint32_t write(::apache::thrift::protocol::TProtocol* oprot) const;
++
++};
++
++typedef struct _VdrPluginWeb_ProcessOsdFrame_result__isset {
++  _VdrPluginWeb_ProcessOsdFrame_result__isset() : success(false), err(false) {}
++  bool success :1;
++  bool err :1;
++} _VdrPluginWeb_ProcessOsdFrame_result__isset;
++
++class VdrPluginWeb_ProcessOsdFrame_result {
++ public:
++
++  VdrPluginWeb_ProcessOsdFrame_result(const VdrPluginWeb_ProcessOsdFrame_result&);
++  VdrPluginWeb_ProcessOsdFrame_result& operator=(const VdrPluginWeb_ProcessOsdFrame_result&);
++  VdrPluginWeb_ProcessOsdFrame_result() noexcept;
++
++  virtual ~VdrPluginWeb_ProcessOsdFrame_result() noexcept;
++  bool success;
++   ::common::OperationFailed err;
++
++  _VdrPluginWeb_ProcessOsdFrame_result__isset __isset;
++
++  void __set_success(const bool val);
++
++  void __set_err(const  ::common::OperationFailed& val);
++
++  bool operator == (const VdrPluginWeb_ProcessOsdFrame_result & rhs) const;
++  bool operator != (const VdrPluginWeb_ProcessOsdFrame_result &rhs) const {
++    return !(*this == rhs);
++  }
++
++  bool operator < (const VdrPluginWeb_ProcessOsdFrame_result & ) const;
++
++  uint32_t read(::apache::thrift::protocol::TProtocol* iprot);
++  uint32_t write(::apache::thrift::protocol::TProtocol* oprot) const;
++
++};
++
++typedef struct _VdrPluginWeb_ProcessOsdFrame_presult__isset {
++  _VdrPluginWeb_ProcessOsdFrame_presult__isset() : success(false), err(false) {}
++  bool success :1;
++  bool err :1;
++} _VdrPluginWeb_ProcessOsdFrame_presult__isset;
++
++class VdrPluginWeb_ProcessOsdFrame_presult {
++ public:
++
++
++  virtual ~VdrPluginWeb_ProcessOsdFrame_presult() noexcept;
++  bool* success;
++   ::common::OperationFailed err;
++
++  _VdrPluginWeb_ProcessOsdFrame_presult__isset __isset;
++
++  uint32_t read(::apache::thrift::protocol::TProtocol* iprot);
++
++};
++
+ class VdrPluginWebClient : virtual public VdrPluginWebIf, public  ::common::CommonServiceClient {
+  public:
+   VdrPluginWebClient(std::shared_ptr< ::apache::thrift::protocol::TProtocol> prot) :
+@@ -1691,6 +1794,9 @@ class VdrPluginWebClient : virtual public VdrPluginWebIf, public  ::common::Comm
+   bool StreamEventFilter(const StreamEventFilterType& input) override;
+   void send_StreamEventFilter(const StreamEventFilterType& input);
+   bool recv_StreamEventFilter();
++  bool ProcessOsdFrame(const ProcessOsdFrameType& input) override;
++  void send_ProcessOsdFrame(const ProcessOsdFrameType& input);
++  bool recv_ProcessOsdFrame();
+ };
+ 
+ class VdrPluginWebProcessor : public  ::common::CommonServiceProcessor {
+@@ -1717,6 +1823,7 @@ class VdrPluginWebProcessor : public  ::common::CommonServiceProcessor {
+   void process_SelectSubtitleTrack(int32_t seqid, ::apache::thrift::protocol::TProtocol* iprot, ::apache::thrift::protocol::TProtocol* oprot, void* callContext);
+   void process_EndOfStream(int32_t seqid, ::apache::thrift::protocol::TProtocol* iprot, ::apache::thrift::protocol::TProtocol* oprot, void* callContext);
+   void process_StreamEventFilter(int32_t seqid, ::apache::thrift::protocol::TProtocol* iprot, ::apache::thrift::protocol::TProtocol* oprot, void* callContext);
++  void process_ProcessOsdFrame(int32_t seqid, ::apache::thrift::protocol::TProtocol* iprot, ::apache::thrift::protocol::TProtocol* oprot, void* callContext);
+  public:
+   VdrPluginWebProcessor(::std::shared_ptr<VdrPluginWebIf> iface) :
+      ::common::CommonServiceProcessor(iface),
+@@ -1737,6 +1844,7 @@ class VdrPluginWebProcessor : public  ::common::CommonServiceProcessor {
+     processMap_["SelectSubtitleTrack"] = &VdrPluginWebProcessor::process_SelectSubtitleTrack;
+     processMap_["EndOfStream"] = &VdrPluginWebProcessor::process_EndOfStream;
+     processMap_["StreamEventFilter"] = &VdrPluginWebProcessor::process_StreamEventFilter;
++    processMap_["ProcessOsdFrame"] = &VdrPluginWebProcessor::process_ProcessOsdFrame;
+   }
+ 
+   virtual ~VdrPluginWebProcessor() {}
+@@ -1914,6 +2022,15 @@ class VdrPluginWebMultiface : virtual public VdrPluginWebIf, public  ::common::C
+     return ifaces_[i]->StreamEventFilter(input);
+   }
+ 
++  bool ProcessOsdFrame(const ProcessOsdFrameType& input) override {
++    size_t sz = ifaces_.size();
++    size_t i = 0;
++    for (; i < (sz - 1); ++i) {
++      ifaces_[i]->ProcessOsdFrame(input);
++    }
++    return ifaces_[i]->ProcessOsdFrame(input);
++  }
++
+ };
+ 
+ // The 'concurrent' client is a thread safe client that correctly handles
+@@ -1978,6 +2095,9 @@ class VdrPluginWebConcurrentClient : virtual public VdrPluginWebIf, public  ::co
+   bool StreamEventFilter(const StreamEventFilterType& input) override;
+   int32_t send_StreamEventFilter(const StreamEventFilterType& input);
+   bool recv_StreamEventFilter(const int32_t seqid);
++  bool ProcessOsdFrame(const ProcessOsdFrameType& input) override;
++  int32_t send_ProcessOsdFrame(const ProcessOsdFrameType& input);
++  bool recv_ProcessOsdFrame(const int32_t seqid);
+ };
+ 
+ #ifdef _MSC_VER
+diff --git a/thrift-services/src-gen/VdrPluginWeb_server.skeleton.cpp b/thrift-services/src-gen/VdrPluginWeb_server.skeleton.cpp
+index bf92b54..8fa9ad5 100644
+--- a/thrift-services/src-gen/VdrPluginWeb_server.skeleton.cpp
++++ b/thrift-services/src-gen/VdrPluginWeb_server.skeleton.cpp
+@@ -100,6 +100,11 @@ class VdrPluginWebHandler : virtual public VdrPluginWebIf {
+     printf("StreamEventFilter\n");
+   }
+ 
++  bool ProcessOsdFrame(const ProcessOsdFrameType& input) {
++    // Your implementation goes here
++    printf("ProcessOsdFrame\n");
++  }
++
+ };
+ 
+ int main(int argc, char **argv) {
+diff --git a/thrift-services/src-gen/cefbrowser_types.cpp b/thrift-services/src-gen/cefbrowser_types.cpp
+index cb224a4..a3bd307 100644
+--- a/thrift-services/src-gen/cefbrowser_types.cpp
++++ b/thrift-services/src-gen/cefbrowser_types.cpp
+@@ -1074,6 +1074,131 @@ void PlayerStatusType::printTo(std::ostream& out) const {
+ }
+ 
+ 
++RenderParametersType::~RenderParametersType() noexcept {
++}
++
++RenderParametersType::RenderParametersType() noexcept
++   : width(0),
++     frameRate(0) {
++}
++
++void RenderParametersType::__set_width(const int32_t val) {
++  this->width = val;
++}
++
++void RenderParametersType::__set_frameRate(const int32_t val) {
++  this->frameRate = val;
++}
++std::ostream& operator<<(std::ostream& out, const RenderParametersType& obj)
++{
++  obj.printTo(out);
++  return out;
++}
++
++
++uint32_t RenderParametersType::read(::apache::thrift::protocol::TProtocol* iprot) {
++
++  ::apache::thrift::protocol::TInputRecursionTracker tracker(*iprot);
++  uint32_t xfer = 0;
++  std::string fname;
++  ::apache::thrift::protocol::TType ftype;
++  int16_t fid;
++
++  xfer += iprot->readStructBegin(fname);
++
++  using ::apache::thrift::protocol::TProtocolException;
++
++
++  while (true)
++  {
++    xfer += iprot->readFieldBegin(fname, ftype, fid);
++    if (ftype == ::apache::thrift::protocol::T_STOP) {
++      break;
++    }
++    switch (fid)
++    {
++      case 1:
++        if (ftype == ::apache::thrift::protocol::T_I32) {
++          xfer += iprot->readI32(this->width);
++          this->__isset.width = true;
++        } else {
++          xfer += iprot->skip(ftype);
++        }
++        break;
++      case 2:
++        if (ftype == ::apache::thrift::protocol::T_I32) {
++          xfer += iprot->readI32(this->frameRate);
++          this->__isset.frameRate = true;
++        } else {
++          xfer += iprot->skip(ftype);
++        }
++        break;
++      default:
++        xfer += iprot->skip(ftype);
++        break;
++    }
++    xfer += iprot->readFieldEnd();
++  }
++
++  xfer += iprot->readStructEnd();
++
++  return xfer;
++}
++
++uint32_t RenderParametersType::write(::apache::thrift::protocol::TProtocol* oprot) const {
++  uint32_t xfer = 0;
++  ::apache::thrift::protocol::TOutputRecursionTracker tracker(*oprot);
++  xfer += oprot->writeStructBegin("RenderParametersType");
++
++  xfer += oprot->writeFieldBegin("width", ::apache::thrift::protocol::T_I32, 1);
++  xfer += oprot->writeI32(this->width);
++  xfer += oprot->writeFieldEnd();
++
++  xfer += oprot->writeFieldBegin("frameRate", ::apache::thrift::protocol::T_I32, 2);
++  xfer += oprot->writeI32(this->frameRate);
++  xfer += oprot->writeFieldEnd();
++
++  xfer += oprot->writeFieldStop();
++  xfer += oprot->writeStructEnd();
++  return xfer;
++}
++
++void swap(RenderParametersType &a, RenderParametersType &b) noexcept {
++  using ::std::swap;
++  swap(a.width, b.width);
++  swap(a.frameRate, b.frameRate);
++  swap(a.__isset, b.__isset);
++}
++
++bool RenderParametersType::operator==(const RenderParametersType & rhs) const
++{
++  if (!(width == rhs.width))
++    return false;
++  if (!(frameRate == rhs.frameRate))
++    return false;
++  return true;
++}
++
++RenderParametersType::RenderParametersType(const RenderParametersType& other18) noexcept {
++  width = other18.width;
++  frameRate = other18.frameRate;
++  __isset = other18.__isset;
++}
++RenderParametersType& RenderParametersType::operator=(const RenderParametersType& other19) noexcept {
++  width = other19.width;
++  frameRate = other19.frameRate;
++  __isset = other19.__isset;
++  return *this;
++}
++void RenderParametersType::printTo(std::ostream& out) const {
++  using ::apache::thrift::to_string;
++  out << "RenderParametersType(";
++  out << "width=" << to_string(width);
++  out << ", " << "frameRate=" << to_string(frameRate);
++  out << ")";
++}
++
++
+ StreamEventType::~StreamEventType() noexcept {
+ }
+ 
+@@ -1219,19 +1344,19 @@ bool StreamEventType::operator==(const StreamEventType & rhs) const
+   return true;
+ }
+ 
+-StreamEventType::StreamEventType(const StreamEventType& other18) {
+-  componentTag = other18.componentTag;
+-  eventId = other18.eventId;
+-  privateData = other18.privateData;
+-  status = other18.status;
+-  __isset = other18.__isset;
++StreamEventType::StreamEventType(const StreamEventType& other20) {
++  componentTag = other20.componentTag;
++  eventId = other20.eventId;
++  privateData = other20.privateData;
++  status = other20.status;
++  __isset = other20.__isset;
+ }
+-StreamEventType& StreamEventType::operator=(const StreamEventType& other19) {
+-  componentTag = other19.componentTag;
+-  eventId = other19.eventId;
+-  privateData = other19.privateData;
+-  status = other19.status;
+-  __isset = other19.__isset;
++StreamEventType& StreamEventType::operator=(const StreamEventType& other21) {
++  componentTag = other21.componentTag;
++  eventId = other21.eventId;
++  privateData = other21.privateData;
++  status = other21.status;
++  __isset = other21.__isset;
+   return *this;
+ }
+ void StreamEventType::printTo(std::ostream& out) const {
+diff --git a/thrift-services/src-gen/cefbrowser_types.h b/thrift-services/src-gen/cefbrowser_types.h
+index b4e9881..e34177d 100644
+--- a/thrift-services/src-gen/cefbrowser_types.h
++++ b/thrift-services/src-gen/cefbrowser_types.h
+@@ -40,6 +40,8 @@ class StopVideoType;
+ 
+ class PlayerStatusType;
+ 
++class RenderParametersType;
++
+ class StreamEventType;
+ 
+ typedef struct _LoadUrlType__isset {
+@@ -390,6 +392,46 @@ void swap(PlayerStatusType &a, PlayerStatusType &b) noexcept;
+ 
+ std::ostream& operator<<(std::ostream& out, const PlayerStatusType& obj);
+ 
++typedef struct _RenderParametersType__isset {
++  _RenderParametersType__isset() : width(false), frameRate(false) {}
++  bool width :1;
++  bool frameRate :1;
++} _RenderParametersType__isset;
++
++class RenderParametersType : public virtual ::apache::thrift::TBase {
++ public:
++
++  RenderParametersType(const RenderParametersType&) noexcept;
++  RenderParametersType& operator=(const RenderParametersType&) noexcept;
++  RenderParametersType() noexcept;
++
++  virtual ~RenderParametersType() noexcept;
++  int32_t width;
++  int32_t frameRate;
++
++  _RenderParametersType__isset __isset;
++
++  void __set_width(const int32_t val);
++
++  void __set_frameRate(const int32_t val);
++
++  bool operator == (const RenderParametersType & rhs) const;
++  bool operator != (const RenderParametersType &rhs) const {
++    return !(*this == rhs);
++  }
++
++  bool operator < (const RenderParametersType & ) const;
++
++  uint32_t read(::apache::thrift::protocol::TProtocol* iprot) override;
++  uint32_t write(::apache::thrift::protocol::TProtocol* oprot) const override;
++
++  virtual void printTo(std::ostream& out) const;
++};
++
++void swap(RenderParametersType &a, RenderParametersType &b) noexcept;
++
++std::ostream& operator<<(std::ostream& out, const RenderParametersType& obj);
++
+ typedef struct _StreamEventType__isset {
+   _StreamEventType__isset() : componentTag(false), eventId(false), privateData(false), status(false) {}
+   bool componentTag :1;
+diff --git a/thrift-services/src-gen/pluginweb_types.cpp b/thrift-services/src-gen/pluginweb_types.cpp
+index f4bb774..db52a95 100644
+--- a/thrift-services/src-gen/pluginweb_types.cpp
++++ b/thrift-services/src-gen/pluginweb_types.cpp
+@@ -448,6 +448,390 @@ void ProcessOsdUpdateQOIType::printTo(std::ostream& out) const {
+ }
+ 
+ 
++OsdRectType::~OsdRectType() noexcept {
++}
++
++OsdRectType::OsdRectType() noexcept
++   : x(0),
++     y(0),
++     width(0),
++     height(0),
++     data() {
++}
++
++void OsdRectType::__set_x(const int32_t val) {
++  this->x = val;
++}
++
++void OsdRectType::__set_y(const int32_t val) {
++  this->y = val;
++}
++
++void OsdRectType::__set_width(const int32_t val) {
++  this->width = val;
++}
++
++void OsdRectType::__set_height(const int32_t val) {
++  this->height = val;
++}
++
++void OsdRectType::__set_data(const std::string& val) {
++  this->data = val;
++}
++std::ostream& operator<<(std::ostream& out, const OsdRectType& obj)
++{
++  obj.printTo(out);
++  return out;
++}
++
++
++uint32_t OsdRectType::read(::apache::thrift::protocol::TProtocol* iprot) {
++
++  ::apache::thrift::protocol::TInputRecursionTracker tracker(*iprot);
++  uint32_t xfer = 0;
++  std::string fname;
++  ::apache::thrift::protocol::TType ftype;
++  int16_t fid;
++
++  xfer += iprot->readStructBegin(fname);
++
++  using ::apache::thrift::protocol::TProtocolException;
++
++
++  while (true)
++  {
++    xfer += iprot->readFieldBegin(fname, ftype, fid);
++    if (ftype == ::apache::thrift::protocol::T_STOP) {
++      break;
++    }
++    switch (fid)
++    {
++      case 1:
++        if (ftype == ::apache::thrift::protocol::T_I32) {
++          xfer += iprot->readI32(this->x);
++          this->__isset.x = true;
++        } else {
++          xfer += iprot->skip(ftype);
++        }
++        break;
++      case 2:
++        if (ftype == ::apache::thrift::protocol::T_I32) {
++          xfer += iprot->readI32(this->y);
++          this->__isset.y = true;
++        } else {
++          xfer += iprot->skip(ftype);
++        }
++        break;
++      case 3:
++        if (ftype == ::apache::thrift::protocol::T_I32) {
++          xfer += iprot->readI32(this->width);
++          this->__isset.width = true;
++        } else {
++          xfer += iprot->skip(ftype);
++        }
++        break;
++      case 4:
++        if (ftype == ::apache::thrift::protocol::T_I32) {
++          xfer += iprot->readI32(this->height);
++          this->__isset.height = true;
++        } else {
++          xfer += iprot->skip(ftype);
++        }
++        break;
++      case 5:
++        if (ftype == ::apache::thrift::protocol::T_STRING) {
++          xfer += iprot->readBinary(this->data);
++          this->__isset.data = true;
++        } else {
++          xfer += iprot->skip(ftype);
++        }
++        break;
++      default:
++        xfer += iprot->skip(ftype);
++        break;
++    }
++    xfer += iprot->readFieldEnd();
++  }
++
++  xfer += iprot->readStructEnd();
++
++  return xfer;
++}
++
++uint32_t OsdRectType::write(::apache::thrift::protocol::TProtocol* oprot) const {
++  uint32_t xfer = 0;
++  ::apache::thrift::protocol::TOutputRecursionTracker tracker(*oprot);
++  xfer += oprot->writeStructBegin("OsdRectType");
++
++  xfer += oprot->writeFieldBegin("x", ::apache::thrift::protocol::T_I32, 1);
++  xfer += oprot->writeI32(this->x);
++  xfer += oprot->writeFieldEnd();
++
++  xfer += oprot->writeFieldBegin("y", ::apache::thrift::protocol::T_I32, 2);
++  xfer += oprot->writeI32(this->y);
++  xfer += oprot->writeFieldEnd();
++
++  xfer += oprot->writeFieldBegin("width", ::apache::thrift::protocol::T_I32, 3);
++  xfer += oprot->writeI32(this->width);
++  xfer += oprot->writeFieldEnd();
++
++  xfer += oprot->writeFieldBegin("height", ::apache::thrift::protocol::T_I32, 4);
++  xfer += oprot->writeI32(this->height);
++  xfer += oprot->writeFieldEnd();
++
++  xfer += oprot->writeFieldBegin("data", ::apache::thrift::protocol::T_STRING, 5);
++  xfer += oprot->writeBinary(this->data);
++  xfer += oprot->writeFieldEnd();
++
++  xfer += oprot->writeFieldStop();
++  xfer += oprot->writeStructEnd();
++  return xfer;
++}
++
++void swap(OsdRectType &a, OsdRectType &b) noexcept {
++  using ::std::swap;
++  swap(a.x, b.x);
++  swap(a.y, b.y);
++  swap(a.width, b.width);
++  swap(a.height, b.height);
++  swap(a.data, b.data);
++  swap(a.__isset, b.__isset);
++}
++
++bool OsdRectType::operator==(const OsdRectType & rhs) const
++{
++  if (!(x == rhs.x))
++    return false;
++  if (!(y == rhs.y))
++    return false;
++  if (!(width == rhs.width))
++    return false;
++  if (!(height == rhs.height))
++    return false;
++  if (!(data == rhs.data))
++    return false;
++  return true;
++}
++
++OsdRectType::OsdRectType(const OsdRectType& other4) {
++  x = other4.x;
++  y = other4.y;
++  width = other4.width;
++  height = other4.height;
++  data = other4.data;
++  __isset = other4.__isset;
++}
++OsdRectType& OsdRectType::operator=(const OsdRectType& other5) {
++  x = other5.x;
++  y = other5.y;
++  width = other5.width;
++  height = other5.height;
++  data = other5.data;
++  __isset = other5.__isset;
++  return *this;
++}
++void OsdRectType::printTo(std::ostream& out) const {
++  using ::apache::thrift::to_string;
++  out << "OsdRectType(";
++  out << "x=" << to_string(x);
++  out << ", " << "y=" << to_string(y);
++  out << ", " << "width=" << to_string(width);
++  out << ", " << "height=" << to_string(height);
++  out << ", " << "data=" << to_string(data);
++  out << ")";
++}
++
++
++ProcessOsdFrameType::~ProcessOsdFrameType() noexcept {
++}
++
++ProcessOsdFrameType::ProcessOsdFrameType() noexcept
++   : render_width(0),
++     render_height(0),
++     qoi(0) {
++}
++
++void ProcessOsdFrameType::__set_render_width(const int32_t val) {
++  this->render_width = val;
++}
++
++void ProcessOsdFrameType::__set_render_height(const int32_t val) {
++  this->render_height = val;
++}
++
++void ProcessOsdFrameType::__set_qoi(const bool val) {
++  this->qoi = val;
++}
++
++void ProcessOsdFrameType::__set_rects(const std::vector<OsdRectType> & val) {
++  this->rects = val;
++}
++std::ostream& operator<<(std::ostream& out, const ProcessOsdFrameType& obj)
++{
++  obj.printTo(out);
++  return out;
++}
++
++
++uint32_t ProcessOsdFrameType::read(::apache::thrift::protocol::TProtocol* iprot) {
++
++  ::apache::thrift::protocol::TInputRecursionTracker tracker(*iprot);
++  uint32_t xfer = 0;
++  std::string fname;
++  ::apache::thrift::protocol::TType ftype;
++  int16_t fid;
++
++  xfer += iprot->readStructBegin(fname);
++
++  using ::apache::thrift::protocol::TProtocolException;
++
++
++  while (true)
++  {
++    xfer += iprot->readFieldBegin(fname, ftype, fid);
++    if (ftype == ::apache::thrift::protocol::T_STOP) {
++      break;
++    }
++    switch (fid)
++    {
++      case 1:
++        if (ftype == ::apache::thrift::protocol::T_I32) {
++          xfer += iprot->readI32(this->render_width);
++          this->__isset.render_width = true;
++        } else {
++          xfer += iprot->skip(ftype);
++        }
++        break;
++      case 2:
++        if (ftype == ::apache::thrift::protocol::T_I32) {
++          xfer += iprot->readI32(this->render_height);
++          this->__isset.render_height = true;
++        } else {
++          xfer += iprot->skip(ftype);
++        }
++        break;
++      case 3:
++        if (ftype == ::apache::thrift::protocol::T_BOOL) {
++          xfer += iprot->readBool(this->qoi);
++          this->__isset.qoi = true;
++        } else {
++          xfer += iprot->skip(ftype);
++        }
++        break;
++      case 4:
++        if (ftype == ::apache::thrift::protocol::T_LIST) {
++          {
++            this->rects.clear();
++            uint32_t _size6;
++            ::apache::thrift::protocol::TType _etype9;
++            xfer += iprot->readListBegin(_etype9, _size6);
++            this->rects.resize(_size6);
++            uint32_t _i10;
++            for (_i10 = 0; _i10 < _size6; ++_i10)
++            {
++              xfer += this->rects[_i10].read(iprot);
++            }
++            xfer += iprot->readListEnd();
++          }
++          this->__isset.rects = true;
++        } else {
++          xfer += iprot->skip(ftype);
++        }
++        break;
++      default:
++        xfer += iprot->skip(ftype);
++        break;
++    }
++    xfer += iprot->readFieldEnd();
++  }
++
++  xfer += iprot->readStructEnd();
++
++  return xfer;
++}
++
++uint32_t ProcessOsdFrameType::write(::apache::thrift::protocol::TProtocol* oprot) const {
++  uint32_t xfer = 0;
++  ::apache::thrift::protocol::TOutputRecursionTracker tracker(*oprot);
++  xfer += oprot->writeStructBegin("ProcessOsdFrameType");
++
++  xfer += oprot->writeFieldBegin("render_width", ::apache::thrift::protocol::T_I32, 1);
++  xfer += oprot->writeI32(this->render_width);
++  xfer += oprot->writeFieldEnd();
++
++  xfer += oprot->writeFieldBegin("render_height", ::apache::thrift::protocol::T_I32, 2);
++  xfer += oprot->writeI32(this->render_height);
++  xfer += oprot->writeFieldEnd();
++
++  xfer += oprot->writeFieldBegin("qoi", ::apache::thrift::protocol::T_BOOL, 3);
++  xfer += oprot->writeBool(this->qoi);
++  xfer += oprot->writeFieldEnd();
++
++  xfer += oprot->writeFieldBegin("rects", ::apache::thrift::protocol::T_LIST, 4);
++  {
++    xfer += oprot->writeListBegin(::apache::thrift::protocol::T_STRUCT, static_cast<uint32_t>(this->rects.size()));
++    std::vector<OsdRectType> ::const_iterator _iter11;
++    for (_iter11 = this->rects.begin(); _iter11 != this->rects.end(); ++_iter11)
++    {
++      xfer += (*_iter11).write(oprot);
++    }
++    xfer += oprot->writeListEnd();
++  }
++  xfer += oprot->writeFieldEnd();
++
++  xfer += oprot->writeFieldStop();
++  xfer += oprot->writeStructEnd();
++  return xfer;
++}
++
++void swap(ProcessOsdFrameType &a, ProcessOsdFrameType &b) noexcept {
++  using ::std::swap;
++  swap(a.render_width, b.render_width);
++  swap(a.render_height, b.render_height);
++  swap(a.qoi, b.qoi);
++  swap(a.rects, b.rects);
++  swap(a.__isset, b.__isset);
++}
++
++bool ProcessOsdFrameType::operator==(const ProcessOsdFrameType & rhs) const
++{
++  if (!(render_width == rhs.render_width))
++    return false;
++  if (!(render_height == rhs.render_height))
++    return false;
++  if (!(qoi == rhs.qoi))
++    return false;
++  if (!(rects == rhs.rects))
++    return false;
++  return true;
++}
++
++ProcessOsdFrameType::ProcessOsdFrameType(const ProcessOsdFrameType& other12) {
++  render_width = other12.render_width;
++  render_height = other12.render_height;
++  qoi = other12.qoi;
++  rects = other12.rects;
++  __isset = other12.__isset;
++}
++ProcessOsdFrameType& ProcessOsdFrameType::operator=(const ProcessOsdFrameType& other13) {
++  render_width = other13.render_width;
++  render_height = other13.render_height;
++  qoi = other13.qoi;
++  rects = other13.rects;
++  __isset = other13.__isset;
++  return *this;
++}
++void ProcessOsdFrameType::printTo(std::ostream& out) const {
++  using ::apache::thrift::to_string;
++  out << "ProcessOsdFrameType(";
++  out << "render_width=" << to_string(render_width);
++  out << ", " << "render_height=" << to_string(render_height);
++  out << ", " << "qoi=" << to_string(qoi);
++  out << ", " << "rects=" << to_string(rects);
++  out << ")";
++}
++
++
+ ProcessTSPacketType::~ProcessTSPacketType() noexcept {
+ }
+ 
+@@ -533,13 +917,13 @@ bool ProcessTSPacketType::operator==(const ProcessTSPacketType & rhs) const
+   return true;
+ }
+ 
+-ProcessTSPacketType::ProcessTSPacketType(const ProcessTSPacketType& other4) {
+-  ts = other4.ts;
+-  __isset = other4.__isset;
++ProcessTSPacketType::ProcessTSPacketType(const ProcessTSPacketType& other14) {
++  ts = other14.ts;
++  __isset = other14.__isset;
+ }
+-ProcessTSPacketType& ProcessTSPacketType::operator=(const ProcessTSPacketType& other5) {
+-  ts = other5.ts;
+-  __isset = other5.__isset;
++ProcessTSPacketType& ProcessTSPacketType::operator=(const ProcessTSPacketType& other15) {
++  ts = other15.ts;
++  __isset = other15.__isset;
+   return *this;
+ }
+ void ProcessTSPacketType::printTo(std::ostream& out) const {
+@@ -635,13 +1019,13 @@ bool StartVideoType::operator==(const StartVideoType & rhs) const
+   return true;
+ }
+ 
+-StartVideoType::StartVideoType(const StartVideoType& other6) {
+-  videoInfo = other6.videoInfo;
+-  __isset = other6.__isset;
++StartVideoType::StartVideoType(const StartVideoType& other16) {
++  videoInfo = other16.videoInfo;
++  __isset = other16.__isset;
+ }
+-StartVideoType& StartVideoType::operator=(const StartVideoType& other7) {
+-  videoInfo = other7.videoInfo;
+-  __isset = other7.__isset;
++StartVideoType& StartVideoType::operator=(const StartVideoType& other17) {
++  videoInfo = other17.videoInfo;
++  __isset = other17.__isset;
+   return *this;
+ }
+ void StartVideoType::printTo(std::ostream& out) const {
+@@ -797,19 +1181,19 @@ bool VideoSizeType::operator==(const VideoSizeType & rhs) const
+   return true;
+ }
+ 
+-VideoSizeType::VideoSizeType(const VideoSizeType& other8) noexcept {
+-  x = other8.x;
+-  y = other8.y;
+-  w = other8.w;
+-  h = other8.h;
+-  __isset = other8.__isset;
++VideoSizeType::VideoSizeType(const VideoSizeType& other18) noexcept {
++  x = other18.x;
++  y = other18.y;
++  w = other18.w;
++  h = other18.h;
++  __isset = other18.__isset;
+ }
+-VideoSizeType& VideoSizeType::operator=(const VideoSizeType& other9) noexcept {
+-  x = other9.x;
+-  y = other9.y;
+-  w = other9.w;
+-  h = other9.h;
+-  __isset = other9.__isset;
++VideoSizeType& VideoSizeType::operator=(const VideoSizeType& other19) noexcept {
++  x = other19.x;
++  y = other19.y;
++  w = other19.w;
++  h = other19.h;
++  __isset = other19.__isset;
+   return *this;
+ }
+ void VideoSizeType::printTo(std::ostream& out) const {
+@@ -908,13 +1292,13 @@ bool ResetVideoType::operator==(const ResetVideoType & rhs) const
+   return true;
+ }
+ 
+-ResetVideoType::ResetVideoType(const ResetVideoType& other10) {
+-  videoInfo = other10.videoInfo;
+-  __isset = other10.__isset;
++ResetVideoType::ResetVideoType(const ResetVideoType& other20) {
++  videoInfo = other20.videoInfo;
++  __isset = other20.__isset;
+ }
+-ResetVideoType& ResetVideoType::operator=(const ResetVideoType& other11) {
+-  videoInfo = other11.videoInfo;
+-  __isset = other11.__isset;
++ResetVideoType& ResetVideoType::operator=(const ResetVideoType& other21) {
++  videoInfo = other21.videoInfo;
++  __isset = other21.__isset;
+   return *this;
+ }
+ void ResetVideoType::printTo(std::ostream& out) const {
+@@ -1010,13 +1394,13 @@ bool SelectAudioTrackType::operator==(const SelectAudioTrackType & rhs) const
+   return true;
+ }
+ 
+-SelectAudioTrackType::SelectAudioTrackType(const SelectAudioTrackType& other12) {
+-  audioTrack = other12.audioTrack;
+-  __isset = other12.__isset;
++SelectAudioTrackType::SelectAudioTrackType(const SelectAudioTrackType& other22) {
++  audioTrack = other22.audioTrack;
++  __isset = other22.__isset;
+ }
+-SelectAudioTrackType& SelectAudioTrackType::operator=(const SelectAudioTrackType& other13) {
+-  audioTrack = other13.audioTrack;
+-  __isset = other13.__isset;
++SelectAudioTrackType& SelectAudioTrackType::operator=(const SelectAudioTrackType& other23) {
++  audioTrack = other23.audioTrack;
++  __isset = other23.__isset;
+   return *this;
+ }
+ void SelectAudioTrackType::printTo(std::ostream& out) const {
+@@ -1112,13 +1496,13 @@ bool SelectSubtitleTrackType::operator==(const SelectSubtitleTrackType & rhs) co
+   return true;
+ }
+ 
+-SelectSubtitleTrackType::SelectSubtitleTrackType(const SelectSubtitleTrackType& other14) {
+-  subtitleTrack = other14.subtitleTrack;
+-  __isset = other14.__isset;
++SelectSubtitleTrackType::SelectSubtitleTrackType(const SelectSubtitleTrackType& other24) {
++  subtitleTrack = other24.subtitleTrack;
++  __isset = other24.__isset;
+ }
+-SelectSubtitleTrackType& SelectSubtitleTrackType::operator=(const SelectSubtitleTrackType& other15) {
+-  subtitleTrack = other15.subtitleTrack;
+-  __isset = other15.__isset;
++SelectSubtitleTrackType& SelectSubtitleTrackType::operator=(const SelectSubtitleTrackType& other25) {
++  subtitleTrack = other25.subtitleTrack;
++  __isset = other25.__isset;
+   return *this;
+ }
+ void SelectSubtitleTrackType::printTo(std::ostream& out) const {
+@@ -1234,15 +1618,15 @@ bool StreamEventFilterType::operator==(const StreamEventFilterType & rhs) const
+   return true;
+ }
+ 
+-StreamEventFilterType::StreamEventFilterType(const StreamEventFilterType& other16) noexcept {
+-  componentTag = other16.componentTag;
+-  enable = other16.enable;
+-  __isset = other16.__isset;
++StreamEventFilterType::StreamEventFilterType(const StreamEventFilterType& other26) noexcept {
++  componentTag = other26.componentTag;
++  enable = other26.enable;
++  __isset = other26.__isset;
+ }
+-StreamEventFilterType& StreamEventFilterType::operator=(const StreamEventFilterType& other17) noexcept {
+-  componentTag = other17.componentTag;
+-  enable = other17.enable;
+-  __isset = other17.__isset;
++StreamEventFilterType& StreamEventFilterType::operator=(const StreamEventFilterType& other27) noexcept {
++  componentTag = other27.componentTag;
++  enable = other27.enable;
++  __isset = other27.__isset;
+   return *this;
+ }
+ void StreamEventFilterType::printTo(std::ostream& out) const {
+diff --git a/thrift-services/src-gen/pluginweb_types.h b/thrift-services/src-gen/pluginweb_types.h
+index a7b7f23..afa8f62 100644
+--- a/thrift-services/src-gen/pluginweb_types.h
++++ b/thrift-services/src-gen/pluginweb_types.h
+@@ -26,6 +26,10 @@ class ProcessOsdUpdateType;
+ 
+ class ProcessOsdUpdateQOIType;
+ 
++class OsdRectType;
++
++class ProcessOsdFrameType;
++
+ class ProcessTSPacketType;
+ 
+ class StartVideoType;
+@@ -152,6 +156,106 @@ void swap(ProcessOsdUpdateQOIType &a, ProcessOsdUpdateQOIType &b) noexcept;
+ 
+ std::ostream& operator<<(std::ostream& out, const ProcessOsdUpdateQOIType& obj);
+ 
++typedef struct _OsdRectType__isset {
++  _OsdRectType__isset() : x(false), y(false), width(false), height(false), data(false) {}
++  bool x :1;
++  bool y :1;
++  bool width :1;
++  bool height :1;
++  bool data :1;
++} _OsdRectType__isset;
++
++class OsdRectType : public virtual ::apache::thrift::TBase {
++ public:
++
++  OsdRectType(const OsdRectType&);
++  OsdRectType& operator=(const OsdRectType&);
++  OsdRectType() noexcept;
++
++  virtual ~OsdRectType() noexcept;
++  int32_t x;
++  int32_t y;
++  int32_t width;
++  int32_t height;
++  std::string data;
++
++  _OsdRectType__isset __isset;
++
++  void __set_x(const int32_t val);
++
++  void __set_y(const int32_t val);
++
++  void __set_width(const int32_t val);
++
++  void __set_height(const int32_t val);
++
++  void __set_data(const std::string& val);
++
++  bool operator == (const OsdRectType & rhs) const;
++  bool operator != (const OsdRectType &rhs) const {
++    return !(*this == rhs);
++  }
++
++  bool operator < (const OsdRectType & ) const;
++
++  uint32_t read(::apache::thrift::protocol::TProtocol* iprot) override;
++  uint32_t write(::apache::thrift::protocol::TProtocol* oprot) const override;
++
++  virtual void printTo(std::ostream& out) const;
++};
++
++void swap(OsdRectType &a, OsdRectType &b) noexcept;
++
++std::ostream& operator<<(std::ostream& out, const OsdRectType& obj);
++
++typedef struct _ProcessOsdFrameType__isset {
++  _ProcessOsdFrameType__isset() : render_width(false), render_height(false), qoi(false), rects(false) {}
++  bool render_width :1;
++  bool render_height :1;
++  bool qoi :1;
++  bool rects :1;
++} _ProcessOsdFrameType__isset;
++
++class ProcessOsdFrameType : public virtual ::apache::thrift::TBase {
++ public:
++
++  ProcessOsdFrameType(const ProcessOsdFrameType&);
++  ProcessOsdFrameType& operator=(const ProcessOsdFrameType&);
++  ProcessOsdFrameType() noexcept;
++
++  virtual ~ProcessOsdFrameType() noexcept;
++  int32_t render_width;
++  int32_t render_height;
++  bool qoi;
++  std::vector<OsdRectType>  rects;
++
++  _ProcessOsdFrameType__isset __isset;
++
++  void __set_render_width(const int32_t val);
++
++  void __set_render_height(const int32_t val);
++
++  void __set_qoi(const bool val);
++
++  void __set_rects(const std::vector<OsdRectType> & val);
++
++  bool operator == (const ProcessOsdFrameType & rhs) const;
++  bool operator != (const ProcessOsdFrameType &rhs) const {
++    return !(*this == rhs);
++  }
++
++  bool operator < (const ProcessOsdFrameType & ) const;
++
++  uint32_t read(::apache::thrift::protocol::TProtocol* iprot) override;
++  uint32_t write(::apache::thrift::protocol::TProtocol* oprot) const override;
++
++  virtual void printTo(std::ostream& out) const;
++};
++
++void swap(ProcessOsdFrameType &a, ProcessOsdFrameType &b) noexcept;
++
++std::ostream& operator<<(std::ostream& out, const ProcessOsdFrameType& obj);
++
+ typedef struct _ProcessTSPacketType__isset {
+   _ProcessTSPacketType__isset() : ts(false) {}
+   bool ts :1;
+diff --git a/web.cpp b/web.cpp
+index a3e5f0f..1ec4bec 100644
+--- a/web.cpp
++++ b/web.cpp
+@@ -417,6 +417,11 @@ bool VdrPluginWebServer::StreamEventFilter(const StreamEventFilterType &input) {
+     return StreamEventsRequest(input.componentTag, input.enable);
+ }
+ 
++bool VdrPluginWebServer::ProcessOsdFrame(const ProcessOsdFrameType &input) {
++    // not supported yet
++    throw createException(400, "ProcessOsdFrame not supported");
++}
++
+ VdrPluginWebIf *VdrPluginWebCloneFactory::getHandler(const TConnectionInfo &connInfo) {
+     std::shared_ptr<TSocket> sock = std::dynamic_pointer_cast<TSocket>(connInfo.transport);
+ 
+diff --git a/web.h b/web.h
+index 86a2169..daa5ac4 100644
+--- a/web.h
++++ b/web.h
+@@ -108,6 +108,7 @@ public:
+     bool SelectSubtitleTrack(const SelectSubtitleTrackType& input) override;
+     bool EndOfStream() override;
+     bool StreamEventFilter(const StreamEventFilterType& input) override;
++    bool ProcessOsdFrame(const ProcessOsdFrameType& input) override;
+ };
+ 
+ class VdrPluginWebCloneFactory : virtual public VdrPluginWebIfFactory {
+-- 
+2.43.0
+

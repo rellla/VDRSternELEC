@@ -1,0 +1,91 @@
+From a6722a2d72377d704d32059e166dd9b7319992a9 Mon Sep 17 00:00:00 2001
+From: Andreas Baierl <ichgeh@imkreisrum.de>
+Date: Sun, 1 Nov 2026 13:22:32 +0100
+Subject: [PATCH 29/34] Keep a MSE stream during a pause
+
+The transcoder continues a MSE stream after the pause instead of
+restarting it. Don't drop and clear the data in this case.
+
+Co-Authored-By: Claude Opus 5.5
+---
+ videocontrol.cpp | 6 ++++--
+ videocontrol.h   | 4 ++++
+ web.cpp          | 2 ++
+ 3 files changed, 10 insertions(+), 2 deletions(-)
+
+diff --git a/videocontrol.cpp b/videocontrol.cpp
+index d359b80..e996d58 100644
+--- a/videocontrol.cpp
++++ b/videocontrol.cpp
+@@ -13,6 +13,7 @@ static uchar buf[188], bufsize;
+ VideoPlayer::VideoPlayer() {
+     dsyslog("[vdrweb] Create Player...");
+     pause = false;
++    mse = false;
+     bufsize = 0;
+     tsPlayed = false;
+     ResetStatus();
+@@ -46,7 +47,8 @@ void VideoPlayer::Pause() {
+ void VideoPlayer::Resume() {
+     // Only after a pause a new stream follows. Otherwise (e.g. unfreeze while
+     // playing) clearing the device would throw away the running stream.
+-    if (pause) {
++    // A MSE stream continues after the pause.
++    if (pause && !mse) {
+         ResetVideo();
+         bufsize = 0;
+     }
+@@ -171,7 +173,7 @@ void VideoPlayer::PlayPacket(uint8_t *buffer, int len) {
+     tsError = false;
+ 
+     // if player is paused, discard all incoming packets
+-    if (pause) {
++    if (pause && !mse) {
+         // drop all packets if video is paused
+         return;
+     }
+diff --git a/videocontrol.h b/videocontrol.h
+index b6c4eeb..51470d5 100644
+--- a/videocontrol.h
++++ b/videocontrol.h
+@@ -12,6 +12,9 @@ public:
+     void Pause();
+     void Resume();
+ 
++    // MSE: the transcoder doesn't restart the stream after a pause, keep the data
++    void SetMse(bool on) { mse = on; }
++
+     void PlayPacket(uint8_t *buffer, int len);
+     static void SetVideoSize(int x, int y, int width, int height);
+     static void setVideoFullscreen();
+@@ -42,6 +45,7 @@ private:
+ 
+ private:
+     bool pause;
++    bool mse;
+     bool tsError;
+     bool tsPlayed;
+ 
+diff --git a/web.cpp b/web.cpp
+index 05c6390..1ab538b 100644
+--- a/web.cpp
++++ b/web.cpp
+@@ -256,6 +256,7 @@ bool VdrPluginWebServer::StartVideo(const StartVideoType &input) {
+     page->Display();
+ 
+     videoPlayer = new VideoPlayer();
++    videoPlayer->SetMse(input.mse);
+     page->SetPlayer(videoPlayer);
+ 
+     cControl::Launch(page);
+@@ -372,6 +373,7 @@ bool VdrPluginWebServer::ResetVideo(const ResetVideoType &input) {
+             videoPlayer->ResetVideo();
+         }
+ 
++        videoPlayer->SetMse(input.mse);
+         VideoPlayer::SetVideoSize(lastVideoX, lastVideoY, lastVideoWidth, lastVideoHeight);
+     } else {
+         // TODO: Is it necessary to create a new Player?
+-- 
+2.43.0
+

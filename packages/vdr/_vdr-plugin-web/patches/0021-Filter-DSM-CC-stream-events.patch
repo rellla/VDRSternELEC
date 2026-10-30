@@ -1,0 +1,437 @@
+From 02319d46f13b435abf56ea71f190c070408f89fa Mon Sep 17 00:00:00 2001
+From: Andreas Baierl <ichgeh@imkreisrum.de>
+Date: Fri, 30 Oct 2026 13:17:39 +0100
+Subject: [PATCH 21/34] Filter DSM-CC stream events
+
+HbbTV applications use stream events (do-it-now) for actions synced
+to the programme. Collect the component tags of the PMT, filter the
+DSM-CC stream descriptor sections of the requested components and
+send the stream events to the browser.
+
+Co-Authored-By: Claude Opus 5.5
+---
+ Makefile        |   2 +-
+ ait.cpp         |   8 ++
+ status.cpp      |   5 +
+ streamevent.cpp | 278 ++++++++++++++++++++++++++++++++++++++++++++++++
+ streamevent.h   |  21 ++++
+ web.cpp         |   7 +-
+ 6 files changed, 318 insertions(+), 3 deletions(-)
+ create mode 100644 streamevent.cpp
+ create mode 100644 streamevent.h
+
+diff --git a/Makefile b/Makefile
+index 4f88976..05c1c19 100644
+--- a/Makefile
++++ b/Makefile
+@@ -97,7 +97,7 @@ DEFINES += -DPLUGIN_NAME_I18N='"$(PLUGIN)"' $(CONFIG)
+ 
+ ### The object files (add further files here):
+ 
+-OBJS = $(PLUGIN).o webosdpage.o status.o ait.o videocontrol.o backtrace.o \
++OBJS = $(PLUGIN).o webosdpage.o status.o ait.o videocontrol.o backtrace.o streamevent.o \
+ 	   thrift-services/src-gen/CommonService.o thrift-services/src-gen/common_types.o \
+ 	   thrift-services/src-gen/VdrPluginWeb.o thrift-services/src-gen/pluginweb_types.o \
+ 	   thrift-services/src-gen/CefBrowser.o thrift-services/src-gen/cefbrowser_types.o \
+diff --git a/ait.cpp b/ait.cpp
+index 24a06ab..2cd5345 100644
+--- a/ait.cpp
++++ b/ait.cpp
+@@ -15,6 +15,7 @@
+ #include "status.h"
+ #include "web.h"
+ #include "jsonescape.h"
++#include "streamevent.h"
+ 
+ #define PMT_SCAN_IDLE     5 // 60 //300    // seconds
+ 
+@@ -241,6 +242,13 @@ void cAitFilter::Process(u_short Pid, u_char Tid, const u_char *Data, int Length
+             // Scan the stream-specific loop:
+             SI::PMT::Stream stream;
+             for (SI::Loop::Iterator it; pmt.streamLoop.getNext(stream, it);) {
++                // component tags for the stream events
++                SI::Descriptor *sd;
++                for (SI::Loop::Iterator its; (sd = stream.streamDescriptors.getNext(its, SI::StreamIdentifierDescriptorTag));) {
++                    StreamEventsComponent(((SI::StreamIdentifierDescriptor *) sd)->getComponentTag(), stream.getPid());
++                    delete sd;
++                }
++
+                 if (stream.getStreamType() == 0x05) {
+                     SI::Descriptor *d;
+                     for (SI::Loop::Iterator it2; (d = stream.streamDescriptors.getNext(it2,
+diff --git a/status.cpp b/status.cpp
+index 4666ccc..4a80b9e 100644
+--- a/status.cpp
++++ b/status.cpp
+@@ -16,6 +16,7 @@
+ #include "BrowserClient.h"
+ #include "webosdpage.h"
+ #include "jsonescape.h"
++#include "streamevent.h"
+ 
+ const char *channelJson = R"(
+     {
+@@ -179,6 +180,9 @@ void cHbbtvDeviceStatus::ChannelSwitch(const cDevice * vdrDevice, int channelNum
+    // otherwise ChannelNumber is the number of the channel that has been switched to.
+    // LiveView tells whether this channel switch is for live viewing.
+    if (LiveView) {
++      // stream events belong to the channel
++      StreamEventsChannelSwitch(nullptr);
++
+       if (device) {
+          isyslog("[vdrweb] Detaching HbbTV ait filter from device %d", device->CardIndex()+1);
+          device->Detach(aitFilter);
+@@ -209,6 +213,7 @@ void cHbbtvDeviceStatus::ChannelSwitch(const cDevice * vdrDevice, int channelNum
+          free((void *) buffer);
+ 
+          device->AttachFilter(aitFilter = new cAitFilter(sid));
++         StreamEventsChannelSwitch(device);
+          isyslog("[vdrweb] Attached HbbTV ait filter to device %d, vdrDev=%d actDev=%d, Sid=0x%04x", device->CardIndex()+1, vdrDevice->CardIndex()+1,cDevice::ActualDevice()->CardIndex()+1, sid);
+       }
+    }
+diff --git a/streamevent.cpp b/streamevent.cpp
+new file mode 100644
+index 0000000..bd6213d
+--- /dev/null
++++ b/streamevent.cpp
+@@ -0,0 +1,278 @@
++/*
++ * streamevent.cpp: DSM-CC stream events (do-it-now) for HbbTV applications
++ *
++ * HbbTV applications register for stream events (video/broadcast addStreamEventListener).
++ * The browser resolves the event names (stream event description file) and requests the
++ * events of a component tag. The PID of the component comes from the PMT, the events are
++ * stream event descriptors in DSM-CC sections (table id 0x3D) on this PID.
++ *
++ * See the README file for copyright information and how to reach the author.
++ */
++
++#include <map>
++#include <set>
++#include <deque>
++#include <string>
++#include <vdr/filter.h>
++#include <vdr/thread.h>
++#include <libsi/util.h>
++#include "streamevent.h"
++#include "web.h"
++
++#define TID_DSMCC_STREAM_DESCRIPTORS  0x3D
++#define TAG_STREAM_EVENT_DESCRIPTOR   0x1A
++
++struct tStreamEvent {
++    int componentTag;
++    int eventId;
++    std::string privateData;
++};
++
++// --- sender: the thrift call must not block the section handler -----------------
++
++class cStreamEventSender : public cThread {
++private:
++    cMutex mutex;
++    cCondVar condition;
++    std::deque<tStreamEvent> queue;
++
++protected:
++    void Action() override {
++        while (Running()) {
++            tStreamEvent event;
++            {
++                cMutexLock lock(&mutex);
++                if (queue.empty()) {
++                    condition.TimedWait(mutex, 1000);
++                    continue;
++                }
++                event = queue.front();
++                queue.pop_front();
++            }
++
++            if (browserClient != nullptr) {
++                browserClient->StreamEvent(event.componentTag, event.eventId, event.privateData, "trigger");
++            }
++        }
++    }
++
++public:
++    cStreamEventSender() : cThread("vdrweb stream events") {}
++
++    void Send(const tStreamEvent &event) {
++        cMutexLock lock(&mutex);
++        if (queue.size() < 100) {
++            queue.push_back(event);
++        }
++        condition.Broadcast();
++    }
++
++    void Stop() {
++        Cancel(-1);
++        condition.Broadcast();
++        Cancel(3);
++    }
++};
++
++static cStreamEventSender *sender = nullptr;
++
++// --- filter -------------------------------------------------------------------------
++
++class cStreamEventFilter : public cFilter {
++private:
++    cMutex mutex;
++    std::map<int, int> componentPids;   // component tag -> PID
++    std::set<int> wantedTags;           // requested by the browser
++    std::map<int, int> activePids;      // filtered PID -> component tag
++    std::map<int, int> versions;        // PID << 16 | table id extension -> version
++    bool changed = false;
++
++    void Apply();
++    void Parse(int pid, int componentTag, const u_char *Data, int Length);
++
++protected:
++    void Process(u_short Pid, u_char Tid, const u_char *Data, int Length) override;
++
++public:
++    cStreamEventFilter() {
++        // the PAT arrives regularly, the requested changes are applied in Process()
++        Set(0x00, SI::TableIdPAT);
++    }
++
++    void SetComponentPid(int componentTag, int pid) {
++        cMutexLock lock(&mutex);
++        if (componentPids[componentTag] != pid) {
++            componentPids[componentTag] = pid;
++            changed = true;
++        }
++    }
++
++    bool Request(int componentTag, bool enable) {
++        cMutexLock lock(&mutex);
++        if (enable) {
++            wantedTags.insert(componentTag);
++        } else {
++            wantedTags.erase(componentTag);
++        }
++        changed = true;
++        // the PID may become known later (PMT)
++        return true;
++    }
++};
++
++// Add() and Del() are called in the thread of the section handler only
++void cStreamEventFilter::Apply() {
++    std::map<int, int> wanted;
++    for (int tag : wantedTags) {
++        auto it = componentPids.find(tag);
++        if (it != componentPids.end()) {
++            wanted[it->second] = tag;
++        }
++    }
++
++    for (auto it = activePids.begin(); it != activePids.end();) {
++        if (wanted.count(it->first) == 0) {
++            Del(it->first, TID_DSMCC_STREAM_DESCRIPTORS);
++            it = activePids.erase(it);
++        } else {
++            ++it;
++        }
++    }
++
++    for (const auto &w : wanted) {
++        if (activePids.count(w.first) == 0) {
++            dsyslog("[vdrweb] stream events: filter component tag %d, pid %d", w.second, w.first);
++            Add(w.first, TID_DSMCC_STREAM_DESCRIPTORS);
++            // report the current events of a newly requested component again
++            for (auto v = versions.begin(); v != versions.end();) {
++                v = ((v->first >> 16) == w.first) ? versions.erase(v) : std::next(v);
++            }
++        }
++        activePids[w.first] = w.second;
++    }
++}
++
++void cStreamEventFilter::Process(u_short Pid, u_char Tid, const u_char *Data, int Length) {
++    cMutexLock lock(&mutex);
++
++    if (changed) {
++        changed = false;
++        Apply();
++    }
++
++    if (Tid != TID_DSMCC_STREAM_DESCRIPTORS) {
++        return;
++    }
++
++    auto active = activePids.find(Pid);
++    if (active != activePids.end()) {
++        Parse(Pid, active->second, Data, Length);
++    }
++}
++
++void cStreamEventFilter::Parse(int pid, int componentTag, const u_char *Data, int Length) {
++    if (Length < 12) {
++        return;
++    }
++
++    int sectionLength = ((Data[1] & 0x0F) << 8) | Data[2];
++    bool syntaxIndicator = (Data[1] & 0x80) != 0;
++    if (sectionLength + 3 > Length) {
++        return;
++    }
++
++    if (syntaxIndicator && !SI::CRC32::isValid((const char *) Data, sectionLength + 3)) {
++        return;
++    }
++
++    int tableIdExtension = (Data[3] << 8) | Data[4];
++    int version = (Data[5] >> 1) & 0x1F;
++
++    // the sections are repeated, an event is triggered once per version
++    int key = (pid << 16) | tableIdExtension;
++
++    auto v = versions.find(key);
++    if (v != versions.end() && v->second == version) {
++        return;
++    }
++    versions[key] = version;
++
++    // descriptors between the header (8 bytes) and the CRC (4 bytes)
++    const u_char *p = Data + 8;
++    const u_char *end = Data + 3 + sectionLength - 4;
++
++    while (p + 2 <= end) {
++        int tag = p[0];
++        int length = p[1];
++        if (p + 2 + length > end) {
++            break;
++        }
++
++        if (tag == TAG_STREAM_EVENT_DESCRIPTOR && length >= 10) {
++            tStreamEvent event;
++            event.componentTag = componentTag;
++            event.eventId = (p[2] << 8) | p[3];
++            // p[4..11]: reserved and event NPT, HbbTV uses do-it-now events only
++            event.privateData.assign((const char *) p + 12, length - 10);
++
++            dsyslog("[vdrweb] stream event: component tag %d, event id %d, %d bytes", componentTag, event.eventId, length - 10);
++
++            if (sender != nullptr) {
++                sender->Send(event);
++            }
++        }
++
++        p += 2 + length;
++    }
++}
++
++// --- interface -------------------------------------------------------------------------
++
++static cMutex filterMutex;
++static cStreamEventFilter *filter = nullptr;
++static cDevice *filterDevice = nullptr;
++
++void StreamEventsChannelSwitch(cDevice *device) {
++    cMutexLock lock(&filterMutex);
++
++    if (sender == nullptr) {
++        sender = new cStreamEventSender();
++        sender->Start();
++    }
++
++    if (filter != nullptr && filterDevice != nullptr) {
++        filterDevice->Detach(filter);
++    }
++    delete filter;
++    filter = nullptr;
++    filterDevice = nullptr;
++
++    if (device != nullptr) {
++        filter = new cStreamEventFilter();
++        filterDevice = device;
++        device->AttachFilter(filter);
++    }
++}
++
++void StreamEventsComponent(int componentTag, int pid) {
++    cMutexLock lock(&filterMutex);
++    if (filter != nullptr) {
++        filter->SetComponentPid(componentTag, pid);
++    }
++}
++
++bool StreamEventsRequest(int componentTag, bool enable) {
++    cMutexLock lock(&filterMutex);
++    return filter != nullptr && filter->Request(componentTag, enable);
++}
++
++void StreamEventsShutdown() {
++    StreamEventsChannelSwitch(nullptr);
++
++    cMutexLock lock(&filterMutex);
++    if (sender != nullptr) {
++        sender->Stop();
++        delete sender;
++        sender = nullptr;
++    }
++}
+diff --git a/streamevent.h b/streamevent.h
+new file mode 100644
+index 0000000..35b704c
+--- /dev/null
++++ b/streamevent.h
+@@ -0,0 +1,21 @@
++/*
++ * streamevent.h: DSM-CC stream events (do-it-now) for HbbTV applications
++ *
++ * See the README file for copyright information and how to reach the author.
++ */
++
++#pragma once
++
++#include <vdr/device.h>
++
++// a new live channel, device is null before the switch
++void StreamEventsChannelSwitch(cDevice *device);
++
++// component tag and PID of an elementary stream of the current service (from the PMT)
++void StreamEventsComponent(int componentTag, int pid);
++
++// the browser wants (or doesn't want anymore) the stream events of a component
++bool StreamEventsRequest(int componentTag, bool enable);
++
++// stop the sender thread
++void StreamEventsShutdown();
+diff --git a/web.cpp b/web.cpp
+index 05f705b..5e94d0b 100644
+--- a/web.cpp
++++ b/web.cpp
+@@ -23,6 +23,7 @@
+ #include "videocontrol.h"
+ #include "dummyosd.h"
+ #include "debuglog.h"
++#include "streamevent.h"
+ 
+ #define TSDIR  "%s/web/%s/%4d-%02d-%02d.%02d.%02d.%d-%d.rec"
+ 
+@@ -411,8 +412,8 @@ bool VdrPluginWebServer::EndOfStream() {
+ }
+ 
+ bool VdrPluginWebServer::StreamEventFilter(const StreamEventFilterType &input) {
+-    // not supported yet
+-    return false;
++    dsyslog("[vdrweb] StreamEventFilter: component tag %d, %s", input.componentTag, input.enable ? "on" : "off");
++    return StreamEventsRequest(input.componentTag, input.enable);
+ }
+ 
+ VdrPluginWebIf *VdrPluginWebCloneFactory::getHandler(const TConnectionInfo &connInfo) {
+@@ -605,6 +606,8 @@ void cPluginWeb::Stop() {
+ 
+     regularWorker->Stop();
+ 
++    StreamEventsShutdown();
++
+     if (hbbtvDeviceStatus != nullptr) {
+         delete hbbtvDeviceStatus;
+     }
+-- 
+2.43.0
+

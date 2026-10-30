@@ -1,0 +1,147 @@
+From f78a42013c37058d1d089b2e1f3e18648d5821ff Mon Sep 17 00:00:00 2001
+From: Andreas Baierl <ichgeh@imkreisrum.de>
+Date: Sun, 1 Nov 2026 08:59:09 +0100
+Subject: [PATCH 24/34] Draw all regions of an OSD frame with one flush
+
+Every region was flushed on its own, the device composed the OSD
+several times per frame and could show half drawn frames. Draw all
+regions of a frame and flush once.
+
+Co-Authored-By: Claude Opus 5.5
+---
+ web.cpp        | 14 ++++++++++++--
+ webosdpage.cpp | 40 +++++++++++++++++++++++++++++++++++++---
+ webosdpage.h   |  6 +++++-
+ 3 files changed, 54 insertions(+), 6 deletions(-)
+
+diff --git a/web.cpp b/web.cpp
+index 1ec4bec..fc58ad4 100644
+--- a/web.cpp
++++ b/web.cpp
+@@ -418,8 +418,18 @@ bool VdrPluginWebServer::StreamEventFilter(const StreamEventFilterType &input) {
+ }
+ 
+ bool VdrPluginWebServer::ProcessOsdFrame(const ProcessOsdFrameType &input) {
+-    // not supported yet
+-    throw createException(400, "ProcessOsdFrame not supported");
++    WebOSDPage* page = WebOSDPage::Get();
++    if (page == nullptr) {
++        // illegal request -> abort
++        esyslog("[vdrweb] ProcessOsdFrame: osd update request while webOsdPage is null.");
++        throw createException(400, "webOsdPage is null");
++    }
++
++    if (!page->drawFrame(input)) {
++        throw createException(400, "ProcessOsdFrame failed");
++    }
++
++    return true;
+ }
+ 
+ VdrPluginWebIf *VdrPluginWebCloneFactory::getHandler(const TConnectionInfo &connInfo) {
+diff --git a/webosdpage.cpp b/webosdpage.cpp
+index e95641f..9224828 100644
+--- a/webosdpage.cpp
++++ b/webosdpage.cpp
+@@ -242,6 +242,40 @@ bool WebOSDPage::drawImage(uint8_t* image, int render_width, int render_height,
+     return scaleAndPaint(image, render_width, render_height, x, y, width, height);
+ }
+ 
++bool WebOSDPage::drawFrame(const pluginweb::ProcessOsdFrameType &frame) {
++    bool ok = true;
++
++    for (const auto &r : frame.rects) {
++        if (frame.qoi) {
++            qoi_desc desc;
++            void *image = qoi_decode(r.data.c_str(), (int) r.data.size(), &desc, 4);
++            if (image == nullptr) {
++                esyslog("[vdrweb] failed to decode qoi OSD image");
++                ok = false;
++                continue;
++            }
++
++            ok &= scaleAndPaint(static_cast<uint8_t *>(image), frame.render_width, frame.render_height, r.x, r.y, (int) desc.width, (int) desc.height, false);
++            free(image);
++        } else {
++            if ((int64_t) r.width * r.height * 4 != (int64_t) r.data.size()) {
++                ok = false;
++                continue;
++            }
++
++            ok &= scaleAndPaint((uint8_t *) r.data.c_str(), frame.render_width, frame.render_height, r.x, r.y, r.width, r.height, false);
++        }
++    }
++
++    // one flush for the whole frame
++    std::lock_guard<std::recursive_mutex> lock(pixmap_mutex);
++    if (osd != nullptr) {
++        osd->Flush();
++    }
++
++    return ok;
++}
++
+ bool WebOSDPage::drawImageQOI(const std::string qoibuffer, const int render_width, const int render_height, const int x, const int y) {
+     // decode image data
+     qoi_desc desc;
+@@ -259,7 +293,7 @@ bool WebOSDPage::drawImageQOI(const std::string qoibuffer, const int render_widt
+     return retValue;
+ }
+ 
+-bool WebOSDPage::scaleAndPaint(uint8_t* image, int render_width, int render_height, int x, int y, int width, int height) {
++bool WebOSDPage::scaleAndPaint(uint8_t* image, int render_width, int render_height, int x, int y, int width, int height, bool flush) {
+     // sanity check
+     if (width > 3840 || height > 2160 || width <= 0 || height <= 0) {
+         return false;
+@@ -283,7 +317,7 @@ bool WebOSDPage::scaleAndPaint(uint8_t* image, int render_width, int render_heig
+             esyslog("[vdrweb] Pixmap is null. OSD not available");
+         }
+ 
+-        if (osd != nullptr) {
++        if (flush && osd != nullptr) {
+             osd->Flush();
+         }
+ 
+@@ -354,7 +388,7 @@ bool WebOSDPage::scaleAndPaint(uint8_t* image, int render_width, int render_heig
+     }
+ #endif
+ 
+-    if (osd != nullptr) {
++    if (flush && osd != nullptr) {
+         osd->Flush();
+     }
+ 
+diff --git a/webosdpage.h b/webosdpage.h
+index 4bc5a53..8f51e98 100644
+--- a/webosdpage.h
++++ b/webosdpage.h
+@@ -5,6 +5,7 @@
+ #include <thread>
+ #include <vdr/osdbase.h>
+ #include <vdr/player.h>
++#include "pluginweb_types.h"
+ 
+ enum OSD_MODE {
+     OSD,
+@@ -37,7 +38,7 @@ private:
+ private:
+     explicit WebOSDPage(bool useOutputDeviceScale, OSD_MODE osdMode);
+ 
+-    bool scaleAndPaint(uint8_t* image, int render_width, int render_height, int x, int y, int width, int height);
++    bool scaleAndPaint(uint8_t* image, int render_width, int render_height, int x, int y, int width, int height, bool flush = true);
+ 
+     void DeleteVolume();
+ 
+@@ -64,6 +65,9 @@ public:
+     bool drawImage(uint8_t* image, int render_width, int render_height, int x, int y, int width, int height);
+     bool drawImageQOI(const std::string qoiBuffer, const int render_width, const int render_height, const int x, const int y);
+ 
++    // all regions of a frame, the OSD is flushed once
++    bool drawFrame(const pluginweb::ProcessOsdFrameType &frame);
++
+     void DrawVolume(int volume = 0);
+ 
+     // get current OSD mode
+-- 
+2.43.0
+

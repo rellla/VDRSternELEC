@@ -1,0 +1,34 @@
+From 1d5cb12c0b9ed5336d5272846be8e0c9a0192f17 Mon Sep 17 00:00:00 2001
+From: Andreas Baierl <ichgeh@imkreisrum.de>
+Date: Thu, 29 Oct 2026 16:37:45 +0100
+Subject: [PATCH 03/34] Fix buffer overflow in PlayPacket() for short chunks
+
+If a chunk was shorter than the missing part of a saved partial
+packet, memcpy() read beyond the input and len became negative.
+
+Co-Authored-By: Claude Opus 5.5
+---
+ videocontrol.cpp | 7 +++++++
+ 1 file changed, 7 insertions(+)
+
+diff --git a/videocontrol.cpp b/videocontrol.cpp
+index a932f7a..4cfa9ab 100644
+--- a/videocontrol.cpp
++++ b/videocontrol.cpp
+@@ -100,6 +100,13 @@ void VideoPlayer::PlayPacket(uint8_t *buffer, int len) {
+     if (len) { // at least one tspacket
+         // play saved partial packet
+         if (bufsize) {
++            if (len < 188 - bufsize) {
++                // still not a complete packet
++                memcpy(buf + bufsize, buffer, len);
++                bufsize += len;
++                return;
++            }
++
+             memcpy(buf + bufsize, buffer, 188 - bufsize);
+             if (videoPlayer != nullptr) {
+                 PlayTs(buf, 188);
+-- 
+2.43.0
+

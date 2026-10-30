@@ -1,0 +1,173 @@
+From 1ca813ca367ba376123862fb8a6abfbdfc3f6a94 Mon Sep 17 00:00:00 2001
+From: Andreas Baierl <ichgeh@imkreisrum.de>
+Date: Fri, 30 Oct 2026 13:15:43 +0100
+Subject: [PATCH 20/34] Send present and following programme with the channel
+
+Add the present and following event with its parental rating to the
+channel json, for the programmes of video/broadcast. Send the channel
+again when the present event changes.
+
+Co-Authored-By: Claude Opus 5.5
+---
+ status.cpp | 79 +++++++++++++++++++++++++++++++++++++++++++++++++++++-
+ status.h   |  5 ++++
+ web.cpp    |  4 +++
+ 3 files changed, 87 insertions(+), 1 deletion(-)
+
+diff --git a/status.cpp b/status.cpp
+index bdae2b9..4666ccc 100644
+--- a/status.cpp
++++ b/status.cpp
+@@ -87,6 +87,50 @@ static std::string channelComponentsJson(const cChannel* channel) {
+     return result;
+ }
+ 
++static std::string programmeJson(const cEvent *event) {
++    if (event == nullptr) {
++        return "";
++    }
++
++    std::string ratings = "[]";
++    if (event->ParentalRating() > 0) {
++        // dvb-si scheme: the name is the minimum age, the value the rating of the descriptor
++        ratings = *cString::sprintf("[{\"name\":\"%d\",\"scheme\":\"dvb-si\",\"value\":%d,\"region\":\"de\"}]",
++                                    event->ParentalRating(), event->ParentalRating() - 3);
++    }
++
++    return *cString::sprintf("{\"programmeID\":\"%u\",\"name\":\"%s\",\"description\":\"%s\",\"longDescription\":\"%s\","
++                             "\"startTime\":%ld,\"duration\":%d,\"parentalRatings\":%s}",
++                             event->EventID(), jsonEscape(event->Title()).c_str(), jsonEscape(event->ShortText()).c_str(),
++                             jsonEscape(event->Description()).c_str(), (long) event->StartTime(), event->Duration(), ratings.c_str());
++}
++
++// present and following programme of the channel (video/broadcast programmes)
++static std::string channelProgrammesJson(const cChannel* channel, tEventID *presentId = nullptr) {
++    std::string result = "[";
++
++    LOCK_SCHEDULES_READ
++    const cSchedule *schedule = Schedules->GetSchedule(channel);
++    if (schedule != nullptr) {
++        const cEvent *present = schedule->GetPresentEvent();
++        const cEvent *following = schedule->GetFollowingEvent();
++
++        if (presentId != nullptr) {
++            *presentId = present ? present->EventID() : 0;
++        }
++
++        std::string p = programmeJson(present);
++        std::string f = programmeJson(following);
++        result += p;
++        if (!p.empty() && !f.empty()) {
++            result += ",";
++        }
++        result += f;
++    }
++
++    return result + "]";
++}
++
+ inline const char* toChannelJson(const cChannel* channel) {
+     // longName, Name => currentChannel
+     // nid            => ??? (use 1 as default)
+@@ -114,7 +158,8 @@ inline const char* toChannelJson(const cChannel* channel) {
+     free(cmd);
+ 
+     auto end = json.find_last_of('}');
+-    json = json.substr(0, end) + ",\n        \"components\": " + channelComponentsJson(channel) + "\n    }\n";
++    json = json.substr(0, end) + ",\n        \"components\": " + channelComponentsJson(channel) +
++                                 ",\n        \"programmes\": " + channelProgrammesJson(channel) + "\n    }\n";
+ 
+     return strdup(json.c_str());
+ }
+@@ -157,6 +202,7 @@ void cHbbtvDeviceStatus::ChannelSwitch(const cDevice * vdrDevice, int channelNum
+          }
+ 
+          sid = channel->Sid();
++         lastPresentEventId = 0;
+ 
+          const char* buffer = toChannelJson(channel);
+          browserClient->InsertChannel(buffer);
+@@ -168,6 +214,37 @@ void cHbbtvDeviceStatus::ChannelSwitch(const cDevice * vdrDevice, int channelNum
+    }
+ }
+ 
++// The present programme changes, or the EPG arrives after the channel switch.
++// Send the channel again, the browser updates the running application.
++void cHbbtvDeviceStatus::CheckProgramme() {
++    if (sid < 0 || browserClient == nullptr) {
++        return;
++    }
++
++    std::string buffer;
++    {
++        LOCK_CHANNELS_READ
++        const cChannel *channel = Channels->GetByNumber(cDevice::CurrentChannel());
++        if (channel == nullptr) {
++            return;
++        }
++
++        tEventID presentId = 0;
++        channelProgrammesJson(channel, &presentId);
++
++        if (presentId == lastPresentEventId) {
++            return;
++        }
++        lastPresentEventId = presentId;
++
++        const char *json = toChannelJson(channel);
++        buffer = json;
++        free((void *) json);
++    }
++
++    browserClient->InsertChannel(buffer);
++}
++
+ void cHbbtvDeviceStatus::SetVolume(int Volume, bool Absolute) {
+     // instead using the parameter (relative volume change), use the absolute volume of the Device
+ 
+diff --git a/status.h b/status.h
+index ebc18f1..b497ca2 100644
+--- a/status.h
++++ b/status.h
+@@ -9,6 +9,7 @@
+ #pragma once
+ 
+ #include <vdr/status.h>
++#include <vdr/epg.h>
+ #include "ait.h"
+ 
+ class cHbbtvDeviceStatus : public cStatus
+@@ -18,6 +19,7 @@ private:
+    cAitFilter *aitFilter;
+    int sid;
+    int volume = 0;
++   tEventID lastPresentEventId = 0;
+ protected:
+    void ChannelSwitch(const cDevice *device, int channelNumber, bool LiveView) override;
+    virtual void SetVolume(int Volume, bool Absolute);
+@@ -26,4 +28,7 @@ public:
+    cHbbtvDeviceStatus();
+    ~cHbbtvDeviceStatus() override;
+    int Sid() const { return sid; }
++
++   // called regularly, sends the channel again if the present programme changes
++   void CheckProgramme();
+ };
+diff --git a/web.cpp b/web.cpp
+index f4695d2..05f705b 100644
+--- a/web.cpp
++++ b/web.cpp
+@@ -481,6 +481,10 @@ void cRegularWorker::Action() {
+             }
+         }
+ 
++        if (hbbtvDeviceStatus != nullptr) {
++            hbbtvDeviceStatus->CheckProgramme();
++        }
++
+         // tell the browser what is really displayed, the transparent video in the
+         // browser runs independently (position, end of video, buffering)
+         if (sendStatus && browserClient != nullptr) {
+-- 
+2.43.0
+

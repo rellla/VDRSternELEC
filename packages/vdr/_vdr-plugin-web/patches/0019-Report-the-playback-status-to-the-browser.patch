@@ -1,0 +1,226 @@
+From f36ddaa44fa22b04d49416f9c95837332c067029 Mon Sep 17 00:00:00 2001
+From: Andreas Baierl <ichgeh@imkreisrum.de>
+Date: Fri, 30 Oct 2026 13:12:08 +0100
+Subject: [PATCH 19/34] Report the playback status to the browser
+
+The transparent video in the browser runs independently of the real
+playback in VDR. Report position (STC relative to the first PTS),
+pause, buffering and the end of the video every 500ms. The end is
+detected after the transcoder signals the end of the stream and the
+decoder has shown the last picture.
+
+Co-Authored-By: Claude Opus 5.5
+---
+ videocontrol.cpp | 75 ++++++++++++++++++++++++++++++++++++++++++++++++
+ videocontrol.h   | 19 ++++++++++++
+ web.cpp          | 30 ++++++++++++++++---
+ 3 files changed, 120 insertions(+), 4 deletions(-)
+
+diff --git a/videocontrol.cpp b/videocontrol.cpp
+index 5181e0d..d359b80 100644
+--- a/videocontrol.cpp
++++ b/videocontrol.cpp
+@@ -4,6 +4,7 @@
+ #include <algorithm>
+ #include "BrowserClient.h"
+ #include "videocontrol.h"
++#include <vdr/remux.h>
+ 
+ bool isPlayerActivated;
+ 
+@@ -14,6 +15,7 @@ VideoPlayer::VideoPlayer() {
+     pause = false;
+     bufsize = 0;
+     tsPlayed = false;
++    ResetStatus();
+ }
+ 
+ VideoPlayer::~VideoPlayer() {
+@@ -58,6 +60,74 @@ void VideoPlayer::setVideoFullscreen() {
+     cDevice::PrimaryDevice()->ScaleVideo(cRect::Null);
+ }
+ 
++void VideoPlayer::ResetStatus() {
++    firstPts = -1;
++    lastPts = -1;
++    endOfStream = false;
++    lastStc = -1;
++    stcStall.Set();
++    lastData.Set();
++}
++
++void VideoPlayer::SetEndOfStream() {
++    dsyslog("[vdrweb] end of stream");
++    endOfStream = true;
++}
++
++// remember the first and the last PTS of the video stream
++void VideoPlayer::ScanPts(const uint8_t *data, int len) {
++    for (; len >= TS_SIZE; data += TS_SIZE, len -= TS_SIZE) {
++        if (data[0] != TS_SYNC_BYTE || !TsHasPayload(data) || !TsPayloadStart(data)) {
++            continue;
++        }
++
++        const uchar *payload = data;
++        int length = TsGetPayload(&payload);
++
++        // PES of a video stream (stream id 0xE0 - 0xEF)
++        if (length >= 14 && payload[0] == 0 && payload[1] == 0 && payload[2] == 1 &&
++            (payload[3] & 0xF0) == 0xE0 && PesHasPts(payload)) {
++            lastPts = PesGetPts(payload);
++            if (firstPts < 0) {
++                firstPts = lastPts;
++            }
++        }
++    }
++
++    lastData.Set();
++}
++
++void VideoPlayer::GetStatus(int64_t &position, int &state) {
++    int64_t stc = (int64_t) DeviceGetSTC();
++    bool stcValid = stc >= 0 && stc != (int64_t) -1 && firstPts >= 0;
++
++    if (stcValid && stc != lastStc) {
++        lastStc = stc;
++        stcStall.Set();
++    }
++
++    position = -1;
++    if (stcValid) {
++        int64_t diff = PtsDiff(firstPts, stc);
++        // ignore an STC which doesn't belong to this stream yet
++        if (diff >= 0 && diff < 24LL * 3600 * PTSTICKS) {
++            position = diff / (PTSTICKS / 1000);
++        }
++    }
++
++    if (pause) {
++        state = STATE_PAUSED;
++    } else if (endOfStream && (stcValid ? stcStall.Elapsed() >= 1000 : lastData.Elapsed() >= 3000)) {
++        // the decoder has shown the last picture
++        state = STATE_ENDED;
++    } else if (!endOfStream && stcValid && stcStall.Elapsed() >= 1500) {
++        // waiting for data
++        state = STATE_BUFFERING;
++    } else {
++        state = STATE_PLAYING;
++    }
++}
++
+ void VideoPlayer::ResetVideo() {
+     if (tsPlayed) {
+         dsyslog("VideoPlayer::ResetVideo");
+@@ -67,6 +137,9 @@ void VideoPlayer::ResetVideo() {
+     }
+ 
+     bufsize = 0;
++
++    // a new stream starts
++    ResetStatus();
+ }
+ 
+ void VideoPlayer::SetVideoSize(int x, int y, int width, int height) {
+@@ -140,6 +213,8 @@ void VideoPlayer::PlayPacket(uint8_t *buffer, int len) {
+ }
+ 
+ bool VideoPlayer::PlayData(uint8_t *data, int len) {
++    ScanPts(data, len);
++
+     // the device buffer may be full, wait up to 5 seconds without progress
+     int waited = 0;
+ 
+diff --git a/videocontrol.h b/videocontrol.h
+index de7413a..b6c4eeb 100644
+--- a/videocontrol.h
++++ b/videocontrol.h
+@@ -21,6 +21,15 @@ public:
+ 
+     bool hasTsError() { return tsError; };
+ 
++    // playback status for the browser
++    enum { STATE_PLAYING = 0, STATE_PAUSED = 1, STATE_BUFFERING = 2, STATE_ENDED = 3 };
++
++    // the transcoder has sent the whole stream
++    void SetEndOfStream();
++
++    // position in ms of the displayed picture since the (re)start of the stream, -1 if unknown
++    void GetStatus(int64_t &position, int &state);
++
+ protected:
+     void Activate(bool On) override;
+ 
+@@ -28,11 +37,21 @@ private:
+     static void calcVideoPosition(int x, int y, int w, int h, int *newx, int *newy, int *newwidth, int *newheight);
+ 
+     bool PlayData(uint8_t *data, int len);
++    void ScanPts(const uint8_t *data, int len);
++    void ResetStatus();
+ 
+ private:
+     bool pause;
+     bool tsError;
+     bool tsPlayed;
++
++    // status
++    int64_t firstPts;
++    int64_t lastPts;
++    bool endOfStream;
++    int64_t lastStc;
++    cTimeMs stcStall;      // time since the STC has changed
++    cTimeMs lastData;      // time since the last packets
+ };
+ 
+ extern VideoPlayer *videoPlayer;
+\ No newline at end of file
+diff --git a/web.cpp b/web.cpp
+index 92d90c3..f4695d2 100644
+--- a/web.cpp
++++ b/web.cpp
+@@ -401,7 +401,12 @@ bool VdrPluginWebServer::SelectSubtitleTrack(const SelectSubtitleTrackType &inpu
+ }
+ 
+ bool VdrPluginWebServer::EndOfStream() {
+-    // not supported yet
++    std::lock_guard<std::recursive_mutex> lock(playerMutex);
++
++    if (videoPlayer != nullptr) {
++        videoPlayer->SetEndOfStream();
++    }
++
+     return true;
+ }
+ 
+@@ -460,9 +465,26 @@ void cRegularWorker::Action() {
+     while (Running()) {
+         m_waitCondition.TimedWait(m_mutex, loopSleep);
+ 
+-        std::lock_guard<std::recursive_mutex> lock(playerMutex);
+-        if (WebOSDPage::Get() == nullptr && videoPlayer != nullptr) {
+-            releasePlayer();
++        bool sendStatus = false;
++        int64_t position = -1;
++        int state = 0;
++
++        {
++            std::lock_guard<std::recursive_mutex> lock(playerMutex);
++            if (WebOSDPage::Get() == nullptr && videoPlayer != nullptr) {
++                releasePlayer();
++            }
++
++            if (videoPlayer != nullptr) {
++                videoPlayer->GetStatus(position, state);
++                sendStatus = true;
++            }
++        }
++
++        // tell the browser what is really displayed, the transparent video in the
++        // browser runs independently (position, end of video, buffering)
++        if (sendStatus && browserClient != nullptr) {
++            browserClient->PlayerStatus(position, state);
+         }
+     }
+ }
+-- 
+2.43.0
+

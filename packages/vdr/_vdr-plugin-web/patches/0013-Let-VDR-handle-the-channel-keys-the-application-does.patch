@@ -1,0 +1,55 @@
+From 6aff02bc7f3dcf591b5ba1469593c7ccfd3fe9d3 Mon Sep 17 00:00:00 2001
+From: Andreas Baierl <ichgeh@imkreisrum.de>
+Date: Thu, 29 Oct 2026 17:04:59 +0100
+Subject: [PATCH 13/34] Let VDR handle the channel keys the application doesn't
+ use
+
+Every key went to the browser, also keys outside the keyset of the
+application, and the channel keys were swallowed. On a TV such keys
+switch the channel. Close the page and pass the key to VDR if the
+application doesn't use it. Also forward repeated keys.
+
+Co-Authored-By: Claude Opus 5.5
+---
+ webosdpage.cpp | 22 +++++++++++++++++++---
+ 1 file changed, 19 insertions(+), 3 deletions(-)
+
+diff --git a/webosdpage.cpp b/webosdpage.cpp
+index 27ce715..e95641f 100644
+--- a/webosdpage.cpp
++++ b/webosdpage.cpp
+@@ -368,12 +368,28 @@ eOSState WebOSDPage::ProcessKey(eKeys Key) {
+     if (pixmapVol && (time(NULL) - lastVolumeTime > 3))
+         DeleteVolume();
+ 
+-    auto search = ::keyMap.find(Key);
+-    if (search != ::keyMap.end()) {
+-        browserClient->ProcessKey(search->second);
++    if (Key & k_Release) {
+         return osContinue;
+     }
+ 
++    // repeated keys (e.g. scrolling with a held arrow key) are sent as normal keys
++    eKeys key = NORMALKEY(Key);
++
++    auto search = ::keyMap.find(key);
++    if (search != ::keyMap.end() && browserClient->ProcessKey(search->second)) {
++        return osContinue;
++    }
++
++    // The application doesn't use this key (not in its keyset or not mapped).
++    // Like a TV: the numeric and channel keys switch the channel. Close the page
++    // and let VDR handle the key in normal viewing mode.
++    bool isChannelKey = (key >= k0 && key <= k9) || key == kChanUp || key == kChanDn || key == kChanPrev;
++    if (isChannelKey && !(Key & k_Repeat)) {
++        dsyslog("[vdrweb] key %d not used by the application, pass it to VDR", (int)key);
++        cRemote::Put(key);
++        return osEnd;
++    }
++
+     return osContinue;
+ }
+ 
+-- 
+2.43.0
+

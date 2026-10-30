@@ -1,0 +1,32 @@
+From fd8c4dc731b90d41e249f21fab64e32b8ab3337f Mon Sep 17 00:00:00 2001
+From: Andreas Baierl <ichgeh@imkreisrum.de>
+Date: Thu, 29 Oct 2026 16:37:38 +0100
+Subject: [PATCH 02/34] Check current channel in MainMenuAction()
+
+GetByNumber() may return null, e.g. during replay.
+
+Co-Authored-By: Claude Opus 5.5
+---
+ web.cpp | 6 ++++++
+ 1 file changed, 6 insertions(+)
+
+diff --git a/web.cpp b/web.cpp
+index 3f5e566..ea4b544 100644
+--- a/web.cpp
++++ b/web.cpp
+@@ -553,6 +553,12 @@ cOsdObject *cPluginWeb::MainMenuAction() {
+     LOCK_CHANNELS_READ
+     const cChannel *currentChannel = Channels->GetByNumber(cDevice::CurrentChannel());
+ 
++    if (currentChannel == nullptr) {
++        esyslog("[vdrweb] MainMenuAction: no current channel");
++        nextOsdCommand = OPEN;
++        return nullptr;
++    }
++
+     WebOSDPage* page = WebOSDPage::Create(useOutputDeviceScale, OSD);
+ 
+     if (nextOsdCommand == OPEN) {
+-- 
+2.43.0
+

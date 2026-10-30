@@ -1,0 +1,190 @@
+From 9958f9cfc4272be59a06d3ce6aedfaf4b923c3a9 Mon Sep 17 00:00:00 2001
+From: Andreas Baierl <ichgeh@imkreisrum.de>
+Date: Sun, 1 Nov 2026 09:26:09 +0100
+Subject: [PATCH 27/34] Add a measurement of the OSD frames
+
+With -m the plugin logs the time from a key to the next OSD frame
+drawn by VDR, and every 5 seconds statistics of the OSD frames
+(regions, size, draw and flush time).
+
+Co-Authored-By: Claude Opus 5.5
+---
+ README.md      |  4 +++
+ web.cpp        | 11 ++++++--
+ webosdpage.cpp | 72 +++++++++++++++++++++++++++++++++++++++++++++++---
+ 3 files changed, 82 insertions(+), 5 deletions(-)
+
+diff --git a/README.md b/README.md
+index 1f5459e..020c366 100644
+--- a/README.md
++++ b/README.md
+@@ -49,6 +49,10 @@ Creates a dummy osd while streaming a video. It could be necessary.
+ ### -s / --savets
+ Used for debugging. The incoming TS streams will be saved in the recordings/web directory. 
+ 
++### -m / --measure
++Logs the time from a key to the OSD frame drawn by VDR and every 5 seconds statistics
++of the OSD frames (size, draw and flush time).
++
+ ### -b / --bindall
+ If set, then bind the internal HTTP server to all available network devices. Otherwise use the configured IP.
+ 
+diff --git a/web.cpp b/web.cpp
+index 946e042..05c6390 100644
+--- a/web.cpp
++++ b/web.cpp
+@@ -70,6 +70,7 @@ enum OSD_COMMAND {
+ OSD_COMMAND nextOsdCommand = OPEN;
+ bool useOutputDeviceScale = false;
+ bool useDummyOsd = false;
++bool measureOsd = false;
+ 
+ int nr = 0;
+ 
+@@ -530,7 +531,8 @@ const char *cPluginWeb::CommandLineHelp() {
+            "  -o,          --dummyosd    opens a dummy osd while playing videos\n"
+            "  -s,          --savets      Saves all incoming ts streams\n"
+            "  -b,          --bindall     bind the web server to all interfaces\n"
+-           "  -n,          --name        Menu entry name\n";
++           "  -n,          --name        Menu entry name\n"
++           "  -m,          --measure     Logs the time from a key to the OSD frame and OSD statistics\n";
+ }
+ 
+ bool cPluginWeb::ProcessArgs(int argc, char *argv[]) {
+@@ -541,13 +543,14 @@ bool cPluginWeb::ProcessArgs(int argc, char *argv[]) {
+             { "savets",      optional_argument, nullptr, 's' },
+             { "bindall",     optional_argument, nullptr, 'b' },
+             { "name",        optional_argument, nullptr, 'n' },
++            { "measure",     no_argument,       nullptr, 'm' },
+             { nullptr }
+     };
+ 
+     int c, option_index = 0;
+     std::string configFilename;
+ 
+-    while ((c = getopt_long(argc, argv, "c:fosbn:", long_options, &option_index)) != -1)
++    while ((c = getopt_long(argc, argv, "c:fosbn:m", long_options, &option_index)) != -1)
+     {
+         switch (c)
+         {
+@@ -571,6 +574,10 @@ bool cPluginWeb::ProcessArgs(int argc, char *argv[]) {
+                 bindAll = true;
+                 break;
+ 
++            case 'm':
++                measureOsd = true;
++                break;
++
+             case 'n':
+                 MAINMENUENTRYALT = strdup(optarg);
+                 break;
+diff --git a/webosdpage.cpp b/webosdpage.cpp
+index 78fc8dc..ce194d8 100644
+--- a/webosdpage.cpp
++++ b/webosdpage.cpp
+@@ -5,6 +5,9 @@
+ #include <chrono>
+ #include <mutex>
+ #include "webosdpage.h"
++#include <algorithm>
++
++extern bool measureOsd;
+ #include "web.h"
+ 
+ // #define MEASURE_SCALE_TIME 1
+@@ -244,8 +247,56 @@ bool WebOSDPage::drawImage(uint8_t* image, int render_width, int render_height,
+     return scaleAndPaint(image, render_width, render_height, x, y, width, height);
+ }
+ 
++// measurement (-m): time from a key to its frame and statistics of the OSD frames
++static std::mutex measureMutex;
++static eKeys measureKey = kNone;
++static cTimeMs measureKeyTime;
++
++struct tOsdStats {
++    cTimeMs start;
++    int frames = 0;
++    int rects = 0;
++    size_t bytes = 0;
++    uint64_t draw = 0;
++    uint64_t drawMax = 0;
++    uint64_t flush = 0;
++    uint64_t flushMax = 0;
++};
++
++static tOsdStats osdStats;
++
++static void measureFrame(const pluginweb::ProcessOsdFrameType &frame, uint64_t draw, uint64_t flush) {
++    std::lock_guard<std::mutex> lock(measureMutex);
++
++    if (measureKey != kNone) {
++        isyslog("[vdrweb] [measure] key %s: frame drawn after %d ms (draw %d ms, flush %d ms)",
++                cKey::ToString(measureKey), (int) measureKeyTime.Elapsed(), (int) draw, (int) flush);
++        measureKey = kNone;
++    }
++
++    osdStats.frames++;
++    osdStats.rects += (int) frame.rects.size();
++    for (const auto &r : frame.rects) {
++        osdStats.bytes += r.data.size();
++    }
++    osdStats.draw += draw;
++    osdStats.drawMax = std::max(osdStats.drawMax, draw);
++    osdStats.flush += flush;
++    osdStats.flushMax = std::max(osdStats.flushMax, flush);
++
++    uint64_t elapsed = osdStats.start.Elapsed();
++    if (elapsed >= 5000) {
++        isyslog("[vdrweb] [measure] OSD: %d frames in %.1f s, %.1f regions/frame, %.1f MB, draw avg %.1f max %d ms, flush avg %.1f max %d ms",
++                osdStats.frames, elapsed / 1000.0, (double) osdStats.rects / osdStats.frames, osdStats.bytes / 1048576.0,
++                (double) osdStats.draw / osdStats.frames, (int) osdStats.drawMax,
++                (double) osdStats.flush / osdStats.frames, (int) osdStats.flushMax);
++        osdStats = tOsdStats();
++    }
++}
++
+ bool WebOSDPage::drawFrame(const pluginweb::ProcessOsdFrameType &frame) {
+     bool ok = true;
++    cTimeMs drawTime;
+ 
+     for (const auto &r : frame.rects) {
+         if (frame.qoi) {
+@@ -269,10 +320,19 @@ bool WebOSDPage::drawFrame(const pluginweb::ProcessOsdFrameType &frame) {
+         }
+     }
+ 
++    uint64_t draw = drawTime.Elapsed();
++    cTimeMs flushTime;
++
+     // one flush for the whole frame
+-    std::lock_guard<std::recursive_mutex> lock(pixmap_mutex);
+-    if (osd != nullptr) {
+-        osd->Flush();
++    {
++        std::lock_guard<std::recursive_mutex> lock(pixmap_mutex);
++        if (osd != nullptr) {
++            osd->Flush();
++        }
++    }
++
++    if (measureOsd) {
++        measureFrame(frame, draw, flushTime.Elapsed());
+     }
+ 
+     return ok;
+@@ -411,6 +471,12 @@ eOSState WebOSDPage::ProcessKey(eKeys Key) {
+     // repeated keys (e.g. scrolling with a held arrow key) are sent as normal keys
+     eKeys key = NORMALKEY(Key);
+ 
++    if (measureOsd) {
++        std::lock_guard<std::mutex> lock(measureMutex);
++        measureKey = key;
++        measureKeyTime.Set();
++    }
++
+     auto search = ::keyMap.find(key);
+     if (search != ::keyMap.end() && browserClient->ProcessKey(search->second)) {
+         return osContinue;
+-- 
+2.43.0
+

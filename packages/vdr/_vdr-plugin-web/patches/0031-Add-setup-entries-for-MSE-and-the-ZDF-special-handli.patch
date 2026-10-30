@@ -1,0 +1,132 @@
+From d468007f25e3df18f9a94bbfa0faec66330209db Mon Sep 17 00:00:00 2001
+From: Andreas Baierl <ichgeh@imkreisrum.de>
+Date: Sun, 1 Nov 2026 15:34:13 +0100
+Subject: [PATCH 31/34] Add setup entries for MSE and the ZDF special handling
+
+Both are sent to the browser with the render parameters and take
+effect with the next application.
+
+Co-Authored-By: Claude Opus 5.5
+---
+ README.md   |  8 ++++++++
+ po/de_DE.po |  6 ++++++
+ setup.cpp   | 13 ++++++++++++-
+ setup.h     |  4 +++-
+ web.cpp     |  4 ++++
+ 5 files changed, 33 insertions(+), 2 deletions(-)
+
+diff --git a/README.md b/README.md
+index 020c366..983b71d 100644
+--- a/README.md
++++ b/README.md
+@@ -85,6 +85,14 @@ VDR uses the red key itself. To start HbbTV with a key, map it to the plugin in
+ 
+ "browser default" keeps the values the browser was started with (`--zoom`, 25 fps).
+ 
++### Browser
++| Setup entry             | Default | Description |
++|-------------------------|---------|-------------|
++| Media Source Extensions | yes     | Videos of players like dash.js are sent to VDR via the transcoder. Switch it off if an application worked better without. |
++| ZDF special handling    | yes     | The ZDF applications are forced to plain HTML5 videos. Without it they use their dash player (needs Media Source Extensions). |
++
++Both take effect with the next application.
++
+ ## Logging
+ Uses the VDR logging mechanism. Log entries can be found in ```/var/log/syslog``` with ```[vdrweb]``` prefix.
+ 
+diff --git a/po/de_DE.po b/po/de_DE.po
+index 8787fdd..e6757cb 100644
+--- a/po/de_DE.po
++++ b/po/de_DE.po
+@@ -56,5 +56,11 @@ msgstr "Skalierung durch Ausgabeger
+ msgid "Browser frame rate"
+ msgstr "Bildrate des Browsers"
+ 
++msgid "Media Source Extensions"
++msgstr "Media Source Extensions"
++
++msgid "ZDF special handling"
++msgstr "ZDF-Sonderbehandlung"
++
+ msgid "browser default"
+ msgstr "Vorgabe des Browsers"
+diff --git a/setup.cpp b/setup.cpp
+index 8d0e755..0530e88 100644
+--- a/setup.cpp
++++ b/setup.cpp
+@@ -23,9 +23,16 @@ int cWebSetup::FrameRate() const {
+ }
+ 
+ void SendRenderParameters() {
+-    if (browserClient != nullptr && (webSetup.Width() > 0 || webSetup.FrameRate() > 0)) {
++    if (browserClient == nullptr) {
++        return;
++    }
++
++    if (webSetup.Width() > 0 || webSetup.FrameRate() > 0) {
+         browserClient->SetRenderParameters(webSetup.Width(), webSetup.FrameRate());
+     }
++
++    // used by the next page
++    browserClient->SetBrowserOptions(webSetup.mse != 0, webSetup.zdfQuirks != 0);
+ }
+ 
+ cMenuSetupWeb::cMenuSetupWeb() {
+@@ -58,6 +65,8 @@ cMenuSetupWeb::cMenuSetupWeb() {
+     Add(new cMenuEditBoolItem(tr("Scale by output device"), &web.deviceScale));
+ #endif
+     Add(new cMenuEditStraItem(tr("Browser frame rate"), &web.frameRate, 5, frameRates));
++    Add(new cMenuEditBoolItem(tr("Media Source Extensions"), &web.mse));
++    Add(new cMenuEditBoolItem(tr("ZDF special handling"), &web.zdfQuirks));
+ }
+ 
+ void cMenuSetupWeb::Store() {
+@@ -72,6 +81,8 @@ void cMenuSetupWeb::Store() {
+     SetupStore("Resolution", webSetup.resolution);
+     SetupStore("DeviceScale", webSetup.deviceScale);
+     SetupStore("FrameRate", webSetup.frameRate);
++    SetupStore("Mse", webSetup.mse);
++    SetupStore("ZdfQuirks", webSetup.zdfQuirks);
+ 
+     SendRenderParameters();
+ }
+diff --git a/setup.h b/setup.h
+index 6bdacad..a4c9985 100644
+--- a/setup.h
++++ b/setup.h
+@@ -13,6 +13,8 @@ struct cWebSetup {
+     int resolution = 0;    // width of the page: 0 = browser default, 1 = 1280, 2 = 1920, 3 = 2560, 4 = 3840
+     int deviceScale = -1;  // scale by the output device, -1 = command line (-f)
+     int frameRate = 0;     // 0 = browser default, 1 = 25, 2 = 30, 3 = 50, 4 = 60
++    int mse = 1;           // Media Source Extensions (dash.js, hls.js, ...)
++    int zdfQuirks = 1;     // special handling of the ZDF applications
+ 
+     int Width() const;
+     int FrameRate() const;
+@@ -20,7 +22,7 @@ struct cWebSetup {
+ 
+ extern cWebSetup webSetup;
+ 
+-// tell the browser resolution and frame rate
++// tell the browser resolution, frame rate and options
+ void SendRenderParameters();
+ 
+ class cMenuSetupWeb : public cMenuSetupPage {
+diff --git a/web.cpp b/web.cpp
+index 1ab538b..ccdb0d7 100644
+--- a/web.cpp
++++ b/web.cpp
+@@ -745,6 +745,10 @@ bool cPluginWeb::SetupParse(const char *Name, const char *Value) {
+         useOutputDeviceScale = webSetup.deviceScale;
+     } else if (!strcasecmp(Name, "FrameRate")) {
+         webSetup.frameRate = constrain(atoi(Value), 0, 4);
++    } else if (!strcasecmp(Name, "Mse")) {
++        webSetup.mse = atoi(Value) ? 1 : 0;
++    } else if (!strcasecmp(Name, "ZdfQuirks")) {
++        webSetup.zdfQuirks = atoi(Value) ? 1 : 0;
+     } else {
+         return false;
+     }
+-- 
+2.43.0
+

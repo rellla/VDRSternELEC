@@ -1,0 +1,28 @@
+From ce169735ca78a0942c284e0071e75b856d201b66 Mon Sep 17 00:00:00 2001
+From: Andreas Baierl <ichgeh@imkreisrum.de>
+Date: Thu, 29 Oct 2026 16:37:38 +0100
+Subject: [PATCH 01/34] Don't return the control itself in GetInfo()
+
+VDR deletes the object returned by GetInfo() when the info menu is
+closed. Returning 'this' deleted the running player control.
+
+Co-Authored-By: Claude Opus 5.5
+---
+ webosdpage.cpp | 3 ++-
+ 1 file changed, 2 insertions(+), 1 deletion(-)
+
+diff --git a/webosdpage.cpp b/webosdpage.cpp
+index b13a600..27ce715 100644
+--- a/webosdpage.cpp
++++ b/webosdpage.cpp
+@@ -419,5 +419,6 @@ void WebOSDPage::DeleteVolume(void) {
+ cOsdObject *WebOSDPage::GetInfo() {
+     dsyslog("[vdrweb] WebOSDPage::GetInfo...");
+ 
+-    return this;
++    // VDR deletes the returned object after closing the info menu
++    return nullptr;
+ }
+-- 
+2.43.0
+

@@ -1,0 +1,32 @@
+From cf5f8197b90a0796b82856bd81f8bc8d9d5e1320 Mon Sep 17 00:00:00 2001
+From: Andreas Baierl <ichgeh@imkreisrum.de>
+Date: Thu, 29 Oct 2026 16:38:10 +0100
+Subject: [PATCH 05/34] Don't lose the completed partial packet
+
+The result of PlayTs() was ignored, so the packet was dropped if the
+device buffer was full.
+
+Co-Authored-By: Claude Opus 5.5
+---
+ videocontrol.cpp | 5 ++---
+ 1 file changed, 2 insertions(+), 3 deletions(-)
+
+diff --git a/videocontrol.cpp b/videocontrol.cpp
+index de5f39e..6b14778 100644
+--- a/videocontrol.cpp
++++ b/videocontrol.cpp
+@@ -108,9 +108,8 @@ void VideoPlayer::PlayPacket(uint8_t *buffer, int len) {
+             }
+ 
+             memcpy(buf + bufsize, buffer, 188 - bufsize);
+-            if (videoPlayer != nullptr) {
+-                PlayTs(buf, 188);
+-            } else {
++            if (!PlayData(buf, 188)) {
++                bufsize = 0;
+                 return;
+             }
+ 
+-- 
+2.43.0
+

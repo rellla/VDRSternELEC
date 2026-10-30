@@ -1,0 +1,27 @@
+From 7ec586f7efeaee2ee144ea292a0256138a59e24e Mon Sep 17 00:00:00 2001
+From: Andreas Baierl <ichgeh@imkreisrum.de>
+Date: Sun, 1 Nov 2026 15:41:09 +0100
+Subject: [PATCH 32/34] Delete the AIT filter of the previous channel
+
+Detach() doesn't delete the filter, every channel switch left one.
+
+Co-Authored-By: Claude Opus 5.5
+---
+ status.cpp | 1 +
+ 1 file changed, 1 insertion(+)
+
+diff --git a/status.cpp b/status.cpp
+index f72a846..528328a 100644
+--- a/status.cpp
++++ b/status.cpp
+@@ -190,6 +190,7 @@ void cHbbtvDeviceStatus::ChannelSwitch(const cDevice * vdrDevice, int channelNum
+       if (device) {
+          isyslog("[vdrweb] Detaching HbbTV ait filter from device %d", device->CardIndex()+1);
+          device->Detach(aitFilter);
++         delete aitFilter;
+          device = nullptr;
+          aitFilter = nullptr;
+          sid = -1;
+-- 
+2.43.0
+

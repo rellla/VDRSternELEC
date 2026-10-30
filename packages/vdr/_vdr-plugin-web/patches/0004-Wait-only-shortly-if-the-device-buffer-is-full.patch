@@ -1,0 +1,115 @@
+From 15b63c76c0b660b19cbe85381cbf4049e1147f79 Mon Sep 17 00:00:00 2001
+From: Andreas Baierl <ichgeh@imkreisrum.de>
+Date: Thu, 29 Oct 2026 16:38:01 +0100
+Subject: [PATCH 04/34] Wait only shortly if the device buffer is full
+
+PlayPacket() slept 500ms per retry, which lets the device buffer
+run empty. Retry every 5ms instead, up to 5s without progress.
+
+Co-Authored-By: Claude Opus 5.5
+---
+ videocontrol.cpp | 66 ++++++++++++++++++++++++++----------------------
+ videocontrol.h   |  2 ++
+ 2 files changed, 38 insertions(+), 30 deletions(-)
+
+diff --git a/videocontrol.cpp b/videocontrol.cpp
+index 4cfa9ab..de5f39e 100644
+--- a/videocontrol.cpp
++++ b/videocontrol.cpp
+@@ -128,44 +128,50 @@ void VideoPlayer::PlayPacket(uint8_t *buffer, int len) {
+         }
+ 
+         // now play packets
+-        int retry_loop_count = 0;
+-        while (len >= 188) {
+-            int result = -1;
+-            if (videoPlayer != nullptr) {
+-                result = PlayTs(buffer, len);
+-            } else {
+-                return;
+-            }
++        PlayData(buffer, len);
++    }
+ 
+-            // play error.
+-            if (result < 0) {
++
++}
++
++bool VideoPlayer::PlayData(uint8_t *data, int len) {
++    // the device buffer may be full, wait up to 5 seconds without progress
++    int waited = 0;
++
++    while (len >= 188) {
++        if (videoPlayer == nullptr) {
++            return false;
++        }
++
++        int result = PlayTs(data, len);
++
++        // play error
++        if (result < 0) {
++            tsError = true;
++            return false;
++        }
++
++        // packets not played, retry after a short time
++        if (result == 0) {
++            if (waited >= 5000) {
+                 tsError = true;
+-                return;
++                return false;
+             }
+ 
+-            // packets not played
+-            if (result == 0) {
+-                // retry after some time, but increase retry_loop_count
+-                if (retry_loop_count >= 10) {
+-                    tsError = true;
+-                    return;
+-                } else {
+-                    retry_loop_count++;
+-                    std::this_thread::sleep_for(std::chrono::milliseconds(500));
+-
+-                    continue;
+-                }
+-            }
++            std::this_thread::sleep_for(std::chrono::milliseconds(5));
++            waited += 5;
++            continue;
++        }
+ 
+-            // packets accepted
+-            len -= result;
+-            buffer += result;
++        // packets accepted
++        len -= result;
++        data += result;
++        waited = 0;
+ 
+-            tsPlayed = true;
+-        }
++        tsPlayed = true;
+     }
+ 
+-
++    return true;
+ }
+ 
+ void VideoPlayer::SelectAudioTrack(std::string track) {
+diff --git a/videocontrol.h b/videocontrol.h
+index 097bf41..0e69039 100644
+--- a/videocontrol.h
++++ b/videocontrol.h
+@@ -27,6 +27,8 @@ protected:
+ private:
+     static void calcVideoPosition(int x, int y, int w, int h, int *newx, int *newy, int *newwidth, int *newheight);
+ 
++    bool PlayData(uint8_t *data, int len);
++
+ private:
+     bool pause;
+     bool tsError;
+-- 
+2.43.0
+

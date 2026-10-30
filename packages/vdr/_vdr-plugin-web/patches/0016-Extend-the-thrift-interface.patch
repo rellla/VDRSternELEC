@@ -1,0 +1,4414 @@
+From a85abaaf315a0997ca5d8be509ea0804abc9c1cc Mon Sep 17 00:00:00 2001
+From: Andreas Baierl <ichgeh@imkreisrum.de>
+Date: Fri, 30 Oct 2026 13:06:38 +0100
+Subject: [PATCH 16/34] Extend the thrift interface
+
+Add player status and stream events to the browser, and subtitle
+track selection, end of stream and stream event filters to VDR.
+Regenerated with thrift 0.24.
+
+Co-Authored-By: Claude Opus 5.5
+---
+ thrift-services/cefbrowser.thrift             |   16 +-
+ thrift-services/pluginweb.thrift              |   14 +-
+ thrift-services/src-client/BrowserClient.cpp  |   24 +
+ thrift-services/src-client/BrowserClient.h    |    2 +
+ thrift-services/src-client/VdrClient.cpp      |   31 +
+ thrift-services/src-client/VdrClient.h        |    3 +
+ thrift-services/src-gen/CefBrowser.cpp        |  860 +++++++++-
+ thrift-services/src-gen/CefBrowser.h          |  240 +++
+ .../src-gen/CefBrowser_server.skeleton.cpp    |   10 +
+ thrift-services/src-gen/VdrPluginWeb.cpp      | 1407 +++++++++++++++--
+ thrift-services/src-gen/VdrPluginWeb.h        |  350 ++++
+ .../src-gen/VdrPluginWeb_server.skeleton.cpp  |   15 +
+ thrift-services/src-gen/cefbrowser_types.cpp  |  296 ++++
+ thrift-services/src-gen/cefbrowser_types.h    |   92 ++
+ thrift-services/src-gen/pluginweb_types.cpp   |  227 +++
+ thrift-services/src-gen/pluginweb_types.h     |   80 +
+ web.cpp                                       |   15 +
+ web.h                                         |    3 +
+ 18 files changed, 3583 insertions(+), 102 deletions(-)
+
+diff --git a/thrift-services/cefbrowser.thrift b/thrift-services/cefbrowser.thrift
+index e091391..a6559af 100644
+--- a/thrift-services/cefbrowser.thrift
++++ b/thrift-services/cefbrowser.thrift
+@@ -41,6 +41,18 @@ struct StopVideoType {
+     1: string reason
+ }
+ 
++struct PlayerStatusType {
++    1: i64 position,           // position of the displayed picture in ms
++    2: i32 state               // 0 = playing, 1 = paused, 2 = buffering, 3 = ended
++}
++
++struct StreamEventType {
++    1: i32 componentTag,
++    2: i32 eventId,
++    3: binary privateData,
++    4: string status           // "trigger" or "error"
++}
++
+ service CefBrowser extends common.CommonService {
+     bool LoadUrl(1: LoadUrlType input) throws (1:common.OperationFailed err),
+     bool RedButton(1: RedButtonType input) throws (1:common.OperationFailed err),
+@@ -50,5 +62,7 @@ service CefBrowser extends common.CommonService {
+     bool StreamError(1: StreamErrorType input) throws (1:common.OperationFailed err),
+     bool InsertHbbtv(1: InsertHbbtvType input) throws (1:common.OperationFailed err),
+     bool InsertChannel(1: InsertChannelType input) throws (1:common.OperationFailed err),
+-    bool StopVideo(1: StopVideoType input) throws (1:common.OperationFailed err)
++    bool StopVideo(1: StopVideoType input) throws (1:common.OperationFailed err),
++    bool PlayerStatus(1: PlayerStatusType input) throws (1:common.OperationFailed err),
++    bool StreamEvent(1: StreamEventType input) throws (1:common.OperationFailed err)
+ }
+\ No newline at end of file
+diff --git a/thrift-services/pluginweb.thrift b/thrift-services/pluginweb.thrift
+index 6f74b11..762c835 100644
+--- a/thrift-services/pluginweb.thrift
++++ b/thrift-services/pluginweb.thrift
+@@ -45,6 +45,15 @@ struct SelectAudioTrackType {
+     1: string audioTrack;
+ }
+ 
++struct SelectSubtitleTrackType {
++    1: string subtitleTrack;   // index of the subtitle track, -1 switches subtitles off
++}
++
++struct StreamEventFilterType {
++    1: i32 componentTag,       // component tag of the elementary stream with the stream events
++    2: bool enable
++}
++
+ service VdrPluginWeb extends common.CommonService {
+     bool ProcessOsdUpdate(1: ProcessOsdUpdateType input) throws (1:common.OperationFailed err),
+     bool ProcessOsdUpdateQOI(1: ProcessOsdUpdateQOIType input) throws (1:common.OperationFailed err),
+@@ -58,5 +67,8 @@ service VdrPluginWeb extends common.CommonService {
+     bool VideoFullscreen() throws (1:common.OperationFailed err),
+     bool ResetVideo(1: ResetVideoType input) throws (1:common.OperationFailed err),
+     bool SelectAudioTrack(1: SelectAudioTrackType input) throws (1:common.OperationFailed err),
+-    bool IsWebActive() throws (1:common.OperationFailed err)
++    bool IsWebActive() throws (1:common.OperationFailed err),
++    bool SelectSubtitleTrack(1: SelectSubtitleTrackType input) throws (1:common.OperationFailed err),
++    bool EndOfStream() throws (1:common.OperationFailed err),
++    bool StreamEventFilter(1: StreamEventFilterType input) throws (1:common.OperationFailed err)
+ }
+diff --git a/thrift-services/src-client/BrowserClient.cpp b/thrift-services/src-client/BrowserClient.cpp
+index 4939028..25265a5 100644
+--- a/thrift-services/src-client/BrowserClient.cpp
++++ b/thrift-services/src-client/BrowserClient.cpp
+@@ -227,3 +227,27 @@ bool BrowserClient::StopVideo(const std::string& reason) {
+         return client->StopVideo(input);
+     });
+ }
++
++bool BrowserClient::PlayerStatus(int64_t position, int state) {
++    return processInternal([&]() -> bool {
++        PlayerStatusType input;
++        input.position = position;
++        input.state = state;
++
++        return client->PlayerStatus(input);
++    });
++}
++
++bool BrowserClient::StreamEvent(int componentTag, int eventId, const std::string& privateData, const std::string& status) {
++    DEBUGLOG("BrowserClient::StreamEvent: tag %d, id %d, %s", componentTag, eventId, status.c_str());
++
++    return processInternal([&]() -> bool {
++        StreamEventType input;
++        input.componentTag = componentTag;
++        input.eventId = eventId;
++        input.privateData = privateData;
++        input.status = status;
++
++        return client->StreamEvent(input);
++    });
++}
+diff --git a/thrift-services/src-client/BrowserClient.h b/thrift-services/src-client/BrowserClient.h
+index 5d6a1c2..cb7336d 100644
+--- a/thrift-services/src-client/BrowserClient.h
++++ b/thrift-services/src-client/BrowserClient.h
+@@ -30,6 +30,8 @@ public:
+     bool InsertHbbtv(const std::string& hbbtv);
+     bool InsertChannel(const std::string& channel);
+     bool StopVideo(const std::string& reason);
++    bool PlayerStatus(int64_t position, int state);
++    bool StreamEvent(int componentTag, int eventId, const std::string& privateData, const std::string& status);
+ 
+ private:
+     bool connect();
+diff --git a/thrift-services/src-client/VdrClient.cpp b/thrift-services/src-client/VdrClient.cpp
+index 4b62bfa..8f7953d 100644
+--- a/thrift-services/src-client/VdrClient.cpp
++++ b/thrift-services/src-client/VdrClient.cpp
+@@ -231,6 +231,37 @@ bool VdrClient::SelectAudioTrack(std::string& nr) {
+     });
+ }
+ 
++bool VdrClient::SelectSubtitleTrack(const std::string& nr) {
++    DEBUGLOG("VdrClient::SelectSubtitleTrack");
++
++    return processInternal([&]() -> bool {
++        SelectSubtitleTrackType input;
++        input.subtitleTrack = nr;
++
++        return client->SelectSubtitleTrack(input);
++    });
++}
++
++bool VdrClient::EndOfStream() {
++    DEBUGLOG("VdrClient::EndOfStream");
++
++    return processInternal([&]() -> bool {
++        return client->EndOfStream();
++    });
++}
++
++bool VdrClient::StreamEventFilter(int componentTag, bool enable) {
++    DEBUGLOG("VdrClient::StreamEventFilter");
++
++    return processInternal([&]() -> bool {
++        StreamEventFilterType input;
++        input.componentTag = componentTag;
++        input.enable = enable;
++
++        return client->StreamEventFilter(input);
++    });
++}
++
+ bool VdrClient::IsWebActive() {
+     // DEBUGLOG("VdrClient::IsWebActive");
+ 
+diff --git a/thrift-services/src-client/VdrClient.h b/thrift-services/src-client/VdrClient.h
+index a39fd60..d187c6d 100644
+--- a/thrift-services/src-client/VdrClient.h
++++ b/thrift-services/src-client/VdrClient.h
+@@ -38,6 +38,9 @@ public:
+     bool VideoFullscreen();
+ 
+     bool SelectAudioTrack(std::string& nr);
++    bool SelectSubtitleTrack(const std::string& nr);
++    bool EndOfStream();
++    bool StreamEventFilter(int componentTag, bool enable);
+ 
+     bool IsWebActive();
+ 
+diff --git a/thrift-services/src-gen/CefBrowser.cpp b/thrift-services/src-gen/CefBrowser.cpp
+index 26a5bf3..0300010 100644
+--- a/thrift-services/src-gen/CefBrowser.cpp
++++ b/thrift-services/src-gen/CefBrowser.cpp
+@@ -1895,6 +1895,430 @@ uint32_t CefBrowser_StopVideo_presult::read(::apache::thrift::protocol::TProtoco
+   return xfer;
+ }
+ 
++
++CefBrowser_PlayerStatus_args::~CefBrowser_PlayerStatus_args() noexcept {
++}
++
++CefBrowser_PlayerStatus_args::CefBrowser_PlayerStatus_args() noexcept {
++}
++
++uint32_t CefBrowser_PlayerStatus_args::read(::apache::thrift::protocol::TProtocol* iprot) {
++
++  ::apache::thrift::protocol::TInputRecursionTracker tracker(*iprot);
++  uint32_t xfer = 0;
++  std::string fname;
++  ::apache::thrift::protocol::TType ftype;
++  int16_t fid;
++
++  xfer += iprot->readStructBegin(fname);
++
++  using ::apache::thrift::protocol::TProtocolException;
++
++
++  while (true)
++  {
++    xfer += iprot->readFieldBegin(fname, ftype, fid);
++    if (ftype == ::apache::thrift::protocol::T_STOP) {
++      break;
++    }
++    switch (fid)
++    {
++      case 1:
++        if (ftype == ::apache::thrift::protocol::T_STRUCT) {
++          xfer += this->input.read(iprot);
++          this->__isset.input = true;
++        } else {
++          xfer += iprot->skip(ftype);
++        }
++        break;
++      default:
++        xfer += iprot->skip(ftype);
++        break;
++    }
++    xfer += iprot->readFieldEnd();
++  }
++
++  xfer += iprot->readStructEnd();
++
++  return xfer;
++}
++
++uint32_t CefBrowser_PlayerStatus_args::write(::apache::thrift::protocol::TProtocol* oprot) const {
++  uint32_t xfer = 0;
++  ::apache::thrift::protocol::TOutputRecursionTracker tracker(*oprot);
++  xfer += oprot->writeStructBegin("CefBrowser_PlayerStatus_args");
++
++  xfer += oprot->writeFieldBegin("input", ::apache::thrift::protocol::T_STRUCT, 1);
++  xfer += this->input.write(oprot);
++  xfer += oprot->writeFieldEnd();
++
++  xfer += oprot->writeFieldStop();
++  xfer += oprot->writeStructEnd();
++  return xfer;
++}
++
++
++CefBrowser_PlayerStatus_pargs::~CefBrowser_PlayerStatus_pargs() noexcept {
++}
++
++
++uint32_t CefBrowser_PlayerStatus_pargs::write(::apache::thrift::protocol::TProtocol* oprot) const {
++  uint32_t xfer = 0;
++  ::apache::thrift::protocol::TOutputRecursionTracker tracker(*oprot);
++  xfer += oprot->writeStructBegin("CefBrowser_PlayerStatus_pargs");
++
++  xfer += oprot->writeFieldBegin("input", ::apache::thrift::protocol::T_STRUCT, 1);
++  xfer += (*(this->input)).write(oprot);
++  xfer += oprot->writeFieldEnd();
++
++  xfer += oprot->writeFieldStop();
++  xfer += oprot->writeStructEnd();
++  return xfer;
++}
++
++
++CefBrowser_PlayerStatus_result::~CefBrowser_PlayerStatus_result() noexcept {
++}
++
++CefBrowser_PlayerStatus_result::CefBrowser_PlayerStatus_result() noexcept
++   : success(0) {
++}
++
++uint32_t CefBrowser_PlayerStatus_result::read(::apache::thrift::protocol::TProtocol* iprot) {
++
++  ::apache::thrift::protocol::TInputRecursionTracker tracker(*iprot);
++  uint32_t xfer = 0;
++  std::string fname;
++  ::apache::thrift::protocol::TType ftype;
++  int16_t fid;
++
++  xfer += iprot->readStructBegin(fname);
++
++  using ::apache::thrift::protocol::TProtocolException;
++
++
++  while (true)
++  {
++    xfer += iprot->readFieldBegin(fname, ftype, fid);
++    if (ftype == ::apache::thrift::protocol::T_STOP) {
++      break;
++    }
++    switch (fid)
++    {
++      case 0:
++        if (ftype == ::apache::thrift::protocol::T_BOOL) {
++          xfer += iprot->readBool(this->success);
++          this->__isset.success = true;
++        } else {
++          xfer += iprot->skip(ftype);
++        }
++        break;
++      case 1:
++        if (ftype == ::apache::thrift::protocol::T_STRUCT) {
++          xfer += this->err.read(iprot);
++          this->__isset.err = true;
++        } else {
++          xfer += iprot->skip(ftype);
++        }
++        break;
++      default:
++        xfer += iprot->skip(ftype);
++        break;
++    }
++    xfer += iprot->readFieldEnd();
++  }
++
++  xfer += iprot->readStructEnd();
++
++  return xfer;
++}
++
++uint32_t CefBrowser_PlayerStatus_result::write(::apache::thrift::protocol::TProtocol* oprot) const {
++
++  uint32_t xfer = 0;
++
++  xfer += oprot->writeStructBegin("CefBrowser_PlayerStatus_result");
++
++  if (this->__isset.success) {
++    xfer += oprot->writeFieldBegin("success", ::apache::thrift::protocol::T_BOOL, 0);
++    xfer += oprot->writeBool(this->success);
++    xfer += oprot->writeFieldEnd();
++  } else if (this->__isset.err) {
++    xfer += oprot->writeFieldBegin("err", ::apache::thrift::protocol::T_STRUCT, 1);
++    xfer += this->err.write(oprot);
++    xfer += oprot->writeFieldEnd();
++  }
++  xfer += oprot->writeFieldStop();
++  xfer += oprot->writeStructEnd();
++  return xfer;
++}
++
++
++CefBrowser_PlayerStatus_presult::~CefBrowser_PlayerStatus_presult() noexcept {
++}
++
++
++uint32_t CefBrowser_PlayerStatus_presult::read(::apache::thrift::protocol::TProtocol* iprot) {
++
++  ::apache::thrift::protocol::TInputRecursionTracker tracker(*iprot);
++  uint32_t xfer = 0;
++  std::string fname;
++  ::apache::thrift::protocol::TType ftype;
++  int16_t fid;
++
++  xfer += iprot->readStructBegin(fname);
++
++  using ::apache::thrift::protocol::TProtocolException;
++
++
++  while (true)
++  {
++    xfer += iprot->readFieldBegin(fname, ftype, fid);
++    if (ftype == ::apache::thrift::protocol::T_STOP) {
++      break;
++    }
++    switch (fid)
++    {
++      case 0:
++        if (ftype == ::apache::thrift::protocol::T_BOOL) {
++          xfer += iprot->readBool((*(this->success)));
++          this->__isset.success = true;
++        } else {
++          xfer += iprot->skip(ftype);
++        }
++        break;
++      case 1:
++        if (ftype == ::apache::thrift::protocol::T_STRUCT) {
++          xfer += this->err.read(iprot);
++          this->__isset.err = true;
++        } else {
++          xfer += iprot->skip(ftype);
++        }
++        break;
++      default:
++        xfer += iprot->skip(ftype);
++        break;
++    }
++    xfer += iprot->readFieldEnd();
++  }
++
++  xfer += iprot->readStructEnd();
++
++  return xfer;
++}
++
++
++CefBrowser_StreamEvent_args::~CefBrowser_StreamEvent_args() noexcept {
++}
++
++CefBrowser_StreamEvent_args::CefBrowser_StreamEvent_args() noexcept {
++}
++
++uint32_t CefBrowser_StreamEvent_args::read(::apache::thrift::protocol::TProtocol* iprot) {
++
++  ::apache::thrift::protocol::TInputRecursionTracker tracker(*iprot);
++  uint32_t xfer = 0;
++  std::string fname;
++  ::apache::thrift::protocol::TType ftype;
++  int16_t fid;
++
++  xfer += iprot->readStructBegin(fname);
++
++  using ::apache::thrift::protocol::TProtocolException;
++
++
++  while (true)
++  {
++    xfer += iprot->readFieldBegin(fname, ftype, fid);
++    if (ftype == ::apache::thrift::protocol::T_STOP) {
++      break;
++    }
++    switch (fid)
++    {
++      case 1:
++        if (ftype == ::apache::thrift::protocol::T_STRUCT) {
++          xfer += this->input.read(iprot);
++          this->__isset.input = true;
++        } else {
++          xfer += iprot->skip(ftype);
++        }
++        break;
++      default:
++        xfer += iprot->skip(ftype);
++        break;
++    }
++    xfer += iprot->readFieldEnd();
++  }
++
++  xfer += iprot->readStructEnd();
++
++  return xfer;
++}
++
++uint32_t CefBrowser_StreamEvent_args::write(::apache::thrift::protocol::TProtocol* oprot) const {
++  uint32_t xfer = 0;
++  ::apache::thrift::protocol::TOutputRecursionTracker tracker(*oprot);
++  xfer += oprot->writeStructBegin("CefBrowser_StreamEvent_args");
++
++  xfer += oprot->writeFieldBegin("input", ::apache::thrift::protocol::T_STRUCT, 1);
++  xfer += this->input.write(oprot);
++  xfer += oprot->writeFieldEnd();
++
++  xfer += oprot->writeFieldStop();
++  xfer += oprot->writeStructEnd();
++  return xfer;
++}
++
++
++CefBrowser_StreamEvent_pargs::~CefBrowser_StreamEvent_pargs() noexcept {
++}
++
++
++uint32_t CefBrowser_StreamEvent_pargs::write(::apache::thrift::protocol::TProtocol* oprot) const {
++  uint32_t xfer = 0;
++  ::apache::thrift::protocol::TOutputRecursionTracker tracker(*oprot);
++  xfer += oprot->writeStructBegin("CefBrowser_StreamEvent_pargs");
++
++  xfer += oprot->writeFieldBegin("input", ::apache::thrift::protocol::T_STRUCT, 1);
++  xfer += (*(this->input)).write(oprot);
++  xfer += oprot->writeFieldEnd();
++
++  xfer += oprot->writeFieldStop();
++  xfer += oprot->writeStructEnd();
++  return xfer;
++}
++
++
++CefBrowser_StreamEvent_result::~CefBrowser_StreamEvent_result() noexcept {
++}
++
++CefBrowser_StreamEvent_result::CefBrowser_StreamEvent_result() noexcept
++   : success(0) {
++}
++
++uint32_t CefBrowser_StreamEvent_result::read(::apache::thrift::protocol::TProtocol* iprot) {
++
++  ::apache::thrift::protocol::TInputRecursionTracker tracker(*iprot);
++  uint32_t xfer = 0;
++  std::string fname;
++  ::apache::thrift::protocol::TType ftype;
++  int16_t fid;
++
++  xfer += iprot->readStructBegin(fname);
++
++  using ::apache::thrift::protocol::TProtocolException;
++
++
++  while (true)
++  {
++    xfer += iprot->readFieldBegin(fname, ftype, fid);
++    if (ftype == ::apache::thrift::protocol::T_STOP) {
++      break;
++    }
++    switch (fid)
++    {
++      case 0:
++        if (ftype == ::apache::thrift::protocol::T_BOOL) {
++          xfer += iprot->readBool(this->success);
++          this->__isset.success = true;
++        } else {
++          xfer += iprot->skip(ftype);
++        }
++        break;
++      case 1:
++        if (ftype == ::apache::thrift::protocol::T_STRUCT) {
++          xfer += this->err.read(iprot);
++          this->__isset.err = true;
++        } else {
++          xfer += iprot->skip(ftype);
++        }
++        break;
++      default:
++        xfer += iprot->skip(ftype);
++        break;
++    }
++    xfer += iprot->readFieldEnd();
++  }
++
++  xfer += iprot->readStructEnd();
++
++  return xfer;
++}
++
++uint32_t CefBrowser_StreamEvent_result::write(::apache::thrift::protocol::TProtocol* oprot) const {
++
++  uint32_t xfer = 0;
++
++  xfer += oprot->writeStructBegin("CefBrowser_StreamEvent_result");
++
++  if (this->__isset.success) {
++    xfer += oprot->writeFieldBegin("success", ::apache::thrift::protocol::T_BOOL, 0);
++    xfer += oprot->writeBool(this->success);
++    xfer += oprot->writeFieldEnd();
++  } else if (this->__isset.err) {
++    xfer += oprot->writeFieldBegin("err", ::apache::thrift::protocol::T_STRUCT, 1);
++    xfer += this->err.write(oprot);
++    xfer += oprot->writeFieldEnd();
++  }
++  xfer += oprot->writeFieldStop();
++  xfer += oprot->writeStructEnd();
++  return xfer;
++}
++
++
++CefBrowser_StreamEvent_presult::~CefBrowser_StreamEvent_presult() noexcept {
++}
++
++
++uint32_t CefBrowser_StreamEvent_presult::read(::apache::thrift::protocol::TProtocol* iprot) {
++
++  ::apache::thrift::protocol::TInputRecursionTracker tracker(*iprot);
++  uint32_t xfer = 0;
++  std::string fname;
++  ::apache::thrift::protocol::TType ftype;
++  int16_t fid;
++
++  xfer += iprot->readStructBegin(fname);
++
++  using ::apache::thrift::protocol::TProtocolException;
++
++
++  while (true)
++  {
++    xfer += iprot->readFieldBegin(fname, ftype, fid);
++    if (ftype == ::apache::thrift::protocol::T_STOP) {
++      break;
++    }
++    switch (fid)
++    {
++      case 0:
++        if (ftype == ::apache::thrift::protocol::T_BOOL) {
++          xfer += iprot->readBool((*(this->success)));
++          this->__isset.success = true;
++        } else {
++          xfer += iprot->skip(ftype);
++        }
++        break;
++      case 1:
++        if (ftype == ::apache::thrift::protocol::T_STRUCT) {
++          xfer += this->err.read(iprot);
++          this->__isset.err = true;
++        } else {
++          xfer += iprot->skip(ftype);
++        }
++        break;
++      default:
++        xfer += iprot->skip(ftype);
++        break;
++    }
++    xfer += iprot->readFieldEnd();
++  }
++
++  xfer += iprot->readStructEnd();
++
++  return xfer;
++}
++
+ bool CefBrowserClient::LoadUrl(const LoadUrlType& input)
+ {
+   send_LoadUrl(input);
+@@ -2367,7 +2791,129 @@ bool CefBrowserClient::recv_InsertChannel()
+     iprot_->getTransport()->readEnd();
+   }
+   bool _return;
+-  CefBrowser_InsertChannel_presult result;
++  CefBrowser_InsertChannel_presult result;
++  result.success = &_return;
++  result.read(iprot_);
++  iprot_->readMessageEnd();
++  iprot_->getTransport()->readEnd();
++
++  if (result.__isset.success) {
++    return _return;
++  }
++  if (result.__isset.err) {
++    throw result.err;
++  }
++  throw ::apache::thrift::TApplicationException(::apache::thrift::TApplicationException::MISSING_RESULT, "InsertChannel failed: unknown result");
++}
++
++bool CefBrowserClient::StopVideo(const StopVideoType& input)
++{
++  send_StopVideo(input);
++  return recv_StopVideo();
++}
++
++void CefBrowserClient::send_StopVideo(const StopVideoType& input)
++{
++  int32_t cseqid = 0;
++  oprot_->writeMessageBegin("StopVideo", ::apache::thrift::protocol::T_CALL, cseqid);
++
++  CefBrowser_StopVideo_pargs args;
++  args.input = &input;
++  args.write(oprot_);
++
++  oprot_->writeMessageEnd();
++  oprot_->getTransport()->writeEnd();
++  oprot_->getTransport()->flush();
++}
++
++bool CefBrowserClient::recv_StopVideo()
++{
++
++  int32_t rseqid = 0;
++  std::string fname;
++  ::apache::thrift::protocol::TMessageType mtype;
++
++  iprot_->readMessageBegin(fname, mtype, rseqid);
++  if (mtype == ::apache::thrift::protocol::T_EXCEPTION) {
++    ::apache::thrift::TApplicationException x;
++    x.read(iprot_);
++    iprot_->readMessageEnd();
++    iprot_->getTransport()->readEnd();
++    throw x;
++  }
++  if (mtype != ::apache::thrift::protocol::T_REPLY) {
++    iprot_->skip(::apache::thrift::protocol::T_STRUCT);
++    iprot_->readMessageEnd();
++    iprot_->getTransport()->readEnd();
++  }
++  if (fname.compare("StopVideo") != 0) {
++    iprot_->skip(::apache::thrift::protocol::T_STRUCT);
++    iprot_->readMessageEnd();
++    iprot_->getTransport()->readEnd();
++  }
++  bool _return;
++  CefBrowser_StopVideo_presult result;
++  result.success = &_return;
++  result.read(iprot_);
++  iprot_->readMessageEnd();
++  iprot_->getTransport()->readEnd();
++
++  if (result.__isset.success) {
++    return _return;
++  }
++  if (result.__isset.err) {
++    throw result.err;
++  }
++  throw ::apache::thrift::TApplicationException(::apache::thrift::TApplicationException::MISSING_RESULT, "StopVideo failed: unknown result");
++}
++
++bool CefBrowserClient::PlayerStatus(const PlayerStatusType& input)
++{
++  send_PlayerStatus(input);
++  return recv_PlayerStatus();
++}
++
++void CefBrowserClient::send_PlayerStatus(const PlayerStatusType& input)
++{
++  int32_t cseqid = 0;
++  oprot_->writeMessageBegin("PlayerStatus", ::apache::thrift::protocol::T_CALL, cseqid);
++
++  CefBrowser_PlayerStatus_pargs args;
++  args.input = &input;
++  args.write(oprot_);
++
++  oprot_->writeMessageEnd();
++  oprot_->getTransport()->writeEnd();
++  oprot_->getTransport()->flush();
++}
++
++bool CefBrowserClient::recv_PlayerStatus()
++{
++
++  int32_t rseqid = 0;
++  std::string fname;
++  ::apache::thrift::protocol::TMessageType mtype;
++
++  iprot_->readMessageBegin(fname, mtype, rseqid);
++  if (mtype == ::apache::thrift::protocol::T_EXCEPTION) {
++    ::apache::thrift::TApplicationException x;
++    x.read(iprot_);
++    iprot_->readMessageEnd();
++    iprot_->getTransport()->readEnd();
++    throw x;
++  }
++  if (mtype != ::apache::thrift::protocol::T_REPLY) {
++    iprot_->skip(::apache::thrift::protocol::T_STRUCT);
++    iprot_->readMessageEnd();
++    iprot_->getTransport()->readEnd();
++  }
++  if (fname.compare("PlayerStatus") != 0) {
++    iprot_->skip(::apache::thrift::protocol::T_STRUCT);
++    iprot_->readMessageEnd();
++    iprot_->getTransport()->readEnd();
++  }
++  bool _return;
++  CefBrowser_PlayerStatus_presult result;
+   result.success = &_return;
+   result.read(iprot_);
+   iprot_->readMessageEnd();
+@@ -2379,21 +2925,21 @@ bool CefBrowserClient::recv_InsertChannel()
+   if (result.__isset.err) {
+     throw result.err;
+   }
+-  throw ::apache::thrift::TApplicationException(::apache::thrift::TApplicationException::MISSING_RESULT, "InsertChannel failed: unknown result");
++  throw ::apache::thrift::TApplicationException(::apache::thrift::TApplicationException::MISSING_RESULT, "PlayerStatus failed: unknown result");
+ }
+ 
+-bool CefBrowserClient::StopVideo(const StopVideoType& input)
++bool CefBrowserClient::StreamEvent(const StreamEventType& input)
+ {
+-  send_StopVideo(input);
+-  return recv_StopVideo();
++  send_StreamEvent(input);
++  return recv_StreamEvent();
+ }
+ 
+-void CefBrowserClient::send_StopVideo(const StopVideoType& input)
++void CefBrowserClient::send_StreamEvent(const StreamEventType& input)
+ {
+   int32_t cseqid = 0;
+-  oprot_->writeMessageBegin("StopVideo", ::apache::thrift::protocol::T_CALL, cseqid);
++  oprot_->writeMessageBegin("StreamEvent", ::apache::thrift::protocol::T_CALL, cseqid);
+ 
+-  CefBrowser_StopVideo_pargs args;
++  CefBrowser_StreamEvent_pargs args;
+   args.input = &input;
+   args.write(oprot_);
+ 
+@@ -2402,7 +2948,7 @@ void CefBrowserClient::send_StopVideo(const StopVideoType& input)
+   oprot_->getTransport()->flush();
+ }
+ 
+-bool CefBrowserClient::recv_StopVideo()
++bool CefBrowserClient::recv_StreamEvent()
+ {
+ 
+   int32_t rseqid = 0;
+@@ -2422,13 +2968,13 @@ bool CefBrowserClient::recv_StopVideo()
+     iprot_->readMessageEnd();
+     iprot_->getTransport()->readEnd();
+   }
+-  if (fname.compare("StopVideo") != 0) {
++  if (fname.compare("StreamEvent") != 0) {
+     iprot_->skip(::apache::thrift::protocol::T_STRUCT);
+     iprot_->readMessageEnd();
+     iprot_->getTransport()->readEnd();
+   }
+   bool _return;
+-  CefBrowser_StopVideo_presult result;
++  CefBrowser_StreamEvent_presult result;
+   result.success = &_return;
+   result.read(iprot_);
+   iprot_->readMessageEnd();
+@@ -2440,7 +2986,7 @@ bool CefBrowserClient::recv_StopVideo()
+   if (result.__isset.err) {
+     throw result.err;
+   }
+-  throw ::apache::thrift::TApplicationException(::apache::thrift::TApplicationException::MISSING_RESULT, "StopVideo failed: unknown result");
++  throw ::apache::thrift::TApplicationException(::apache::thrift::TApplicationException::MISSING_RESULT, "StreamEvent failed: unknown result");
+ }
+ 
+ bool CefBrowserProcessor::dispatchCall(::apache::thrift::protocol::TProtocol* iprot, ::apache::thrift::protocol::TProtocol* oprot, const std::string& fname, int32_t seqid, void* callContext) {
+@@ -2966,6 +3512,120 @@ void CefBrowserProcessor::process_StopVideo(int32_t seqid, ::apache::thrift::pro
+   }
+ }
+ 
++void CefBrowserProcessor::process_PlayerStatus(int32_t seqid, ::apache::thrift::protocol::TProtocol* iprot, ::apache::thrift::protocol::TProtocol* oprot, void* callContext)
++{
++  void* ctx = nullptr;
++  if (this->eventHandler_.get() != nullptr) {
++    ctx = this->eventHandler_->getContext("CefBrowser.PlayerStatus", callContext);
++  }
++  ::apache::thrift::TProcessorContextFreer freer(this->eventHandler_.get(), ctx, "CefBrowser.PlayerStatus");
++
++  if (this->eventHandler_.get() != nullptr) {
++    this->eventHandler_->preRead(ctx, "CefBrowser.PlayerStatus");
++  }
++
++  CefBrowser_PlayerStatus_args args;
++  args.read(iprot);
++  iprot->readMessageEnd();
++  uint32_t bytes = iprot->getTransport()->readEnd();
++
++  if (this->eventHandler_.get() != nullptr) {
++    this->eventHandler_->postRead(ctx, "CefBrowser.PlayerStatus", bytes);
++  }
++
++  CefBrowser_PlayerStatus_result result;
++  try {
++    result.success = iface_->PlayerStatus(args.input);
++    result.__isset.success = true;
++  } catch ( ::common::OperationFailed &err) {
++    result.err = std::move(err);
++    result.__isset.err = true;
++  } catch (const std::exception& e) {
++    if (this->eventHandler_.get() != nullptr) {
++      this->eventHandler_->handlerError(ctx, "CefBrowser.PlayerStatus");
++    }
++
++    ::apache::thrift::TApplicationException x(e.what());
++    oprot->writeMessageBegin("PlayerStatus", ::apache::thrift::protocol::T_EXCEPTION, seqid);
++    x.write(oprot);
++    oprot->writeMessageEnd();
++    oprot->getTransport()->writeEnd();
++    oprot->getTransport()->flush();
++    return;
++  }
++
++  if (this->eventHandler_.get() != nullptr) {
++    this->eventHandler_->preWrite(ctx, "CefBrowser.PlayerStatus");
++  }
++
++  oprot->writeMessageBegin("PlayerStatus", ::apache::thrift::protocol::T_REPLY, seqid);
++  result.write(oprot);
++  oprot->writeMessageEnd();
++  bytes = oprot->getTransport()->writeEnd();
++  oprot->getTransport()->flush();
++
++  if (this->eventHandler_.get() != nullptr) {
++    this->eventHandler_->postWrite(ctx, "CefBrowser.PlayerStatus", bytes);
++  }
++}
++
++void CefBrowserProcessor::process_StreamEvent(int32_t seqid, ::apache::thrift::protocol::TProtocol* iprot, ::apache::thrift::protocol::TProtocol* oprot, void* callContext)
++{
++  void* ctx = nullptr;
++  if (this->eventHandler_.get() != nullptr) {
++    ctx = this->eventHandler_->getContext("CefBrowser.StreamEvent", callContext);
++  }
++  ::apache::thrift::TProcessorContextFreer freer(this->eventHandler_.get(), ctx, "CefBrowser.StreamEvent");
++
++  if (this->eventHandler_.get() != nullptr) {
++    this->eventHandler_->preRead(ctx, "CefBrowser.StreamEvent");
++  }
++
++  CefBrowser_StreamEvent_args args;
++  args.read(iprot);
++  iprot->readMessageEnd();
++  uint32_t bytes = iprot->getTransport()->readEnd();
++
++  if (this->eventHandler_.get() != nullptr) {
++    this->eventHandler_->postRead(ctx, "CefBrowser.StreamEvent", bytes);
++  }
++
++  CefBrowser_StreamEvent_result result;
++  try {
++    result.success = iface_->StreamEvent(args.input);
++    result.__isset.success = true;
++  } catch ( ::common::OperationFailed &err) {
++    result.err = std::move(err);
++    result.__isset.err = true;
++  } catch (const std::exception& e) {
++    if (this->eventHandler_.get() != nullptr) {
++      this->eventHandler_->handlerError(ctx, "CefBrowser.StreamEvent");
++    }
++
++    ::apache::thrift::TApplicationException x(e.what());
++    oprot->writeMessageBegin("StreamEvent", ::apache::thrift::protocol::T_EXCEPTION, seqid);
++    x.write(oprot);
++    oprot->writeMessageEnd();
++    oprot->getTransport()->writeEnd();
++    oprot->getTransport()->flush();
++    return;
++  }
++
++  if (this->eventHandler_.get() != nullptr) {
++    this->eventHandler_->preWrite(ctx, "CefBrowser.StreamEvent");
++  }
++
++  oprot->writeMessageBegin("StreamEvent", ::apache::thrift::protocol::T_REPLY, seqid);
++  result.write(oprot);
++  oprot->writeMessageEnd();
++  bytes = oprot->getTransport()->writeEnd();
++  oprot->getTransport()->flush();
++
++  if (this->eventHandler_.get() != nullptr) {
++    this->eventHandler_->postWrite(ctx, "CefBrowser.StreamEvent", bytes);
++  }
++}
++
+ ::std::shared_ptr< ::apache::thrift::TProcessor > CefBrowserProcessorFactory::getProcessor(const ::apache::thrift::TConnectionInfo& connInfo) {
+   ::apache::thrift::ReleaseHandler< CefBrowserIfFactory > cleanup(handlerFactory_);
+   ::std::shared_ptr< CefBrowserIf > handler(handlerFactory_->getHandler(connInfo), cleanup);
+@@ -3764,5 +4424,181 @@ bool CefBrowserConcurrentClient::recv_StopVideo(const int32_t seqid)
+   } // end while(true)
+ }
+ 
++bool CefBrowserConcurrentClient::PlayerStatus(const PlayerStatusType& input)
++{
++  int32_t seqid = send_PlayerStatus(input);
++  return recv_PlayerStatus(seqid);
++}
++
++int32_t CefBrowserConcurrentClient::send_PlayerStatus(const PlayerStatusType& input)
++{
++  int32_t cseqid = this->sync_->generateSeqId();
++  ::apache::thrift::async::TConcurrentSendSentry sentry(this->sync_.get());
++  oprot_->writeMessageBegin("PlayerStatus", ::apache::thrift::protocol::T_CALL, cseqid);
++
++  CefBrowser_PlayerStatus_pargs args;
++  args.input = &input;
++  args.write(oprot_);
++
++  oprot_->writeMessageEnd();
++  oprot_->getTransport()->writeEnd();
++  oprot_->getTransport()->flush();
++
++  sentry.commit();
++  return cseqid;
++}
++
++bool CefBrowserConcurrentClient::recv_PlayerStatus(const int32_t seqid)
++{
++
++  int32_t rseqid = 0;
++  std::string fname;
++  ::apache::thrift::protocol::TMessageType mtype;
++
++  // the read mutex gets dropped and reacquired as part of waitForWork()
++  // The destructor of this sentry wakes up other clients
++  ::apache::thrift::async::TConcurrentRecvSentry sentry(this->sync_.get(), seqid);
++
++  while(true) {
++    if(!this->sync_->getPending(fname, mtype, rseqid)) {
++      iprot_->readMessageBegin(fname, mtype, rseqid);
++    }
++    if(seqid == rseqid) {
++      if (mtype == ::apache::thrift::protocol::T_EXCEPTION) {
++        ::apache::thrift::TApplicationException x;
++        x.read(iprot_);
++        iprot_->readMessageEnd();
++        iprot_->getTransport()->readEnd();
++        sentry.commit();
++        throw x;
++      }
++      if (mtype != ::apache::thrift::protocol::T_REPLY) {
++        iprot_->skip(::apache::thrift::protocol::T_STRUCT);
++        iprot_->readMessageEnd();
++        iprot_->getTransport()->readEnd();
++      }
++      if (fname.compare("PlayerStatus") != 0) {
++        iprot_->skip(::apache::thrift::protocol::T_STRUCT);
++        iprot_->readMessageEnd();
++        iprot_->getTransport()->readEnd();
++
++        // in a bad state, don't commit
++        using ::apache::thrift::protocol::TProtocolException;
++        throw TProtocolException(TProtocolException::INVALID_DATA);
++      }
++      bool _return;
++      CefBrowser_PlayerStatus_presult result;
++      result.success = &_return;
++      result.read(iprot_);
++      iprot_->readMessageEnd();
++      iprot_->getTransport()->readEnd();
++
++      if (result.__isset.success) {
++        sentry.commit();
++        return _return;
++      }
++      if (result.__isset.err) {
++        sentry.commit();
++        throw result.err;
++      }
++      // in a bad state, don't commit
++      throw ::apache::thrift::TApplicationException(::apache::thrift::TApplicationException::MISSING_RESULT, "PlayerStatus failed: unknown result");
++    }
++    // seqid != rseqid
++    this->sync_->updatePending(fname, mtype, rseqid);
++
++    // this will temporarily unlock the readMutex, and let other clients get work done
++    this->sync_->waitForWork(seqid);
++  } // end while(true)
++}
++
++bool CefBrowserConcurrentClient::StreamEvent(const StreamEventType& input)
++{
++  int32_t seqid = send_StreamEvent(input);
++  return recv_StreamEvent(seqid);
++}
++
++int32_t CefBrowserConcurrentClient::send_StreamEvent(const StreamEventType& input)
++{
++  int32_t cseqid = this->sync_->generateSeqId();
++  ::apache::thrift::async::TConcurrentSendSentry sentry(this->sync_.get());
++  oprot_->writeMessageBegin("StreamEvent", ::apache::thrift::protocol::T_CALL, cseqid);
++
++  CefBrowser_StreamEvent_pargs args;
++  args.input = &input;
++  args.write(oprot_);
++
++  oprot_->writeMessageEnd();
++  oprot_->getTransport()->writeEnd();
++  oprot_->getTransport()->flush();
++
++  sentry.commit();
++  return cseqid;
++}
++
++bool CefBrowserConcurrentClient::recv_StreamEvent(const int32_t seqid)
++{
++
++  int32_t rseqid = 0;
++  std::string fname;
++  ::apache::thrift::protocol::TMessageType mtype;
++
++  // the read mutex gets dropped and reacquired as part of waitForWork()
++  // The destructor of this sentry wakes up other clients
++  ::apache::thrift::async::TConcurrentRecvSentry sentry(this->sync_.get(), seqid);
++
++  while(true) {
++    if(!this->sync_->getPending(fname, mtype, rseqid)) {
++      iprot_->readMessageBegin(fname, mtype, rseqid);
++    }
++    if(seqid == rseqid) {
++      if (mtype == ::apache::thrift::protocol::T_EXCEPTION) {
++        ::apache::thrift::TApplicationException x;
++        x.read(iprot_);
++        iprot_->readMessageEnd();
++        iprot_->getTransport()->readEnd();
++        sentry.commit();
++        throw x;
++      }
++      if (mtype != ::apache::thrift::protocol::T_REPLY) {
++        iprot_->skip(::apache::thrift::protocol::T_STRUCT);
++        iprot_->readMessageEnd();
++        iprot_->getTransport()->readEnd();
++      }
++      if (fname.compare("StreamEvent") != 0) {
++        iprot_->skip(::apache::thrift::protocol::T_STRUCT);
++        iprot_->readMessageEnd();
++        iprot_->getTransport()->readEnd();
++
++        // in a bad state, don't commit
++        using ::apache::thrift::protocol::TProtocolException;
++        throw TProtocolException(TProtocolException::INVALID_DATA);
++      }
++      bool _return;
++      CefBrowser_StreamEvent_presult result;
++      result.success = &_return;
++      result.read(iprot_);
++      iprot_->readMessageEnd();
++      iprot_->getTransport()->readEnd();
++
++      if (result.__isset.success) {
++        sentry.commit();
++        return _return;
++      }
++      if (result.__isset.err) {
++        sentry.commit();
++        throw result.err;
++      }
++      // in a bad state, don't commit
++      throw ::apache::thrift::TApplicationException(::apache::thrift::TApplicationException::MISSING_RESULT, "StreamEvent failed: unknown result");
++    }
++    // seqid != rseqid
++    this->sync_->updatePending(fname, mtype, rseqid);
++
++    // this will temporarily unlock the readMutex, and let other clients get work done
++    this->sync_->waitForWork(seqid);
++  } // end while(true)
++}
++
+ } // namespace
+ 
+diff --git a/thrift-services/src-gen/CefBrowser.h b/thrift-services/src-gen/CefBrowser.h
+index d164980..84d97c1 100644
+--- a/thrift-services/src-gen/CefBrowser.h
++++ b/thrift-services/src-gen/CefBrowser.h
+@@ -32,6 +32,8 @@ class CefBrowserIf : virtual public  ::common::CommonServiceIf {
+   virtual bool InsertHbbtv(const InsertHbbtvType& input) = 0;
+   virtual bool InsertChannel(const InsertChannelType& input) = 0;
+   virtual bool StopVideo(const StopVideoType& input) = 0;
++  virtual bool PlayerStatus(const PlayerStatusType& input) = 0;
++  virtual bool StreamEvent(const StreamEventType& input) = 0;
+ };
+ 
+ class CefBrowserIfFactory : virtual public  ::common::CommonServiceIfFactory {
+@@ -97,6 +99,14 @@ class CefBrowserNull : virtual public CefBrowserIf , virtual public  ::common::C
+     bool _return = false;
+     return _return;
+   }
++  bool PlayerStatus(const PlayerStatusType& /* input */) override {
++    bool _return = false;
++    return _return;
++  }
++  bool StreamEvent(const StreamEventType& /* input */) override {
++    bool _return = false;
++    return _return;
++  }
+ };
+ 
+ typedef struct _CefBrowser_LoadUrl_args__isset {
+@@ -971,6 +981,202 @@ class CefBrowser_StopVideo_presult {
+ 
+ };
+ 
++typedef struct _CefBrowser_PlayerStatus_args__isset {
++  _CefBrowser_PlayerStatus_args__isset() : input(false) {}
++  bool input :1;
++} _CefBrowser_PlayerStatus_args__isset;
++
++class CefBrowser_PlayerStatus_args {
++ public:
++
++  CefBrowser_PlayerStatus_args(const CefBrowser_PlayerStatus_args&) noexcept;
++  CefBrowser_PlayerStatus_args& operator=(const CefBrowser_PlayerStatus_args&) noexcept;
++  CefBrowser_PlayerStatus_args() noexcept;
++
++  virtual ~CefBrowser_PlayerStatus_args() noexcept;
++  PlayerStatusType input;
++
++  _CefBrowser_PlayerStatus_args__isset __isset;
++
++  void __set_input(const PlayerStatusType& val);
++
++  bool operator == (const CefBrowser_PlayerStatus_args & rhs) const;
++  bool operator != (const CefBrowser_PlayerStatus_args &rhs) const {
++    return !(*this == rhs);
++  }
++
++  bool operator < (const CefBrowser_PlayerStatus_args & ) const;
++
++  uint32_t read(::apache::thrift::protocol::TProtocol* iprot);
++  uint32_t write(::apache::thrift::protocol::TProtocol* oprot) const;
++
++};
++
++
++class CefBrowser_PlayerStatus_pargs {
++ public:
++
++
++  virtual ~CefBrowser_PlayerStatus_pargs() noexcept;
++  const PlayerStatusType* input;
++
++  uint32_t write(::apache::thrift::protocol::TProtocol* oprot) const;
++
++};
++
++typedef struct _CefBrowser_PlayerStatus_result__isset {
++  _CefBrowser_PlayerStatus_result__isset() : success(false), err(false) {}
++  bool success :1;
++  bool err :1;
++} _CefBrowser_PlayerStatus_result__isset;
++
++class CefBrowser_PlayerStatus_result {
++ public:
++
++  CefBrowser_PlayerStatus_result(const CefBrowser_PlayerStatus_result&);
++  CefBrowser_PlayerStatus_result& operator=(const CefBrowser_PlayerStatus_result&);
++  CefBrowser_PlayerStatus_result() noexcept;
++
++  virtual ~CefBrowser_PlayerStatus_result() noexcept;
++  bool success;
++   ::common::OperationFailed err;
++
++  _CefBrowser_PlayerStatus_result__isset __isset;
++
++  void __set_success(const bool val);
++
++  void __set_err(const  ::common::OperationFailed& val);
++
++  bool operator == (const CefBrowser_PlayerStatus_result & rhs) const;
++  bool operator != (const CefBrowser_PlayerStatus_result &rhs) const {
++    return !(*this == rhs);
++  }
++
++  bool operator < (const CefBrowser_PlayerStatus_result & ) const;
++
++  uint32_t read(::apache::thrift::protocol::TProtocol* iprot);
++  uint32_t write(::apache::thrift::protocol::TProtocol* oprot) const;
++
++};
++
++typedef struct _CefBrowser_PlayerStatus_presult__isset {
++  _CefBrowser_PlayerStatus_presult__isset() : success(false), err(false) {}
++  bool success :1;
++  bool err :1;
++} _CefBrowser_PlayerStatus_presult__isset;
++
++class CefBrowser_PlayerStatus_presult {
++ public:
++
++
++  virtual ~CefBrowser_PlayerStatus_presult() noexcept;
++  bool* success;
++   ::common::OperationFailed err;
++
++  _CefBrowser_PlayerStatus_presult__isset __isset;
++
++  uint32_t read(::apache::thrift::protocol::TProtocol* iprot);
++
++};
++
++typedef struct _CefBrowser_StreamEvent_args__isset {
++  _CefBrowser_StreamEvent_args__isset() : input(false) {}
++  bool input :1;
++} _CefBrowser_StreamEvent_args__isset;
++
++class CefBrowser_StreamEvent_args {
++ public:
++
++  CefBrowser_StreamEvent_args(const CefBrowser_StreamEvent_args&);
++  CefBrowser_StreamEvent_args& operator=(const CefBrowser_StreamEvent_args&);
++  CefBrowser_StreamEvent_args() noexcept;
++
++  virtual ~CefBrowser_StreamEvent_args() noexcept;
++  StreamEventType input;
++
++  _CefBrowser_StreamEvent_args__isset __isset;
++
++  void __set_input(const StreamEventType& val);
++
++  bool operator == (const CefBrowser_StreamEvent_args & rhs) const;
++  bool operator != (const CefBrowser_StreamEvent_args &rhs) const {
++    return !(*this == rhs);
++  }
++
++  bool operator < (const CefBrowser_StreamEvent_args & ) const;
++
++  uint32_t read(::apache::thrift::protocol::TProtocol* iprot);
++  uint32_t write(::apache::thrift::protocol::TProtocol* oprot) const;
++
++};
++
++
++class CefBrowser_StreamEvent_pargs {
++ public:
++
++
++  virtual ~CefBrowser_StreamEvent_pargs() noexcept;
++  const StreamEventType* input;
++
++  uint32_t write(::apache::thrift::protocol::TProtocol* oprot) const;
++
++};
++
++typedef struct _CefBrowser_StreamEvent_result__isset {
++  _CefBrowser_StreamEvent_result__isset() : success(false), err(false) {}
++  bool success :1;
++  bool err :1;
++} _CefBrowser_StreamEvent_result__isset;
++
++class CefBrowser_StreamEvent_result {
++ public:
++
++  CefBrowser_StreamEvent_result(const CefBrowser_StreamEvent_result&);
++  CefBrowser_StreamEvent_result& operator=(const CefBrowser_StreamEvent_result&);
++  CefBrowser_StreamEvent_result() noexcept;
++
++  virtual ~CefBrowser_StreamEvent_result() noexcept;
++  bool success;
++   ::common::OperationFailed err;
++
++  _CefBrowser_StreamEvent_result__isset __isset;
++
++  void __set_success(const bool val);
++
++  void __set_err(const  ::common::OperationFailed& val);
++
++  bool operator == (const CefBrowser_StreamEvent_result & rhs) const;
++  bool operator != (const CefBrowser_StreamEvent_result &rhs) const {
++    return !(*this == rhs);
++  }
++
++  bool operator < (const CefBrowser_StreamEvent_result & ) const;
++
++  uint32_t read(::apache::thrift::protocol::TProtocol* iprot);
++  uint32_t write(::apache::thrift::protocol::TProtocol* oprot) const;
++
++};
++
++typedef struct _CefBrowser_StreamEvent_presult__isset {
++  _CefBrowser_StreamEvent_presult__isset() : success(false), err(false) {}
++  bool success :1;
++  bool err :1;
++} _CefBrowser_StreamEvent_presult__isset;
++
++class CefBrowser_StreamEvent_presult {
++ public:
++
++
++  virtual ~CefBrowser_StreamEvent_presult() noexcept;
++  bool* success;
++   ::common::OperationFailed err;
++
++  _CefBrowser_StreamEvent_presult__isset __isset;
++
++  uint32_t read(::apache::thrift::protocol::TProtocol* iprot);
++
++};
++
+ class CefBrowserClient : virtual public CefBrowserIf, public  ::common::CommonServiceClient {
+  public:
+   CefBrowserClient(std::shared_ptr< ::apache::thrift::protocol::TProtocol> prot) :
+@@ -1009,6 +1215,12 @@ class CefBrowserClient : virtual public CefBrowserIf, public  ::common::CommonSe
+   bool StopVideo(const StopVideoType& input) override;
+   void send_StopVideo(const StopVideoType& input);
+   bool recv_StopVideo();
++  bool PlayerStatus(const PlayerStatusType& input) override;
++  void send_PlayerStatus(const PlayerStatusType& input);
++  bool recv_PlayerStatus();
++  bool StreamEvent(const StreamEventType& input) override;
++  void send_StreamEvent(const StreamEventType& input);
++  bool recv_StreamEvent();
+ };
+ 
+ class CefBrowserProcessor : public  ::common::CommonServiceProcessor {
+@@ -1028,6 +1240,8 @@ class CefBrowserProcessor : public  ::common::CommonServiceProcessor {
+   void process_InsertHbbtv(int32_t seqid, ::apache::thrift::protocol::TProtocol* iprot, ::apache::thrift::protocol::TProtocol* oprot, void* callContext);
+   void process_InsertChannel(int32_t seqid, ::apache::thrift::protocol::TProtocol* iprot, ::apache::thrift::protocol::TProtocol* oprot, void* callContext);
+   void process_StopVideo(int32_t seqid, ::apache::thrift::protocol::TProtocol* iprot, ::apache::thrift::protocol::TProtocol* oprot, void* callContext);
++  void process_PlayerStatus(int32_t seqid, ::apache::thrift::protocol::TProtocol* iprot, ::apache::thrift::protocol::TProtocol* oprot, void* callContext);
++  void process_StreamEvent(int32_t seqid, ::apache::thrift::protocol::TProtocol* iprot, ::apache::thrift::protocol::TProtocol* oprot, void* callContext);
+  public:
+   CefBrowserProcessor(::std::shared_ptr<CefBrowserIf> iface) :
+      ::common::CommonServiceProcessor(iface),
+@@ -1041,6 +1255,8 @@ class CefBrowserProcessor : public  ::common::CommonServiceProcessor {
+     processMap_["InsertHbbtv"] = &CefBrowserProcessor::process_InsertHbbtv;
+     processMap_["InsertChannel"] = &CefBrowserProcessor::process_InsertChannel;
+     processMap_["StopVideo"] = &CefBrowserProcessor::process_StopVideo;
++    processMap_["PlayerStatus"] = &CefBrowserProcessor::process_PlayerStatus;
++    processMap_["StreamEvent"] = &CefBrowserProcessor::process_StreamEvent;
+   }
+ 
+   virtual ~CefBrowserProcessor() {}
+@@ -1155,6 +1371,24 @@ class CefBrowserMultiface : virtual public CefBrowserIf, public  ::common::Commo
+     return ifaces_[i]->StopVideo(input);
+   }
+ 
++  bool PlayerStatus(const PlayerStatusType& input) override {
++    size_t sz = ifaces_.size();
++    size_t i = 0;
++    for (; i < (sz - 1); ++i) {
++      ifaces_[i]->PlayerStatus(input);
++    }
++    return ifaces_[i]->PlayerStatus(input);
++  }
++
++  bool StreamEvent(const StreamEventType& input) override {
++    size_t sz = ifaces_.size();
++    size_t i = 0;
++    for (; i < (sz - 1); ++i) {
++      ifaces_[i]->StreamEvent(input);
++    }
++    return ifaces_[i]->StreamEvent(input);
++  }
++
+ };
+ 
+ // The 'concurrent' client is a thread safe client that correctly handles
+@@ -1198,6 +1432,12 @@ class CefBrowserConcurrentClient : virtual public CefBrowserIf, public  ::common
+   bool StopVideo(const StopVideoType& input) override;
+   int32_t send_StopVideo(const StopVideoType& input);
+   bool recv_StopVideo(const int32_t seqid);
++  bool PlayerStatus(const PlayerStatusType& input) override;
++  int32_t send_PlayerStatus(const PlayerStatusType& input);
++  bool recv_PlayerStatus(const int32_t seqid);
++  bool StreamEvent(const StreamEventType& input) override;
++  int32_t send_StreamEvent(const StreamEventType& input);
++  bool recv_StreamEvent(const int32_t seqid);
+ };
+ 
+ #ifdef _MSC_VER
+diff --git a/thrift-services/src-gen/CefBrowser_server.skeleton.cpp b/thrift-services/src-gen/CefBrowser_server.skeleton.cpp
+index 307f3eb..b8887df 100644
+--- a/thrift-services/src-gen/CefBrowser_server.skeleton.cpp
++++ b/thrift-services/src-gen/CefBrowser_server.skeleton.cpp
+@@ -65,6 +65,16 @@ class CefBrowserHandler : virtual public CefBrowserIf {
+     printf("StopVideo\n");
+   }
+ 
++  bool PlayerStatus(const PlayerStatusType& input) {
++    // Your implementation goes here
++    printf("PlayerStatus\n");
++  }
++
++  bool StreamEvent(const StreamEventType& input) {
++    // Your implementation goes here
++    printf("StreamEvent\n");
++  }
++
+ };
+ 
+ int main(int argc, char **argv) {
+diff --git a/thrift-services/src-gen/VdrPluginWeb.cpp b/thrift-services/src-gen/VdrPluginWeb.cpp
+index 0a4adaf..add4c27 100644
+--- a/thrift-services/src-gen/VdrPluginWeb.cpp
++++ b/thrift-services/src-gen/VdrPluginWeb.cpp
+@@ -2638,6 +2638,621 @@ uint32_t VdrPluginWeb_IsWebActive_presult::read(::apache::thrift::protocol::TPro
+   return xfer;
+ }
+ 
++
++VdrPluginWeb_SelectSubtitleTrack_args::~VdrPluginWeb_SelectSubtitleTrack_args() noexcept {
++}
++
++VdrPluginWeb_SelectSubtitleTrack_args::VdrPluginWeb_SelectSubtitleTrack_args() noexcept {
++}
++
++uint32_t VdrPluginWeb_SelectSubtitleTrack_args::read(::apache::thrift::protocol::TProtocol* iprot) {
++
++  ::apache::thrift::protocol::TInputRecursionTracker tracker(*iprot);
++  uint32_t xfer = 0;
++  std::string fname;
++  ::apache::thrift::protocol::TType ftype;
++  int16_t fid;
++
++  xfer += iprot->readStructBegin(fname);
++
++  using ::apache::thrift::protocol::TProtocolException;
++
++
++  while (true)
++  {
++    xfer += iprot->readFieldBegin(fname, ftype, fid);
++    if (ftype == ::apache::thrift::protocol::T_STOP) {
++      break;
++    }
++    switch (fid)
++    {
++      case 1:
++        if (ftype == ::apache::thrift::protocol::T_STRUCT) {
++          xfer += this->input.read(iprot);
++          this->__isset.input = true;
++        } else {
++          xfer += iprot->skip(ftype);
++        }
++        break;
++      default:
++        xfer += iprot->skip(ftype);
++        break;
++    }
++    xfer += iprot->readFieldEnd();
++  }
++
++  xfer += iprot->readStructEnd();
++
++  return xfer;
++}
++
++uint32_t VdrPluginWeb_SelectSubtitleTrack_args::write(::apache::thrift::protocol::TProtocol* oprot) const {
++  uint32_t xfer = 0;
++  ::apache::thrift::protocol::TOutputRecursionTracker tracker(*oprot);
++  xfer += oprot->writeStructBegin("VdrPluginWeb_SelectSubtitleTrack_args");
++
++  xfer += oprot->writeFieldBegin("input", ::apache::thrift::protocol::T_STRUCT, 1);
++  xfer += this->input.write(oprot);
++  xfer += oprot->writeFieldEnd();
++
++  xfer += oprot->writeFieldStop();
++  xfer += oprot->writeStructEnd();
++  return xfer;
++}
++
++
++VdrPluginWeb_SelectSubtitleTrack_pargs::~VdrPluginWeb_SelectSubtitleTrack_pargs() noexcept {
++}
++
++
++uint32_t VdrPluginWeb_SelectSubtitleTrack_pargs::write(::apache::thrift::protocol::TProtocol* oprot) const {
++  uint32_t xfer = 0;
++  ::apache::thrift::protocol::TOutputRecursionTracker tracker(*oprot);
++  xfer += oprot->writeStructBegin("VdrPluginWeb_SelectSubtitleTrack_pargs");
++
++  xfer += oprot->writeFieldBegin("input", ::apache::thrift::protocol::T_STRUCT, 1);
++  xfer += (*(this->input)).write(oprot);
++  xfer += oprot->writeFieldEnd();
++
++  xfer += oprot->writeFieldStop();
++  xfer += oprot->writeStructEnd();
++  return xfer;
++}
++
++
++VdrPluginWeb_SelectSubtitleTrack_result::~VdrPluginWeb_SelectSubtitleTrack_result() noexcept {
++}
++
++VdrPluginWeb_SelectSubtitleTrack_result::VdrPluginWeb_SelectSubtitleTrack_result() noexcept
++   : success(0) {
++}
++
++uint32_t VdrPluginWeb_SelectSubtitleTrack_result::read(::apache::thrift::protocol::TProtocol* iprot) {
++
++  ::apache::thrift::protocol::TInputRecursionTracker tracker(*iprot);
++  uint32_t xfer = 0;
++  std::string fname;
++  ::apache::thrift::protocol::TType ftype;
++  int16_t fid;
++
++  xfer += iprot->readStructBegin(fname);
++
++  using ::apache::thrift::protocol::TProtocolException;
++
++
++  while (true)
++  {
++    xfer += iprot->readFieldBegin(fname, ftype, fid);
++    if (ftype == ::apache::thrift::protocol::T_STOP) {
++      break;
++    }
++    switch (fid)
++    {
++      case 0:
++        if (ftype == ::apache::thrift::protocol::T_BOOL) {
++          xfer += iprot->readBool(this->success);
++          this->__isset.success = true;
++        } else {
++          xfer += iprot->skip(ftype);
++        }
++        break;
++      case 1:
++        if (ftype == ::apache::thrift::protocol::T_STRUCT) {
++          xfer += this->err.read(iprot);
++          this->__isset.err = true;
++        } else {
++          xfer += iprot->skip(ftype);
++        }
++        break;
++      default:
++        xfer += iprot->skip(ftype);
++        break;
++    }
++    xfer += iprot->readFieldEnd();
++  }
++
++  xfer += iprot->readStructEnd();
++
++  return xfer;
++}
++
++uint32_t VdrPluginWeb_SelectSubtitleTrack_result::write(::apache::thrift::protocol::TProtocol* oprot) const {
++
++  uint32_t xfer = 0;
++
++  xfer += oprot->writeStructBegin("VdrPluginWeb_SelectSubtitleTrack_result");
++
++  if (this->__isset.success) {
++    xfer += oprot->writeFieldBegin("success", ::apache::thrift::protocol::T_BOOL, 0);
++    xfer += oprot->writeBool(this->success);
++    xfer += oprot->writeFieldEnd();
++  } else if (this->__isset.err) {
++    xfer += oprot->writeFieldBegin("err", ::apache::thrift::protocol::T_STRUCT, 1);
++    xfer += this->err.write(oprot);
++    xfer += oprot->writeFieldEnd();
++  }
++  xfer += oprot->writeFieldStop();
++  xfer += oprot->writeStructEnd();
++  return xfer;
++}
++
++
++VdrPluginWeb_SelectSubtitleTrack_presult::~VdrPluginWeb_SelectSubtitleTrack_presult() noexcept {
++}
++
++
++uint32_t VdrPluginWeb_SelectSubtitleTrack_presult::read(::apache::thrift::protocol::TProtocol* iprot) {
++
++  ::apache::thrift::protocol::TInputRecursionTracker tracker(*iprot);
++  uint32_t xfer = 0;
++  std::string fname;
++  ::apache::thrift::protocol::TType ftype;
++  int16_t fid;
++
++  xfer += iprot->readStructBegin(fname);
++
++  using ::apache::thrift::protocol::TProtocolException;
++
++
++  while (true)
++  {
++    xfer += iprot->readFieldBegin(fname, ftype, fid);
++    if (ftype == ::apache::thrift::protocol::T_STOP) {
++      break;
++    }
++    switch (fid)
++    {
++      case 0:
++        if (ftype == ::apache::thrift::protocol::T_BOOL) {
++          xfer += iprot->readBool((*(this->success)));
++          this->__isset.success = true;
++        } else {
++          xfer += iprot->skip(ftype);
++        }
++        break;
++      case 1:
++        if (ftype == ::apache::thrift::protocol::T_STRUCT) {
++          xfer += this->err.read(iprot);
++          this->__isset.err = true;
++        } else {
++          xfer += iprot->skip(ftype);
++        }
++        break;
++      default:
++        xfer += iprot->skip(ftype);
++        break;
++    }
++    xfer += iprot->readFieldEnd();
++  }
++
++  xfer += iprot->readStructEnd();
++
++  return xfer;
++}
++
++
++VdrPluginWeb_EndOfStream_args::~VdrPluginWeb_EndOfStream_args() noexcept {
++}
++
++VdrPluginWeb_EndOfStream_args::VdrPluginWeb_EndOfStream_args() noexcept {
++}
++
++uint32_t VdrPluginWeb_EndOfStream_args::read(::apache::thrift::protocol::TProtocol* iprot) {
++
++  ::apache::thrift::protocol::TInputRecursionTracker tracker(*iprot);
++  uint32_t xfer = 0;
++  std::string fname;
++  ::apache::thrift::protocol::TType ftype;
++  int16_t fid;
++
++  xfer += iprot->readStructBegin(fname);
++
++  using ::apache::thrift::protocol::TProtocolException;
++
++
++  while (true)
++  {
++    xfer += iprot->readFieldBegin(fname, ftype, fid);
++    if (ftype == ::apache::thrift::protocol::T_STOP) {
++      break;
++    }
++    xfer += iprot->skip(ftype);
++    xfer += iprot->readFieldEnd();
++  }
++
++  xfer += iprot->readStructEnd();
++
++  return xfer;
++}
++
++uint32_t VdrPluginWeb_EndOfStream_args::write(::apache::thrift::protocol::TProtocol* oprot) const {
++  uint32_t xfer = 0;
++  ::apache::thrift::protocol::TOutputRecursionTracker tracker(*oprot);
++  xfer += oprot->writeStructBegin("VdrPluginWeb_EndOfStream_args");
++
++  xfer += oprot->writeFieldStop();
++  xfer += oprot->writeStructEnd();
++  return xfer;
++}
++
++
++VdrPluginWeb_EndOfStream_pargs::~VdrPluginWeb_EndOfStream_pargs() noexcept {
++}
++
++
++uint32_t VdrPluginWeb_EndOfStream_pargs::write(::apache::thrift::protocol::TProtocol* oprot) const {
++  uint32_t xfer = 0;
++  ::apache::thrift::protocol::TOutputRecursionTracker tracker(*oprot);
++  xfer += oprot->writeStructBegin("VdrPluginWeb_EndOfStream_pargs");
++
++  xfer += oprot->writeFieldStop();
++  xfer += oprot->writeStructEnd();
++  return xfer;
++}
++
++
++VdrPluginWeb_EndOfStream_result::~VdrPluginWeb_EndOfStream_result() noexcept {
++}
++
++VdrPluginWeb_EndOfStream_result::VdrPluginWeb_EndOfStream_result() noexcept
++   : success(0) {
++}
++
++uint32_t VdrPluginWeb_EndOfStream_result::read(::apache::thrift::protocol::TProtocol* iprot) {
++
++  ::apache::thrift::protocol::TInputRecursionTracker tracker(*iprot);
++  uint32_t xfer = 0;
++  std::string fname;
++  ::apache::thrift::protocol::TType ftype;
++  int16_t fid;
++
++  xfer += iprot->readStructBegin(fname);
++
++  using ::apache::thrift::protocol::TProtocolException;
++
++
++  while (true)
++  {
++    xfer += iprot->readFieldBegin(fname, ftype, fid);
++    if (ftype == ::apache::thrift::protocol::T_STOP) {
++      break;
++    }
++    switch (fid)
++    {
++      case 0:
++        if (ftype == ::apache::thrift::protocol::T_BOOL) {
++          xfer += iprot->readBool(this->success);
++          this->__isset.success = true;
++        } else {
++          xfer += iprot->skip(ftype);
++        }
++        break;
++      case 1:
++        if (ftype == ::apache::thrift::protocol::T_STRUCT) {
++          xfer += this->err.read(iprot);
++          this->__isset.err = true;
++        } else {
++          xfer += iprot->skip(ftype);
++        }
++        break;
++      default:
++        xfer += iprot->skip(ftype);
++        break;
++    }
++    xfer += iprot->readFieldEnd();
++  }
++
++  xfer += iprot->readStructEnd();
++
++  return xfer;
++}
++
++uint32_t VdrPluginWeb_EndOfStream_result::write(::apache::thrift::protocol::TProtocol* oprot) const {
++
++  uint32_t xfer = 0;
++
++  xfer += oprot->writeStructBegin("VdrPluginWeb_EndOfStream_result");
++
++  if (this->__isset.success) {
++    xfer += oprot->writeFieldBegin("success", ::apache::thrift::protocol::T_BOOL, 0);
++    xfer += oprot->writeBool(this->success);
++    xfer += oprot->writeFieldEnd();
++  } else if (this->__isset.err) {
++    xfer += oprot->writeFieldBegin("err", ::apache::thrift::protocol::T_STRUCT, 1);
++    xfer += this->err.write(oprot);
++    xfer += oprot->writeFieldEnd();
++  }
++  xfer += oprot->writeFieldStop();
++  xfer += oprot->writeStructEnd();
++  return xfer;
++}
++
++
++VdrPluginWeb_EndOfStream_presult::~VdrPluginWeb_EndOfStream_presult() noexcept {
++}
++
++
++uint32_t VdrPluginWeb_EndOfStream_presult::read(::apache::thrift::protocol::TProtocol* iprot) {
++
++  ::apache::thrift::protocol::TInputRecursionTracker tracker(*iprot);
++  uint32_t xfer = 0;
++  std::string fname;
++  ::apache::thrift::protocol::TType ftype;
++  int16_t fid;
++
++  xfer += iprot->readStructBegin(fname);
++
++  using ::apache::thrift::protocol::TProtocolException;
++
++
++  while (true)
++  {
++    xfer += iprot->readFieldBegin(fname, ftype, fid);
++    if (ftype == ::apache::thrift::protocol::T_STOP) {
++      break;
++    }
++    switch (fid)
++    {
++      case 0:
++        if (ftype == ::apache::thrift::protocol::T_BOOL) {
++          xfer += iprot->readBool((*(this->success)));
++          this->__isset.success = true;
++        } else {
++          xfer += iprot->skip(ftype);
++        }
++        break;
++      case 1:
++        if (ftype == ::apache::thrift::protocol::T_STRUCT) {
++          xfer += this->err.read(iprot);
++          this->__isset.err = true;
++        } else {
++          xfer += iprot->skip(ftype);
++        }
++        break;
++      default:
++        xfer += iprot->skip(ftype);
++        break;
++    }
++    xfer += iprot->readFieldEnd();
++  }
++
++  xfer += iprot->readStructEnd();
++
++  return xfer;
++}
++
++
++VdrPluginWeb_StreamEventFilter_args::~VdrPluginWeb_StreamEventFilter_args() noexcept {
++}
++
++VdrPluginWeb_StreamEventFilter_args::VdrPluginWeb_StreamEventFilter_args() noexcept {
++}
++
++uint32_t VdrPluginWeb_StreamEventFilter_args::read(::apache::thrift::protocol::TProtocol* iprot) {
++
++  ::apache::thrift::protocol::TInputRecursionTracker tracker(*iprot);
++  uint32_t xfer = 0;
++  std::string fname;
++  ::apache::thrift::protocol::TType ftype;
++  int16_t fid;
++
++  xfer += iprot->readStructBegin(fname);
++
++  using ::apache::thrift::protocol::TProtocolException;
++
++
++  while (true)
++  {
++    xfer += iprot->readFieldBegin(fname, ftype, fid);
++    if (ftype == ::apache::thrift::protocol::T_STOP) {
++      break;
++    }
++    switch (fid)
++    {
++      case 1:
++        if (ftype == ::apache::thrift::protocol::T_STRUCT) {
++          xfer += this->input.read(iprot);
++          this->__isset.input = true;
++        } else {
++          xfer += iprot->skip(ftype);
++        }
++        break;
++      default:
++        xfer += iprot->skip(ftype);
++        break;
++    }
++    xfer += iprot->readFieldEnd();
++  }
++
++  xfer += iprot->readStructEnd();
++
++  return xfer;
++}
++
++uint32_t VdrPluginWeb_StreamEventFilter_args::write(::apache::thrift::protocol::TProtocol* oprot) const {
++  uint32_t xfer = 0;
++  ::apache::thrift::protocol::TOutputRecursionTracker tracker(*oprot);
++  xfer += oprot->writeStructBegin("VdrPluginWeb_StreamEventFilter_args");
++
++  xfer += oprot->writeFieldBegin("input", ::apache::thrift::protocol::T_STRUCT, 1);
++  xfer += this->input.write(oprot);
++  xfer += oprot->writeFieldEnd();
++
++  xfer += oprot->writeFieldStop();
++  xfer += oprot->writeStructEnd();
++  return xfer;
++}
++
++
++VdrPluginWeb_StreamEventFilter_pargs::~VdrPluginWeb_StreamEventFilter_pargs() noexcept {
++}
++
++
++uint32_t VdrPluginWeb_StreamEventFilter_pargs::write(::apache::thrift::protocol::TProtocol* oprot) const {
++  uint32_t xfer = 0;
++  ::apache::thrift::protocol::TOutputRecursionTracker tracker(*oprot);
++  xfer += oprot->writeStructBegin("VdrPluginWeb_StreamEventFilter_pargs");
++
++  xfer += oprot->writeFieldBegin("input", ::apache::thrift::protocol::T_STRUCT, 1);
++  xfer += (*(this->input)).write(oprot);
++  xfer += oprot->writeFieldEnd();
++
++  xfer += oprot->writeFieldStop();
++  xfer += oprot->writeStructEnd();
++  return xfer;
++}
++
++
++VdrPluginWeb_StreamEventFilter_result::~VdrPluginWeb_StreamEventFilter_result() noexcept {
++}
++
++VdrPluginWeb_StreamEventFilter_result::VdrPluginWeb_StreamEventFilter_result() noexcept
++   : success(0) {
++}
++
++uint32_t VdrPluginWeb_StreamEventFilter_result::read(::apache::thrift::protocol::TProtocol* iprot) {
++
++  ::apache::thrift::protocol::TInputRecursionTracker tracker(*iprot);
++  uint32_t xfer = 0;
++  std::string fname;
++  ::apache::thrift::protocol::TType ftype;
++  int16_t fid;
++
++  xfer += iprot->readStructBegin(fname);
++
++  using ::apache::thrift::protocol::TProtocolException;
++
++
++  while (true)
++  {
++    xfer += iprot->readFieldBegin(fname, ftype, fid);
++    if (ftype == ::apache::thrift::protocol::T_STOP) {
++      break;
++    }
++    switch (fid)
++    {
++      case 0:
++        if (ftype == ::apache::thrift::protocol::T_BOOL) {
++          xfer += iprot->readBool(this->success);
++          this->__isset.success = true;
++        } else {
++          xfer += iprot->skip(ftype);
++        }
++        break;
++      case 1:
++        if (ftype == ::apache::thrift::protocol::T_STRUCT) {
++          xfer += this->err.read(iprot);
++          this->__isset.err = true;
++        } else {
++          xfer += iprot->skip(ftype);
++        }
++        break;
++      default:
++        xfer += iprot->skip(ftype);
++        break;
++    }
++    xfer += iprot->readFieldEnd();
++  }
++
++  xfer += iprot->readStructEnd();
++
++  return xfer;
++}
++
++uint32_t VdrPluginWeb_StreamEventFilter_result::write(::apache::thrift::protocol::TProtocol* oprot) const {
++
++  uint32_t xfer = 0;
++
++  xfer += oprot->writeStructBegin("VdrPluginWeb_StreamEventFilter_result");
++
++  if (this->__isset.success) {
++    xfer += oprot->writeFieldBegin("success", ::apache::thrift::protocol::T_BOOL, 0);
++    xfer += oprot->writeBool(this->success);
++    xfer += oprot->writeFieldEnd();
++  } else if (this->__isset.err) {
++    xfer += oprot->writeFieldBegin("err", ::apache::thrift::protocol::T_STRUCT, 1);
++    xfer += this->err.write(oprot);
++    xfer += oprot->writeFieldEnd();
++  }
++  xfer += oprot->writeFieldStop();
++  xfer += oprot->writeStructEnd();
++  return xfer;
++}
++
++
++VdrPluginWeb_StreamEventFilter_presult::~VdrPluginWeb_StreamEventFilter_presult() noexcept {
++}
++
++
++uint32_t VdrPluginWeb_StreamEventFilter_presult::read(::apache::thrift::protocol::TProtocol* iprot) {
++
++  ::apache::thrift::protocol::TInputRecursionTracker tracker(*iprot);
++  uint32_t xfer = 0;
++  std::string fname;
++  ::apache::thrift::protocol::TType ftype;
++  int16_t fid;
++
++  xfer += iprot->readStructBegin(fname);
++
++  using ::apache::thrift::protocol::TProtocolException;
++
++
++  while (true)
++  {
++    xfer += iprot->readFieldBegin(fname, ftype, fid);
++    if (ftype == ::apache::thrift::protocol::T_STOP) {
++      break;
++    }
++    switch (fid)
++    {
++      case 0:
++        if (ftype == ::apache::thrift::protocol::T_BOOL) {
++          xfer += iprot->readBool((*(this->success)));
++          this->__isset.success = true;
++        } else {
++          xfer += iprot->skip(ftype);
++        }
++        break;
++      case 1:
++        if (ftype == ::apache::thrift::protocol::T_STRUCT) {
++          xfer += this->err.read(iprot);
++          this->__isset.err = true;
++        } else {
++          xfer += iprot->skip(ftype);
++        }
++        break;
++      default:
++        xfer += iprot->skip(ftype);
++        break;
++    }
++    xfer += iprot->readFieldEnd();
++  }
++
++  xfer += iprot->readStructEnd();
++
++  return xfer;
++}
++
+ bool VdrPluginWebClient::ProcessOsdUpdate(const ProcessOsdUpdateType& input)
+ {
+   send_ProcessOsdUpdate(input);
+@@ -3021,7 +3636,188 @@ void VdrPluginWebClient::send_ResumeVideo()
+   oprot_->getTransport()->flush();
+ }
+ 
+-bool VdrPluginWebClient::recv_ResumeVideo()
++bool VdrPluginWebClient::recv_ResumeVideo()
++{
++
++  int32_t rseqid = 0;
++  std::string fname;
++  ::apache::thrift::protocol::TMessageType mtype;
++
++  iprot_->readMessageBegin(fname, mtype, rseqid);
++  if (mtype == ::apache::thrift::protocol::T_EXCEPTION) {
++    ::apache::thrift::TApplicationException x;
++    x.read(iprot_);
++    iprot_->readMessageEnd();
++    iprot_->getTransport()->readEnd();
++    throw x;
++  }
++  if (mtype != ::apache::thrift::protocol::T_REPLY) {
++    iprot_->skip(::apache::thrift::protocol::T_STRUCT);
++    iprot_->readMessageEnd();
++    iprot_->getTransport()->readEnd();
++  }
++  if (fname.compare("ResumeVideo") != 0) {
++    iprot_->skip(::apache::thrift::protocol::T_STRUCT);
++    iprot_->readMessageEnd();
++    iprot_->getTransport()->readEnd();
++  }
++  bool _return;
++  VdrPluginWeb_ResumeVideo_presult result;
++  result.success = &_return;
++  result.read(iprot_);
++  iprot_->readMessageEnd();
++  iprot_->getTransport()->readEnd();
++
++  if (result.__isset.success) {
++    return _return;
++  }
++  if (result.__isset.err) {
++    throw result.err;
++  }
++  throw ::apache::thrift::TApplicationException(::apache::thrift::TApplicationException::MISSING_RESULT, "ResumeVideo failed: unknown result");
++}
++
++bool VdrPluginWebClient::Seeked()
++{
++  send_Seeked();
++  return recv_Seeked();
++}
++
++void VdrPluginWebClient::send_Seeked()
++{
++  int32_t cseqid = 0;
++  oprot_->writeMessageBegin("Seeked", ::apache::thrift::protocol::T_CALL, cseqid);
++
++  VdrPluginWeb_Seeked_pargs args;
++  args.write(oprot_);
++
++  oprot_->writeMessageEnd();
++  oprot_->getTransport()->writeEnd();
++  oprot_->getTransport()->flush();
++}
++
++bool VdrPluginWebClient::recv_Seeked()
++{
++
++  int32_t rseqid = 0;
++  std::string fname;
++  ::apache::thrift::protocol::TMessageType mtype;
++
++  iprot_->readMessageBegin(fname, mtype, rseqid);
++  if (mtype == ::apache::thrift::protocol::T_EXCEPTION) {
++    ::apache::thrift::TApplicationException x;
++    x.read(iprot_);
++    iprot_->readMessageEnd();
++    iprot_->getTransport()->readEnd();
++    throw x;
++  }
++  if (mtype != ::apache::thrift::protocol::T_REPLY) {
++    iprot_->skip(::apache::thrift::protocol::T_STRUCT);
++    iprot_->readMessageEnd();
++    iprot_->getTransport()->readEnd();
++  }
++  if (fname.compare("Seeked") != 0) {
++    iprot_->skip(::apache::thrift::protocol::T_STRUCT);
++    iprot_->readMessageEnd();
++    iprot_->getTransport()->readEnd();
++  }
++  bool _return;
++  VdrPluginWeb_Seeked_presult result;
++  result.success = &_return;
++  result.read(iprot_);
++  iprot_->readMessageEnd();
++  iprot_->getTransport()->readEnd();
++
++  if (result.__isset.success) {
++    return _return;
++  }
++  if (result.__isset.err) {
++    throw result.err;
++  }
++  throw ::apache::thrift::TApplicationException(::apache::thrift::TApplicationException::MISSING_RESULT, "Seeked failed: unknown result");
++}
++
++bool VdrPluginWebClient::VideoSize(const VideoSizeType& input)
++{
++  send_VideoSize(input);
++  return recv_VideoSize();
++}
++
++void VdrPluginWebClient::send_VideoSize(const VideoSizeType& input)
++{
++  int32_t cseqid = 0;
++  oprot_->writeMessageBegin("VideoSize", ::apache::thrift::protocol::T_CALL, cseqid);
++
++  VdrPluginWeb_VideoSize_pargs args;
++  args.input = &input;
++  args.write(oprot_);
++
++  oprot_->writeMessageEnd();
++  oprot_->getTransport()->writeEnd();
++  oprot_->getTransport()->flush();
++}
++
++bool VdrPluginWebClient::recv_VideoSize()
++{
++
++  int32_t rseqid = 0;
++  std::string fname;
++  ::apache::thrift::protocol::TMessageType mtype;
++
++  iprot_->readMessageBegin(fname, mtype, rseqid);
++  if (mtype == ::apache::thrift::protocol::T_EXCEPTION) {
++    ::apache::thrift::TApplicationException x;
++    x.read(iprot_);
++    iprot_->readMessageEnd();
++    iprot_->getTransport()->readEnd();
++    throw x;
++  }
++  if (mtype != ::apache::thrift::protocol::T_REPLY) {
++    iprot_->skip(::apache::thrift::protocol::T_STRUCT);
++    iprot_->readMessageEnd();
++    iprot_->getTransport()->readEnd();
++  }
++  if (fname.compare("VideoSize") != 0) {
++    iprot_->skip(::apache::thrift::protocol::T_STRUCT);
++    iprot_->readMessageEnd();
++    iprot_->getTransport()->readEnd();
++  }
++  bool _return;
++  VdrPluginWeb_VideoSize_presult result;
++  result.success = &_return;
++  result.read(iprot_);
++  iprot_->readMessageEnd();
++  iprot_->getTransport()->readEnd();
++
++  if (result.__isset.success) {
++    return _return;
++  }
++  if (result.__isset.err) {
++    throw result.err;
++  }
++  throw ::apache::thrift::TApplicationException(::apache::thrift::TApplicationException::MISSING_RESULT, "VideoSize failed: unknown result");
++}
++
++bool VdrPluginWebClient::VideoFullscreen()
++{
++  send_VideoFullscreen();
++  return recv_VideoFullscreen();
++}
++
++void VdrPluginWebClient::send_VideoFullscreen()
++{
++  int32_t cseqid = 0;
++  oprot_->writeMessageBegin("VideoFullscreen", ::apache::thrift::protocol::T_CALL, cseqid);
++
++  VdrPluginWeb_VideoFullscreen_pargs args;
++  args.write(oprot_);
++
++  oprot_->writeMessageEnd();
++  oprot_->getTransport()->writeEnd();
++  oprot_->getTransport()->flush();
++}
++
++bool VdrPluginWebClient::recv_VideoFullscreen()
+ {
+ 
+   int32_t rseqid = 0;
+@@ -3041,13 +3837,13 @@ bool VdrPluginWebClient::recv_ResumeVideo()
+     iprot_->readMessageEnd();
+     iprot_->getTransport()->readEnd();
+   }
+-  if (fname.compare("ResumeVideo") != 0) {
++  if (fname.compare("VideoFullscreen") != 0) {
+     iprot_->skip(::apache::thrift::protocol::T_STRUCT);
+     iprot_->readMessageEnd();
+     iprot_->getTransport()->readEnd();
+   }
+   bool _return;
+-  VdrPluginWeb_ResumeVideo_presult result;
++  VdrPluginWeb_VideoFullscreen_presult result;
+   result.success = &_return;
+   result.read(iprot_);
+   iprot_->readMessageEnd();
+@@ -3059,21 +3855,22 @@ bool VdrPluginWebClient::recv_ResumeVideo()
+   if (result.__isset.err) {
+     throw result.err;
+   }
+-  throw ::apache::thrift::TApplicationException(::apache::thrift::TApplicationException::MISSING_RESULT, "ResumeVideo failed: unknown result");
++  throw ::apache::thrift::TApplicationException(::apache::thrift::TApplicationException::MISSING_RESULT, "VideoFullscreen failed: unknown result");
+ }
+ 
+-bool VdrPluginWebClient::Seeked()
++bool VdrPluginWebClient::ResetVideo(const ResetVideoType& input)
+ {
+-  send_Seeked();
+-  return recv_Seeked();
++  send_ResetVideo(input);
++  return recv_ResetVideo();
+ }
+ 
+-void VdrPluginWebClient::send_Seeked()
++void VdrPluginWebClient::send_ResetVideo(const ResetVideoType& input)
+ {
+   int32_t cseqid = 0;
+-  oprot_->writeMessageBegin("Seeked", ::apache::thrift::protocol::T_CALL, cseqid);
++  oprot_->writeMessageBegin("ResetVideo", ::apache::thrift::protocol::T_CALL, cseqid);
+ 
+-  VdrPluginWeb_Seeked_pargs args;
++  VdrPluginWeb_ResetVideo_pargs args;
++  args.input = &input;
+   args.write(oprot_);
+ 
+   oprot_->writeMessageEnd();
+@@ -3081,7 +3878,7 @@ void VdrPluginWebClient::send_Seeked()
+   oprot_->getTransport()->flush();
+ }
+ 
+-bool VdrPluginWebClient::recv_Seeked()
++bool VdrPluginWebClient::recv_ResetVideo()
+ {
+ 
+   int32_t rseqid = 0;
+@@ -3101,13 +3898,13 @@ bool VdrPluginWebClient::recv_Seeked()
+     iprot_->readMessageEnd();
+     iprot_->getTransport()->readEnd();
+   }
+-  if (fname.compare("Seeked") != 0) {
++  if (fname.compare("ResetVideo") != 0) {
+     iprot_->skip(::apache::thrift::protocol::T_STRUCT);
+     iprot_->readMessageEnd();
+     iprot_->getTransport()->readEnd();
+   }
+   bool _return;
+-  VdrPluginWeb_Seeked_presult result;
++  VdrPluginWeb_ResetVideo_presult result;
+   result.success = &_return;
+   result.read(iprot_);
+   iprot_->readMessageEnd();
+@@ -3119,21 +3916,21 @@ bool VdrPluginWebClient::recv_Seeked()
+   if (result.__isset.err) {
+     throw result.err;
+   }
+-  throw ::apache::thrift::TApplicationException(::apache::thrift::TApplicationException::MISSING_RESULT, "Seeked failed: unknown result");
++  throw ::apache::thrift::TApplicationException(::apache::thrift::TApplicationException::MISSING_RESULT, "ResetVideo failed: unknown result");
+ }
+ 
+-bool VdrPluginWebClient::VideoSize(const VideoSizeType& input)
++bool VdrPluginWebClient::SelectAudioTrack(const SelectAudioTrackType& input)
+ {
+-  send_VideoSize(input);
+-  return recv_VideoSize();
++  send_SelectAudioTrack(input);
++  return recv_SelectAudioTrack();
+ }
+ 
+-void VdrPluginWebClient::send_VideoSize(const VideoSizeType& input)
++void VdrPluginWebClient::send_SelectAudioTrack(const SelectAudioTrackType& input)
+ {
+   int32_t cseqid = 0;
+-  oprot_->writeMessageBegin("VideoSize", ::apache::thrift::protocol::T_CALL, cseqid);
++  oprot_->writeMessageBegin("SelectAudioTrack", ::apache::thrift::protocol::T_CALL, cseqid);
+ 
+-  VdrPluginWeb_VideoSize_pargs args;
++  VdrPluginWeb_SelectAudioTrack_pargs args;
+   args.input = &input;
+   args.write(oprot_);
+ 
+@@ -3142,7 +3939,7 @@ void VdrPluginWebClient::send_VideoSize(const VideoSizeType& input)
+   oprot_->getTransport()->flush();
+ }
+ 
+-bool VdrPluginWebClient::recv_VideoSize()
++bool VdrPluginWebClient::recv_SelectAudioTrack()
+ {
+ 
+   int32_t rseqid = 0;
+@@ -3162,13 +3959,13 @@ bool VdrPluginWebClient::recv_VideoSize()
+     iprot_->readMessageEnd();
+     iprot_->getTransport()->readEnd();
+   }
+-  if (fname.compare("VideoSize") != 0) {
++  if (fname.compare("SelectAudioTrack") != 0) {
+     iprot_->skip(::apache::thrift::protocol::T_STRUCT);
+     iprot_->readMessageEnd();
+     iprot_->getTransport()->readEnd();
+   }
+   bool _return;
+-  VdrPluginWeb_VideoSize_presult result;
++  VdrPluginWeb_SelectAudioTrack_presult result;
+   result.success = &_return;
+   result.read(iprot_);
+   iprot_->readMessageEnd();
+@@ -3180,21 +3977,21 @@ bool VdrPluginWebClient::recv_VideoSize()
+   if (result.__isset.err) {
+     throw result.err;
+   }
+-  throw ::apache::thrift::TApplicationException(::apache::thrift::TApplicationException::MISSING_RESULT, "VideoSize failed: unknown result");
++  throw ::apache::thrift::TApplicationException(::apache::thrift::TApplicationException::MISSING_RESULT, "SelectAudioTrack failed: unknown result");
+ }
+ 
+-bool VdrPluginWebClient::VideoFullscreen()
++bool VdrPluginWebClient::IsWebActive()
+ {
+-  send_VideoFullscreen();
+-  return recv_VideoFullscreen();
++  send_IsWebActive();
++  return recv_IsWebActive();
+ }
+ 
+-void VdrPluginWebClient::send_VideoFullscreen()
++void VdrPluginWebClient::send_IsWebActive()
+ {
+   int32_t cseqid = 0;
+-  oprot_->writeMessageBegin("VideoFullscreen", ::apache::thrift::protocol::T_CALL, cseqid);
++  oprot_->writeMessageBegin("IsWebActive", ::apache::thrift::protocol::T_CALL, cseqid);
+ 
+-  VdrPluginWeb_VideoFullscreen_pargs args;
++  VdrPluginWeb_IsWebActive_pargs args;
+   args.write(oprot_);
+ 
+   oprot_->writeMessageEnd();
+@@ -3202,7 +3999,7 @@ void VdrPluginWebClient::send_VideoFullscreen()
+   oprot_->getTransport()->flush();
+ }
+ 
+-bool VdrPluginWebClient::recv_VideoFullscreen()
++bool VdrPluginWebClient::recv_IsWebActive()
+ {
+ 
+   int32_t rseqid = 0;
+@@ -3222,13 +4019,13 @@ bool VdrPluginWebClient::recv_VideoFullscreen()
+     iprot_->readMessageEnd();
+     iprot_->getTransport()->readEnd();
+   }
+-  if (fname.compare("VideoFullscreen") != 0) {
++  if (fname.compare("IsWebActive") != 0) {
+     iprot_->skip(::apache::thrift::protocol::T_STRUCT);
+     iprot_->readMessageEnd();
+     iprot_->getTransport()->readEnd();
+   }
+   bool _return;
+-  VdrPluginWeb_VideoFullscreen_presult result;
++  VdrPluginWeb_IsWebActive_presult result;
+   result.success = &_return;
+   result.read(iprot_);
+   iprot_->readMessageEnd();
+@@ -3240,21 +4037,21 @@ bool VdrPluginWebClient::recv_VideoFullscreen()
+   if (result.__isset.err) {
+     throw result.err;
+   }
+-  throw ::apache::thrift::TApplicationException(::apache::thrift::TApplicationException::MISSING_RESULT, "VideoFullscreen failed: unknown result");
++  throw ::apache::thrift::TApplicationException(::apache::thrift::TApplicationException::MISSING_RESULT, "IsWebActive failed: unknown result");
+ }
+ 
+-bool VdrPluginWebClient::ResetVideo(const ResetVideoType& input)
++bool VdrPluginWebClient::SelectSubtitleTrack(const SelectSubtitleTrackType& input)
+ {
+-  send_ResetVideo(input);
+-  return recv_ResetVideo();
++  send_SelectSubtitleTrack(input);
++  return recv_SelectSubtitleTrack();
+ }
+ 
+-void VdrPluginWebClient::send_ResetVideo(const ResetVideoType& input)
++void VdrPluginWebClient::send_SelectSubtitleTrack(const SelectSubtitleTrackType& input)
+ {
+   int32_t cseqid = 0;
+-  oprot_->writeMessageBegin("ResetVideo", ::apache::thrift::protocol::T_CALL, cseqid);
++  oprot_->writeMessageBegin("SelectSubtitleTrack", ::apache::thrift::protocol::T_CALL, cseqid);
+ 
+-  VdrPluginWeb_ResetVideo_pargs args;
++  VdrPluginWeb_SelectSubtitleTrack_pargs args;
+   args.input = &input;
+   args.write(oprot_);
+ 
+@@ -3263,7 +4060,7 @@ void VdrPluginWebClient::send_ResetVideo(const ResetVideoType& input)
+   oprot_->getTransport()->flush();
+ }
+ 
+-bool VdrPluginWebClient::recv_ResetVideo()
++bool VdrPluginWebClient::recv_SelectSubtitleTrack()
+ {
+ 
+   int32_t rseqid = 0;
+@@ -3283,13 +4080,13 @@ bool VdrPluginWebClient::recv_ResetVideo()
+     iprot_->readMessageEnd();
+     iprot_->getTransport()->readEnd();
+   }
+-  if (fname.compare("ResetVideo") != 0) {
++  if (fname.compare("SelectSubtitleTrack") != 0) {
+     iprot_->skip(::apache::thrift::protocol::T_STRUCT);
+     iprot_->readMessageEnd();
+     iprot_->getTransport()->readEnd();
+   }
+   bool _return;
+-  VdrPluginWeb_ResetVideo_presult result;
++  VdrPluginWeb_SelectSubtitleTrack_presult result;
+   result.success = &_return;
+   result.read(iprot_);
+   iprot_->readMessageEnd();
+@@ -3301,22 +4098,21 @@ bool VdrPluginWebClient::recv_ResetVideo()
+   if (result.__isset.err) {
+     throw result.err;
+   }
+-  throw ::apache::thrift::TApplicationException(::apache::thrift::TApplicationException::MISSING_RESULT, "ResetVideo failed: unknown result");
++  throw ::apache::thrift::TApplicationException(::apache::thrift::TApplicationException::MISSING_RESULT, "SelectSubtitleTrack failed: unknown result");
+ }
+ 
+-bool VdrPluginWebClient::SelectAudioTrack(const SelectAudioTrackType& input)
++bool VdrPluginWebClient::EndOfStream()
+ {
+-  send_SelectAudioTrack(input);
+-  return recv_SelectAudioTrack();
++  send_EndOfStream();
++  return recv_EndOfStream();
+ }
+ 
+-void VdrPluginWebClient::send_SelectAudioTrack(const SelectAudioTrackType& input)
++void VdrPluginWebClient::send_EndOfStream()
+ {
+   int32_t cseqid = 0;
+-  oprot_->writeMessageBegin("SelectAudioTrack", ::apache::thrift::protocol::T_CALL, cseqid);
++  oprot_->writeMessageBegin("EndOfStream", ::apache::thrift::protocol::T_CALL, cseqid);
+ 
+-  VdrPluginWeb_SelectAudioTrack_pargs args;
+-  args.input = &input;
++  VdrPluginWeb_EndOfStream_pargs args;
+   args.write(oprot_);
+ 
+   oprot_->writeMessageEnd();
+@@ -3324,7 +4120,7 @@ void VdrPluginWebClient::send_SelectAudioTrack(const SelectAudioTrackType& input
+   oprot_->getTransport()->flush();
+ }
+ 
+-bool VdrPluginWebClient::recv_SelectAudioTrack()
++bool VdrPluginWebClient::recv_EndOfStream()
+ {
+ 
+   int32_t rseqid = 0;
+@@ -3344,13 +4140,13 @@ bool VdrPluginWebClient::recv_SelectAudioTrack()
+     iprot_->readMessageEnd();
+     iprot_->getTransport()->readEnd();
+   }
+-  if (fname.compare("SelectAudioTrack") != 0) {
++  if (fname.compare("EndOfStream") != 0) {
+     iprot_->skip(::apache::thrift::protocol::T_STRUCT);
+     iprot_->readMessageEnd();
+     iprot_->getTransport()->readEnd();
+   }
+   bool _return;
+-  VdrPluginWeb_SelectAudioTrack_presult result;
++  VdrPluginWeb_EndOfStream_presult result;
+   result.success = &_return;
+   result.read(iprot_);
+   iprot_->readMessageEnd();
+@@ -3362,21 +4158,22 @@ bool VdrPluginWebClient::recv_SelectAudioTrack()
+   if (result.__isset.err) {
+     throw result.err;
+   }
+-  throw ::apache::thrift::TApplicationException(::apache::thrift::TApplicationException::MISSING_RESULT, "SelectAudioTrack failed: unknown result");
++  throw ::apache::thrift::TApplicationException(::apache::thrift::TApplicationException::MISSING_RESULT, "EndOfStream failed: unknown result");
+ }
+ 
+-bool VdrPluginWebClient::IsWebActive()
++bool VdrPluginWebClient::StreamEventFilter(const StreamEventFilterType& input)
+ {
+-  send_IsWebActive();
+-  return recv_IsWebActive();
++  send_StreamEventFilter(input);
++  return recv_StreamEventFilter();
+ }
+ 
+-void VdrPluginWebClient::send_IsWebActive()
++void VdrPluginWebClient::send_StreamEventFilter(const StreamEventFilterType& input)
+ {
+   int32_t cseqid = 0;
+-  oprot_->writeMessageBegin("IsWebActive", ::apache::thrift::protocol::T_CALL, cseqid);
++  oprot_->writeMessageBegin("StreamEventFilter", ::apache::thrift::protocol::T_CALL, cseqid);
+ 
+-  VdrPluginWeb_IsWebActive_pargs args;
++  VdrPluginWeb_StreamEventFilter_pargs args;
++  args.input = &input;
+   args.write(oprot_);
+ 
+   oprot_->writeMessageEnd();
+@@ -3384,7 +4181,7 @@ void VdrPluginWebClient::send_IsWebActive()
+   oprot_->getTransport()->flush();
+ }
+ 
+-bool VdrPluginWebClient::recv_IsWebActive()
++bool VdrPluginWebClient::recv_StreamEventFilter()
+ {
+ 
+   int32_t rseqid = 0;
+@@ -3404,13 +4201,13 @@ bool VdrPluginWebClient::recv_IsWebActive()
+     iprot_->readMessageEnd();
+     iprot_->getTransport()->readEnd();
+   }
+-  if (fname.compare("IsWebActive") != 0) {
++  if (fname.compare("StreamEventFilter") != 0) {
+     iprot_->skip(::apache::thrift::protocol::T_STRUCT);
+     iprot_->readMessageEnd();
+     iprot_->getTransport()->readEnd();
+   }
+   bool _return;
+-  VdrPluginWeb_IsWebActive_presult result;
++  VdrPluginWeb_StreamEventFilter_presult result;
+   result.success = &_return;
+   result.read(iprot_);
+   iprot_->readMessageEnd();
+@@ -3422,7 +4219,7 @@ bool VdrPluginWebClient::recv_IsWebActive()
+   if (result.__isset.err) {
+     throw result.err;
+   }
+-  throw ::apache::thrift::TApplicationException(::apache::thrift::TApplicationException::MISSING_RESULT, "IsWebActive failed: unknown result");
++  throw ::apache::thrift::TApplicationException(::apache::thrift::TApplicationException::MISSING_RESULT, "StreamEventFilter failed: unknown result");
+ }
+ 
+ bool VdrPluginWebProcessor::dispatchCall(::apache::thrift::protocol::TProtocol* iprot, ::apache::thrift::protocol::TProtocol* oprot, const std::string& fname, int32_t seqid, void* callContext) {
+@@ -4071,32 +4868,203 @@ void VdrPluginWebProcessor::process_SelectAudioTrack(int32_t seqid, ::apache::th
+   ::apache::thrift::TProcessorContextFreer freer(this->eventHandler_.get(), ctx, "VdrPluginWeb.SelectAudioTrack");
+ 
+   if (this->eventHandler_.get() != nullptr) {
+-    this->eventHandler_->preRead(ctx, "VdrPluginWeb.SelectAudioTrack");
++    this->eventHandler_->preRead(ctx, "VdrPluginWeb.SelectAudioTrack");
++  }
++
++  VdrPluginWeb_SelectAudioTrack_args args;
++  args.read(iprot);
++  iprot->readMessageEnd();
++  uint32_t bytes = iprot->getTransport()->readEnd();
++
++  if (this->eventHandler_.get() != nullptr) {
++    this->eventHandler_->postRead(ctx, "VdrPluginWeb.SelectAudioTrack", bytes);
++  }
++
++  VdrPluginWeb_SelectAudioTrack_result result;
++  try {
++    result.success = iface_->SelectAudioTrack(args.input);
++    result.__isset.success = true;
++  } catch ( ::common::OperationFailed &err) {
++    result.err = std::move(err);
++    result.__isset.err = true;
++  } catch (const std::exception& e) {
++    if (this->eventHandler_.get() != nullptr) {
++      this->eventHandler_->handlerError(ctx, "VdrPluginWeb.SelectAudioTrack");
++    }
++
++    ::apache::thrift::TApplicationException x(e.what());
++    oprot->writeMessageBegin("SelectAudioTrack", ::apache::thrift::protocol::T_EXCEPTION, seqid);
++    x.write(oprot);
++    oprot->writeMessageEnd();
++    oprot->getTransport()->writeEnd();
++    oprot->getTransport()->flush();
++    return;
++  }
++
++  if (this->eventHandler_.get() != nullptr) {
++    this->eventHandler_->preWrite(ctx, "VdrPluginWeb.SelectAudioTrack");
++  }
++
++  oprot->writeMessageBegin("SelectAudioTrack", ::apache::thrift::protocol::T_REPLY, seqid);
++  result.write(oprot);
++  oprot->writeMessageEnd();
++  bytes = oprot->getTransport()->writeEnd();
++  oprot->getTransport()->flush();
++
++  if (this->eventHandler_.get() != nullptr) {
++    this->eventHandler_->postWrite(ctx, "VdrPluginWeb.SelectAudioTrack", bytes);
++  }
++}
++
++void VdrPluginWebProcessor::process_IsWebActive(int32_t seqid, ::apache::thrift::protocol::TProtocol* iprot, ::apache::thrift::protocol::TProtocol* oprot, void* callContext)
++{
++  void* ctx = nullptr;
++  if (this->eventHandler_.get() != nullptr) {
++    ctx = this->eventHandler_->getContext("VdrPluginWeb.IsWebActive", callContext);
++  }
++  ::apache::thrift::TProcessorContextFreer freer(this->eventHandler_.get(), ctx, "VdrPluginWeb.IsWebActive");
++
++  if (this->eventHandler_.get() != nullptr) {
++    this->eventHandler_->preRead(ctx, "VdrPluginWeb.IsWebActive");
++  }
++
++  VdrPluginWeb_IsWebActive_args args;
++  args.read(iprot);
++  iprot->readMessageEnd();
++  uint32_t bytes = iprot->getTransport()->readEnd();
++
++  if (this->eventHandler_.get() != nullptr) {
++    this->eventHandler_->postRead(ctx, "VdrPluginWeb.IsWebActive", bytes);
++  }
++
++  VdrPluginWeb_IsWebActive_result result;
++  try {
++    result.success = iface_->IsWebActive();
++    result.__isset.success = true;
++  } catch ( ::common::OperationFailed &err) {
++    result.err = std::move(err);
++    result.__isset.err = true;
++  } catch (const std::exception& e) {
++    if (this->eventHandler_.get() != nullptr) {
++      this->eventHandler_->handlerError(ctx, "VdrPluginWeb.IsWebActive");
++    }
++
++    ::apache::thrift::TApplicationException x(e.what());
++    oprot->writeMessageBegin("IsWebActive", ::apache::thrift::protocol::T_EXCEPTION, seqid);
++    x.write(oprot);
++    oprot->writeMessageEnd();
++    oprot->getTransport()->writeEnd();
++    oprot->getTransport()->flush();
++    return;
++  }
++
++  if (this->eventHandler_.get() != nullptr) {
++    this->eventHandler_->preWrite(ctx, "VdrPluginWeb.IsWebActive");
++  }
++
++  oprot->writeMessageBegin("IsWebActive", ::apache::thrift::protocol::T_REPLY, seqid);
++  result.write(oprot);
++  oprot->writeMessageEnd();
++  bytes = oprot->getTransport()->writeEnd();
++  oprot->getTransport()->flush();
++
++  if (this->eventHandler_.get() != nullptr) {
++    this->eventHandler_->postWrite(ctx, "VdrPluginWeb.IsWebActive", bytes);
++  }
++}
++
++void VdrPluginWebProcessor::process_SelectSubtitleTrack(int32_t seqid, ::apache::thrift::protocol::TProtocol* iprot, ::apache::thrift::protocol::TProtocol* oprot, void* callContext)
++{
++  void* ctx = nullptr;
++  if (this->eventHandler_.get() != nullptr) {
++    ctx = this->eventHandler_->getContext("VdrPluginWeb.SelectSubtitleTrack", callContext);
++  }
++  ::apache::thrift::TProcessorContextFreer freer(this->eventHandler_.get(), ctx, "VdrPluginWeb.SelectSubtitleTrack");
++
++  if (this->eventHandler_.get() != nullptr) {
++    this->eventHandler_->preRead(ctx, "VdrPluginWeb.SelectSubtitleTrack");
++  }
++
++  VdrPluginWeb_SelectSubtitleTrack_args args;
++  args.read(iprot);
++  iprot->readMessageEnd();
++  uint32_t bytes = iprot->getTransport()->readEnd();
++
++  if (this->eventHandler_.get() != nullptr) {
++    this->eventHandler_->postRead(ctx, "VdrPluginWeb.SelectSubtitleTrack", bytes);
++  }
++
++  VdrPluginWeb_SelectSubtitleTrack_result result;
++  try {
++    result.success = iface_->SelectSubtitleTrack(args.input);
++    result.__isset.success = true;
++  } catch ( ::common::OperationFailed &err) {
++    result.err = std::move(err);
++    result.__isset.err = true;
++  } catch (const std::exception& e) {
++    if (this->eventHandler_.get() != nullptr) {
++      this->eventHandler_->handlerError(ctx, "VdrPluginWeb.SelectSubtitleTrack");
++    }
++
++    ::apache::thrift::TApplicationException x(e.what());
++    oprot->writeMessageBegin("SelectSubtitleTrack", ::apache::thrift::protocol::T_EXCEPTION, seqid);
++    x.write(oprot);
++    oprot->writeMessageEnd();
++    oprot->getTransport()->writeEnd();
++    oprot->getTransport()->flush();
++    return;
++  }
++
++  if (this->eventHandler_.get() != nullptr) {
++    this->eventHandler_->preWrite(ctx, "VdrPluginWeb.SelectSubtitleTrack");
++  }
++
++  oprot->writeMessageBegin("SelectSubtitleTrack", ::apache::thrift::protocol::T_REPLY, seqid);
++  result.write(oprot);
++  oprot->writeMessageEnd();
++  bytes = oprot->getTransport()->writeEnd();
++  oprot->getTransport()->flush();
++
++  if (this->eventHandler_.get() != nullptr) {
++    this->eventHandler_->postWrite(ctx, "VdrPluginWeb.SelectSubtitleTrack", bytes);
++  }
++}
++
++void VdrPluginWebProcessor::process_EndOfStream(int32_t seqid, ::apache::thrift::protocol::TProtocol* iprot, ::apache::thrift::protocol::TProtocol* oprot, void* callContext)
++{
++  void* ctx = nullptr;
++  if (this->eventHandler_.get() != nullptr) {
++    ctx = this->eventHandler_->getContext("VdrPluginWeb.EndOfStream", callContext);
++  }
++  ::apache::thrift::TProcessorContextFreer freer(this->eventHandler_.get(), ctx, "VdrPluginWeb.EndOfStream");
++
++  if (this->eventHandler_.get() != nullptr) {
++    this->eventHandler_->preRead(ctx, "VdrPluginWeb.EndOfStream");
+   }
+ 
+-  VdrPluginWeb_SelectAudioTrack_args args;
++  VdrPluginWeb_EndOfStream_args args;
+   args.read(iprot);
+   iprot->readMessageEnd();
+   uint32_t bytes = iprot->getTransport()->readEnd();
+ 
+   if (this->eventHandler_.get() != nullptr) {
+-    this->eventHandler_->postRead(ctx, "VdrPluginWeb.SelectAudioTrack", bytes);
++    this->eventHandler_->postRead(ctx, "VdrPluginWeb.EndOfStream", bytes);
+   }
+ 
+-  VdrPluginWeb_SelectAudioTrack_result result;
++  VdrPluginWeb_EndOfStream_result result;
+   try {
+-    result.success = iface_->SelectAudioTrack(args.input);
++    result.success = iface_->EndOfStream();
+     result.__isset.success = true;
+   } catch ( ::common::OperationFailed &err) {
+     result.err = std::move(err);
+     result.__isset.err = true;
+   } catch (const std::exception& e) {
+     if (this->eventHandler_.get() != nullptr) {
+-      this->eventHandler_->handlerError(ctx, "VdrPluginWeb.SelectAudioTrack");
++      this->eventHandler_->handlerError(ctx, "VdrPluginWeb.EndOfStream");
+     }
+ 
+     ::apache::thrift::TApplicationException x(e.what());
+-    oprot->writeMessageBegin("SelectAudioTrack", ::apache::thrift::protocol::T_EXCEPTION, seqid);
++    oprot->writeMessageBegin("EndOfStream", ::apache::thrift::protocol::T_EXCEPTION, seqid);
+     x.write(oprot);
+     oprot->writeMessageEnd();
+     oprot->getTransport()->writeEnd();
+@@ -4105,55 +5073,55 @@ void VdrPluginWebProcessor::process_SelectAudioTrack(int32_t seqid, ::apache::th
+   }
+ 
+   if (this->eventHandler_.get() != nullptr) {
+-    this->eventHandler_->preWrite(ctx, "VdrPluginWeb.SelectAudioTrack");
++    this->eventHandler_->preWrite(ctx, "VdrPluginWeb.EndOfStream");
+   }
+ 
+-  oprot->writeMessageBegin("SelectAudioTrack", ::apache::thrift::protocol::T_REPLY, seqid);
++  oprot->writeMessageBegin("EndOfStream", ::apache::thrift::protocol::T_REPLY, seqid);
+   result.write(oprot);
+   oprot->writeMessageEnd();
+   bytes = oprot->getTransport()->writeEnd();
+   oprot->getTransport()->flush();
+ 
+   if (this->eventHandler_.get() != nullptr) {
+-    this->eventHandler_->postWrite(ctx, "VdrPluginWeb.SelectAudioTrack", bytes);
++    this->eventHandler_->postWrite(ctx, "VdrPluginWeb.EndOfStream", bytes);
+   }
+ }
+ 
+-void VdrPluginWebProcessor::process_IsWebActive(int32_t seqid, ::apache::thrift::protocol::TProtocol* iprot, ::apache::thrift::protocol::TProtocol* oprot, void* callContext)
++void VdrPluginWebProcessor::process_StreamEventFilter(int32_t seqid, ::apache::thrift::protocol::TProtocol* iprot, ::apache::thrift::protocol::TProtocol* oprot, void* callContext)
+ {
+   void* ctx = nullptr;
+   if (this->eventHandler_.get() != nullptr) {
+-    ctx = this->eventHandler_->getContext("VdrPluginWeb.IsWebActive", callContext);
++    ctx = this->eventHandler_->getContext("VdrPluginWeb.StreamEventFilter", callContext);
+   }
+-  ::apache::thrift::TProcessorContextFreer freer(this->eventHandler_.get(), ctx, "VdrPluginWeb.IsWebActive");
++  ::apache::thrift::TProcessorContextFreer freer(this->eventHandler_.get(), ctx, "VdrPluginWeb.StreamEventFilter");
+ 
+   if (this->eventHandler_.get() != nullptr) {
+-    this->eventHandler_->preRead(ctx, "VdrPluginWeb.IsWebActive");
++    this->eventHandler_->preRead(ctx, "VdrPluginWeb.StreamEventFilter");
+   }
+ 
+-  VdrPluginWeb_IsWebActive_args args;
++  VdrPluginWeb_StreamEventFilter_args args;
+   args.read(iprot);
+   iprot->readMessageEnd();
+   uint32_t bytes = iprot->getTransport()->readEnd();
+ 
+   if (this->eventHandler_.get() != nullptr) {
+-    this->eventHandler_->postRead(ctx, "VdrPluginWeb.IsWebActive", bytes);
++    this->eventHandler_->postRead(ctx, "VdrPluginWeb.StreamEventFilter", bytes);
+   }
+ 
+-  VdrPluginWeb_IsWebActive_result result;
++  VdrPluginWeb_StreamEventFilter_result result;
+   try {
+-    result.success = iface_->IsWebActive();
++    result.success = iface_->StreamEventFilter(args.input);
+     result.__isset.success = true;
+   } catch ( ::common::OperationFailed &err) {
+     result.err = std::move(err);
+     result.__isset.err = true;
+   } catch (const std::exception& e) {
+     if (this->eventHandler_.get() != nullptr) {
+-      this->eventHandler_->handlerError(ctx, "VdrPluginWeb.IsWebActive");
++      this->eventHandler_->handlerError(ctx, "VdrPluginWeb.StreamEventFilter");
+     }
+ 
+     ::apache::thrift::TApplicationException x(e.what());
+-    oprot->writeMessageBegin("IsWebActive", ::apache::thrift::protocol::T_EXCEPTION, seqid);
++    oprot->writeMessageBegin("StreamEventFilter", ::apache::thrift::protocol::T_EXCEPTION, seqid);
+     x.write(oprot);
+     oprot->writeMessageEnd();
+     oprot->getTransport()->writeEnd();
+@@ -4162,17 +5130,17 @@ void VdrPluginWebProcessor::process_IsWebActive(int32_t seqid, ::apache::thrift:
+   }
+ 
+   if (this->eventHandler_.get() != nullptr) {
+-    this->eventHandler_->preWrite(ctx, "VdrPluginWeb.IsWebActive");
++    this->eventHandler_->preWrite(ctx, "VdrPluginWeb.StreamEventFilter");
+   }
+ 
+-  oprot->writeMessageBegin("IsWebActive", ::apache::thrift::protocol::T_REPLY, seqid);
++  oprot->writeMessageBegin("StreamEventFilter", ::apache::thrift::protocol::T_REPLY, seqid);
+   result.write(oprot);
+   oprot->writeMessageEnd();
+   bytes = oprot->getTransport()->writeEnd();
+   oprot->getTransport()->flush();
+ 
+   if (this->eventHandler_.get() != nullptr) {
+-    this->eventHandler_->postWrite(ctx, "VdrPluginWeb.IsWebActive", bytes);
++    this->eventHandler_->postWrite(ctx, "VdrPluginWeb.StreamEventFilter", bytes);
+   }
+ }
+ 
+@@ -5321,5 +6289,268 @@ bool VdrPluginWebConcurrentClient::recv_IsWebActive(const int32_t seqid)
+   } // end while(true)
+ }
+ 
++bool VdrPluginWebConcurrentClient::SelectSubtitleTrack(const SelectSubtitleTrackType& input)
++{
++  int32_t seqid = send_SelectSubtitleTrack(input);
++  return recv_SelectSubtitleTrack(seqid);
++}
++
++int32_t VdrPluginWebConcurrentClient::send_SelectSubtitleTrack(const SelectSubtitleTrackType& input)
++{
++  int32_t cseqid = this->sync_->generateSeqId();
++  ::apache::thrift::async::TConcurrentSendSentry sentry(this->sync_.get());
++  oprot_->writeMessageBegin("SelectSubtitleTrack", ::apache::thrift::protocol::T_CALL, cseqid);
++
++  VdrPluginWeb_SelectSubtitleTrack_pargs args;
++  args.input = &input;
++  args.write(oprot_);
++
++  oprot_->writeMessageEnd();
++  oprot_->getTransport()->writeEnd();
++  oprot_->getTransport()->flush();
++
++  sentry.commit();
++  return cseqid;
++}
++
++bool VdrPluginWebConcurrentClient::recv_SelectSubtitleTrack(const int32_t seqid)
++{
++
++  int32_t rseqid = 0;
++  std::string fname;
++  ::apache::thrift::protocol::TMessageType mtype;
++
++  // the read mutex gets dropped and reacquired as part of waitForWork()
++  // The destructor of this sentry wakes up other clients
++  ::apache::thrift::async::TConcurrentRecvSentry sentry(this->sync_.get(), seqid);
++
++  while(true) {
++    if(!this->sync_->getPending(fname, mtype, rseqid)) {
++      iprot_->readMessageBegin(fname, mtype, rseqid);
++    }
++    if(seqid == rseqid) {
++      if (mtype == ::apache::thrift::protocol::T_EXCEPTION) {
++        ::apache::thrift::TApplicationException x;
++        x.read(iprot_);
++        iprot_->readMessageEnd();
++        iprot_->getTransport()->readEnd();
++        sentry.commit();
++        throw x;
++      }
++      if (mtype != ::apache::thrift::protocol::T_REPLY) {
++        iprot_->skip(::apache::thrift::protocol::T_STRUCT);
++        iprot_->readMessageEnd();
++        iprot_->getTransport()->readEnd();
++      }
++      if (fname.compare("SelectSubtitleTrack") != 0) {
++        iprot_->skip(::apache::thrift::protocol::T_STRUCT);
++        iprot_->readMessageEnd();
++        iprot_->getTransport()->readEnd();
++
++        // in a bad state, don't commit
++        using ::apache::thrift::protocol::TProtocolException;
++        throw TProtocolException(TProtocolException::INVALID_DATA);
++      }
++      bool _return;
++      VdrPluginWeb_SelectSubtitleTrack_presult result;
++      result.success = &_return;
++      result.read(iprot_);
++      iprot_->readMessageEnd();
++      iprot_->getTransport()->readEnd();
++
++      if (result.__isset.success) {
++        sentry.commit();
++        return _return;
++      }
++      if (result.__isset.err) {
++        sentry.commit();
++        throw result.err;
++      }
++      // in a bad state, don't commit
++      throw ::apache::thrift::TApplicationException(::apache::thrift::TApplicationException::MISSING_RESULT, "SelectSubtitleTrack failed: unknown result");
++    }
++    // seqid != rseqid
++    this->sync_->updatePending(fname, mtype, rseqid);
++
++    // this will temporarily unlock the readMutex, and let other clients get work done
++    this->sync_->waitForWork(seqid);
++  } // end while(true)
++}
++
++bool VdrPluginWebConcurrentClient::EndOfStream()
++{
++  int32_t seqid = send_EndOfStream();
++  return recv_EndOfStream(seqid);
++}
++
++int32_t VdrPluginWebConcurrentClient::send_EndOfStream()
++{
++  int32_t cseqid = this->sync_->generateSeqId();
++  ::apache::thrift::async::TConcurrentSendSentry sentry(this->sync_.get());
++  oprot_->writeMessageBegin("EndOfStream", ::apache::thrift::protocol::T_CALL, cseqid);
++
++  VdrPluginWeb_EndOfStream_pargs args;
++  args.write(oprot_);
++
++  oprot_->writeMessageEnd();
++  oprot_->getTransport()->writeEnd();
++  oprot_->getTransport()->flush();
++
++  sentry.commit();
++  return cseqid;
++}
++
++bool VdrPluginWebConcurrentClient::recv_EndOfStream(const int32_t seqid)
++{
++
++  int32_t rseqid = 0;
++  std::string fname;
++  ::apache::thrift::protocol::TMessageType mtype;
++
++  // the read mutex gets dropped and reacquired as part of waitForWork()
++  // The destructor of this sentry wakes up other clients
++  ::apache::thrift::async::TConcurrentRecvSentry sentry(this->sync_.get(), seqid);
++
++  while(true) {
++    if(!this->sync_->getPending(fname, mtype, rseqid)) {
++      iprot_->readMessageBegin(fname, mtype, rseqid);
++    }
++    if(seqid == rseqid) {
++      if (mtype == ::apache::thrift::protocol::T_EXCEPTION) {
++        ::apache::thrift::TApplicationException x;
++        x.read(iprot_);
++        iprot_->readMessageEnd();
++        iprot_->getTransport()->readEnd();
++        sentry.commit();
++        throw x;
++      }
++      if (mtype != ::apache::thrift::protocol::T_REPLY) {
++        iprot_->skip(::apache::thrift::protocol::T_STRUCT);
++        iprot_->readMessageEnd();
++        iprot_->getTransport()->readEnd();
++      }
++      if (fname.compare("EndOfStream") != 0) {
++        iprot_->skip(::apache::thrift::protocol::T_STRUCT);
++        iprot_->readMessageEnd();
++        iprot_->getTransport()->readEnd();
++
++        // in a bad state, don't commit
++        using ::apache::thrift::protocol::TProtocolException;
++        throw TProtocolException(TProtocolException::INVALID_DATA);
++      }
++      bool _return;
++      VdrPluginWeb_EndOfStream_presult result;
++      result.success = &_return;
++      result.read(iprot_);
++      iprot_->readMessageEnd();
++      iprot_->getTransport()->readEnd();
++
++      if (result.__isset.success) {
++        sentry.commit();
++        return _return;
++      }
++      if (result.__isset.err) {
++        sentry.commit();
++        throw result.err;
++      }
++      // in a bad state, don't commit
++      throw ::apache::thrift::TApplicationException(::apache::thrift::TApplicationException::MISSING_RESULT, "EndOfStream failed: unknown result");
++    }
++    // seqid != rseqid
++    this->sync_->updatePending(fname, mtype, rseqid);
++
++    // this will temporarily unlock the readMutex, and let other clients get work done
++    this->sync_->waitForWork(seqid);
++  } // end while(true)
++}
++
++bool VdrPluginWebConcurrentClient::StreamEventFilter(const StreamEventFilterType& input)
++{
++  int32_t seqid = send_StreamEventFilter(input);
++  return recv_StreamEventFilter(seqid);
++}
++
++int32_t VdrPluginWebConcurrentClient::send_StreamEventFilter(const StreamEventFilterType& input)
++{
++  int32_t cseqid = this->sync_->generateSeqId();
++  ::apache::thrift::async::TConcurrentSendSentry sentry(this->sync_.get());
++  oprot_->writeMessageBegin("StreamEventFilter", ::apache::thrift::protocol::T_CALL, cseqid);
++
++  VdrPluginWeb_StreamEventFilter_pargs args;
++  args.input = &input;
++  args.write(oprot_);
++
++  oprot_->writeMessageEnd();
++  oprot_->getTransport()->writeEnd();
++  oprot_->getTransport()->flush();
++
++  sentry.commit();
++  return cseqid;
++}
++
++bool VdrPluginWebConcurrentClient::recv_StreamEventFilter(const int32_t seqid)
++{
++
++  int32_t rseqid = 0;
++  std::string fname;
++  ::apache::thrift::protocol::TMessageType mtype;
++
++  // the read mutex gets dropped and reacquired as part of waitForWork()
++  // The destructor of this sentry wakes up other clients
++  ::apache::thrift::async::TConcurrentRecvSentry sentry(this->sync_.get(), seqid);
++
++  while(true) {
++    if(!this->sync_->getPending(fname, mtype, rseqid)) {
++      iprot_->readMessageBegin(fname, mtype, rseqid);
++    }
++    if(seqid == rseqid) {
++      if (mtype == ::apache::thrift::protocol::T_EXCEPTION) {
++        ::apache::thrift::TApplicationException x;
++        x.read(iprot_);
++        iprot_->readMessageEnd();
++        iprot_->getTransport()->readEnd();
++        sentry.commit();
++        throw x;
++      }
++      if (mtype != ::apache::thrift::protocol::T_REPLY) {
++        iprot_->skip(::apache::thrift::protocol::T_STRUCT);
++        iprot_->readMessageEnd();
++        iprot_->getTransport()->readEnd();
++      }
++      if (fname.compare("StreamEventFilter") != 0) {
++        iprot_->skip(::apache::thrift::protocol::T_STRUCT);
++        iprot_->readMessageEnd();
++        iprot_->getTransport()->readEnd();
++
++        // in a bad state, don't commit
++        using ::apache::thrift::protocol::TProtocolException;
++        throw TProtocolException(TProtocolException::INVALID_DATA);
++      }
++      bool _return;
++      VdrPluginWeb_StreamEventFilter_presult result;
++      result.success = &_return;
++      result.read(iprot_);
++      iprot_->readMessageEnd();
++      iprot_->getTransport()->readEnd();
++
++      if (result.__isset.success) {
++        sentry.commit();
++        return _return;
++      }
++      if (result.__isset.err) {
++        sentry.commit();
++        throw result.err;
++      }
++      // in a bad state, don't commit
++      throw ::apache::thrift::TApplicationException(::apache::thrift::TApplicationException::MISSING_RESULT, "StreamEventFilter failed: unknown result");
++    }
++    // seqid != rseqid
++    this->sync_->updatePending(fname, mtype, rseqid);
++
++    // this will temporarily unlock the readMutex, and let other clients get work done
++    this->sync_->waitForWork(seqid);
++  } // end while(true)
++}
++
+ } // namespace
+ 
+diff --git a/thrift-services/src-gen/VdrPluginWeb.h b/thrift-services/src-gen/VdrPluginWeb.h
+index 103fe53..fada9ec 100644
+--- a/thrift-services/src-gen/VdrPluginWeb.h
++++ b/thrift-services/src-gen/VdrPluginWeb.h
+@@ -36,6 +36,9 @@ class VdrPluginWebIf : virtual public  ::common::CommonServiceIf {
+   virtual bool ResetVideo(const ResetVideoType& input) = 0;
+   virtual bool SelectAudioTrack(const SelectAudioTrackType& input) = 0;
+   virtual bool IsWebActive() = 0;
++  virtual bool SelectSubtitleTrack(const SelectSubtitleTrackType& input) = 0;
++  virtual bool EndOfStream() = 0;
++  virtual bool StreamEventFilter(const StreamEventFilterType& input) = 0;
+ };
+ 
+ class VdrPluginWebIfFactory : virtual public  ::common::CommonServiceIfFactory {
+@@ -117,6 +120,18 @@ class VdrPluginWebNull : virtual public VdrPluginWebIf , virtual public  ::commo
+     bool _return = false;
+     return _return;
+   }
++  bool SelectSubtitleTrack(const SelectSubtitleTrackType& /* input */) override {
++    bool _return = false;
++    return _return;
++  }
++  bool EndOfStream() override {
++    bool _return = false;
++    return _return;
++  }
++  bool StreamEventFilter(const StreamEventFilterType& /* input */) override {
++    bool _return = false;
++    return _return;
++  }
+ };
+ 
+ typedef struct _VdrPluginWeb_ProcessOsdUpdate_args__isset {
+@@ -1333,6 +1348,290 @@ class VdrPluginWeb_IsWebActive_presult {
+ 
+ };
+ 
++typedef struct _VdrPluginWeb_SelectSubtitleTrack_args__isset {
++  _VdrPluginWeb_SelectSubtitleTrack_args__isset() : input(false) {}
++  bool input :1;
++} _VdrPluginWeb_SelectSubtitleTrack_args__isset;
++
++class VdrPluginWeb_SelectSubtitleTrack_args {
++ public:
++
++  VdrPluginWeb_SelectSubtitleTrack_args(const VdrPluginWeb_SelectSubtitleTrack_args&);
++  VdrPluginWeb_SelectSubtitleTrack_args& operator=(const VdrPluginWeb_SelectSubtitleTrack_args&);
++  VdrPluginWeb_SelectSubtitleTrack_args() noexcept;
++
++  virtual ~VdrPluginWeb_SelectSubtitleTrack_args() noexcept;
++  SelectSubtitleTrackType input;
++
++  _VdrPluginWeb_SelectSubtitleTrack_args__isset __isset;
++
++  void __set_input(const SelectSubtitleTrackType& val);
++
++  bool operator == (const VdrPluginWeb_SelectSubtitleTrack_args & rhs) const;
++  bool operator != (const VdrPluginWeb_SelectSubtitleTrack_args &rhs) const {
++    return !(*this == rhs);
++  }
++
++  bool operator < (const VdrPluginWeb_SelectSubtitleTrack_args & ) const;
++
++  uint32_t read(::apache::thrift::protocol::TProtocol* iprot);
++  uint32_t write(::apache::thrift::protocol::TProtocol* oprot) const;
++
++};
++
++
++class VdrPluginWeb_SelectSubtitleTrack_pargs {
++ public:
++
++
++  virtual ~VdrPluginWeb_SelectSubtitleTrack_pargs() noexcept;
++  const SelectSubtitleTrackType* input;
++
++  uint32_t write(::apache::thrift::protocol::TProtocol* oprot) const;
++
++};
++
++typedef struct _VdrPluginWeb_SelectSubtitleTrack_result__isset {
++  _VdrPluginWeb_SelectSubtitleTrack_result__isset() : success(false), err(false) {}
++  bool success :1;
++  bool err :1;
++} _VdrPluginWeb_SelectSubtitleTrack_result__isset;
++
++class VdrPluginWeb_SelectSubtitleTrack_result {
++ public:
++
++  VdrPluginWeb_SelectSubtitleTrack_result(const VdrPluginWeb_SelectSubtitleTrack_result&);
++  VdrPluginWeb_SelectSubtitleTrack_result& operator=(const VdrPluginWeb_SelectSubtitleTrack_result&);
++  VdrPluginWeb_SelectSubtitleTrack_result() noexcept;
++
++  virtual ~VdrPluginWeb_SelectSubtitleTrack_result() noexcept;
++  bool success;
++   ::common::OperationFailed err;
++
++  _VdrPluginWeb_SelectSubtitleTrack_result__isset __isset;
++
++  void __set_success(const bool val);
++
++  void __set_err(const  ::common::OperationFailed& val);
++
++  bool operator == (const VdrPluginWeb_SelectSubtitleTrack_result & rhs) const;
++  bool operator != (const VdrPluginWeb_SelectSubtitleTrack_result &rhs) const {
++    return !(*this == rhs);
++  }
++
++  bool operator < (const VdrPluginWeb_SelectSubtitleTrack_result & ) const;
++
++  uint32_t read(::apache::thrift::protocol::TProtocol* iprot);
++  uint32_t write(::apache::thrift::protocol::TProtocol* oprot) const;
++
++};
++
++typedef struct _VdrPluginWeb_SelectSubtitleTrack_presult__isset {
++  _VdrPluginWeb_SelectSubtitleTrack_presult__isset() : success(false), err(false) {}
++  bool success :1;
++  bool err :1;
++} _VdrPluginWeb_SelectSubtitleTrack_presult__isset;
++
++class VdrPluginWeb_SelectSubtitleTrack_presult {
++ public:
++
++
++  virtual ~VdrPluginWeb_SelectSubtitleTrack_presult() noexcept;
++  bool* success;
++   ::common::OperationFailed err;
++
++  _VdrPluginWeb_SelectSubtitleTrack_presult__isset __isset;
++
++  uint32_t read(::apache::thrift::protocol::TProtocol* iprot);
++
++};
++
++
++class VdrPluginWeb_EndOfStream_args {
++ public:
++
++  VdrPluginWeb_EndOfStream_args(const VdrPluginWeb_EndOfStream_args&) noexcept;
++  VdrPluginWeb_EndOfStream_args& operator=(const VdrPluginWeb_EndOfStream_args&) noexcept;
++  VdrPluginWeb_EndOfStream_args() noexcept;
++
++  virtual ~VdrPluginWeb_EndOfStream_args() noexcept;
++
++  bool operator == (const VdrPluginWeb_EndOfStream_args & /* rhs */) const;
++  bool operator != (const VdrPluginWeb_EndOfStream_args &rhs) const {
++    return !(*this == rhs);
++  }
++
++  bool operator < (const VdrPluginWeb_EndOfStream_args & ) const;
++
++  uint32_t read(::apache::thrift::protocol::TProtocol* iprot);
++  uint32_t write(::apache::thrift::protocol::TProtocol* oprot) const;
++
++};
++
++
++class VdrPluginWeb_EndOfStream_pargs {
++ public:
++
++
++  virtual ~VdrPluginWeb_EndOfStream_pargs() noexcept;
++
++  uint32_t write(::apache::thrift::protocol::TProtocol* oprot) const;
++
++};
++
++typedef struct _VdrPluginWeb_EndOfStream_result__isset {
++  _VdrPluginWeb_EndOfStream_result__isset() : success(false), err(false) {}
++  bool success :1;
++  bool err :1;
++} _VdrPluginWeb_EndOfStream_result__isset;
++
++class VdrPluginWeb_EndOfStream_result {
++ public:
++
++  VdrPluginWeb_EndOfStream_result(const VdrPluginWeb_EndOfStream_result&);
++  VdrPluginWeb_EndOfStream_result& operator=(const VdrPluginWeb_EndOfStream_result&);
++  VdrPluginWeb_EndOfStream_result() noexcept;
++
++  virtual ~VdrPluginWeb_EndOfStream_result() noexcept;
++  bool success;
++   ::common::OperationFailed err;
++
++  _VdrPluginWeb_EndOfStream_result__isset __isset;
++
++  void __set_success(const bool val);
++
++  void __set_err(const  ::common::OperationFailed& val);
++
++  bool operator == (const VdrPluginWeb_EndOfStream_result & rhs) const;
++  bool operator != (const VdrPluginWeb_EndOfStream_result &rhs) const {
++    return !(*this == rhs);
++  }
++
++  bool operator < (const VdrPluginWeb_EndOfStream_result & ) const;
++
++  uint32_t read(::apache::thrift::protocol::TProtocol* iprot);
++  uint32_t write(::apache::thrift::protocol::TProtocol* oprot) const;
++
++};
++
++typedef struct _VdrPluginWeb_EndOfStream_presult__isset {
++  _VdrPluginWeb_EndOfStream_presult__isset() : success(false), err(false) {}
++  bool success :1;
++  bool err :1;
++} _VdrPluginWeb_EndOfStream_presult__isset;
++
++class VdrPluginWeb_EndOfStream_presult {
++ public:
++
++
++  virtual ~VdrPluginWeb_EndOfStream_presult() noexcept;
++  bool* success;
++   ::common::OperationFailed err;
++
++  _VdrPluginWeb_EndOfStream_presult__isset __isset;
++
++  uint32_t read(::apache::thrift::protocol::TProtocol* iprot);
++
++};
++
++typedef struct _VdrPluginWeb_StreamEventFilter_args__isset {
++  _VdrPluginWeb_StreamEventFilter_args__isset() : input(false) {}
++  bool input :1;
++} _VdrPluginWeb_StreamEventFilter_args__isset;
++
++class VdrPluginWeb_StreamEventFilter_args {
++ public:
++
++  VdrPluginWeb_StreamEventFilter_args(const VdrPluginWeb_StreamEventFilter_args&) noexcept;
++  VdrPluginWeb_StreamEventFilter_args& operator=(const VdrPluginWeb_StreamEventFilter_args&) noexcept;
++  VdrPluginWeb_StreamEventFilter_args() noexcept;
++
++  virtual ~VdrPluginWeb_StreamEventFilter_args() noexcept;
++  StreamEventFilterType input;
++
++  _VdrPluginWeb_StreamEventFilter_args__isset __isset;
++
++  void __set_input(const StreamEventFilterType& val);
++
++  bool operator == (const VdrPluginWeb_StreamEventFilter_args & rhs) const;
++  bool operator != (const VdrPluginWeb_StreamEventFilter_args &rhs) const {
++    return !(*this == rhs);
++  }
++
++  bool operator < (const VdrPluginWeb_StreamEventFilter_args & ) const;
++
++  uint32_t read(::apache::thrift::protocol::TProtocol* iprot);
++  uint32_t write(::apache::thrift::protocol::TProtocol* oprot) const;
++
++};
++
++
++class VdrPluginWeb_StreamEventFilter_pargs {
++ public:
++
++
++  virtual ~VdrPluginWeb_StreamEventFilter_pargs() noexcept;
++  const StreamEventFilterType* input;
++
++  uint32_t write(::apache::thrift::protocol::TProtocol* oprot) const;
++
++};
++
++typedef struct _VdrPluginWeb_StreamEventFilter_result__isset {
++  _VdrPluginWeb_StreamEventFilter_result__isset() : success(false), err(false) {}
++  bool success :1;
++  bool err :1;
++} _VdrPluginWeb_StreamEventFilter_result__isset;
++
++class VdrPluginWeb_StreamEventFilter_result {
++ public:
++
++  VdrPluginWeb_StreamEventFilter_result(const VdrPluginWeb_StreamEventFilter_result&);
++  VdrPluginWeb_StreamEventFilter_result& operator=(const VdrPluginWeb_StreamEventFilter_result&);
++  VdrPluginWeb_StreamEventFilter_result() noexcept;
++
++  virtual ~VdrPluginWeb_StreamEventFilter_result() noexcept;
++  bool success;
++   ::common::OperationFailed err;
++
++  _VdrPluginWeb_StreamEventFilter_result__isset __isset;
++
++  void __set_success(const bool val);
++
++  void __set_err(const  ::common::OperationFailed& val);
++
++  bool operator == (const VdrPluginWeb_StreamEventFilter_result & rhs) const;
++  bool operator != (const VdrPluginWeb_StreamEventFilter_result &rhs) const {
++    return !(*this == rhs);
++  }
++
++  bool operator < (const VdrPluginWeb_StreamEventFilter_result & ) const;
++
++  uint32_t read(::apache::thrift::protocol::TProtocol* iprot);
++  uint32_t write(::apache::thrift::protocol::TProtocol* oprot) const;
++
++};
++
++typedef struct _VdrPluginWeb_StreamEventFilter_presult__isset {
++  _VdrPluginWeb_StreamEventFilter_presult__isset() : success(false), err(false) {}
++  bool success :1;
++  bool err :1;
++} _VdrPluginWeb_StreamEventFilter_presult__isset;
++
++class VdrPluginWeb_StreamEventFilter_presult {
++ public:
++
++
++  virtual ~VdrPluginWeb_StreamEventFilter_presult() noexcept;
++  bool* success;
++   ::common::OperationFailed err;
++
++  _VdrPluginWeb_StreamEventFilter_presult__isset __isset;
++
++  uint32_t read(::apache::thrift::protocol::TProtocol* iprot);
++
++};
++
+ class VdrPluginWebClient : virtual public VdrPluginWebIf, public  ::common::CommonServiceClient {
+  public:
+   VdrPluginWebClient(std::shared_ptr< ::apache::thrift::protocol::TProtocol> prot) :
+@@ -1383,6 +1682,15 @@ class VdrPluginWebClient : virtual public VdrPluginWebIf, public  ::common::Comm
+   bool IsWebActive() override;
+   void send_IsWebActive();
+   bool recv_IsWebActive();
++  bool SelectSubtitleTrack(const SelectSubtitleTrackType& input) override;
++  void send_SelectSubtitleTrack(const SelectSubtitleTrackType& input);
++  bool recv_SelectSubtitleTrack();
++  bool EndOfStream() override;
++  void send_EndOfStream();
++  bool recv_EndOfStream();
++  bool StreamEventFilter(const StreamEventFilterType& input) override;
++  void send_StreamEventFilter(const StreamEventFilterType& input);
++  bool recv_StreamEventFilter();
+ };
+ 
+ class VdrPluginWebProcessor : public  ::common::CommonServiceProcessor {
+@@ -1406,6 +1714,9 @@ class VdrPluginWebProcessor : public  ::common::CommonServiceProcessor {
+   void process_ResetVideo(int32_t seqid, ::apache::thrift::protocol::TProtocol* iprot, ::apache::thrift::protocol::TProtocol* oprot, void* callContext);
+   void process_SelectAudioTrack(int32_t seqid, ::apache::thrift::protocol::TProtocol* iprot, ::apache::thrift::protocol::TProtocol* oprot, void* callContext);
+   void process_IsWebActive(int32_t seqid, ::apache::thrift::protocol::TProtocol* iprot, ::apache::thrift::protocol::TProtocol* oprot, void* callContext);
++  void process_SelectSubtitleTrack(int32_t seqid, ::apache::thrift::protocol::TProtocol* iprot, ::apache::thrift::protocol::TProtocol* oprot, void* callContext);
++  void process_EndOfStream(int32_t seqid, ::apache::thrift::protocol::TProtocol* iprot, ::apache::thrift::protocol::TProtocol* oprot, void* callContext);
++  void process_StreamEventFilter(int32_t seqid, ::apache::thrift::protocol::TProtocol* iprot, ::apache::thrift::protocol::TProtocol* oprot, void* callContext);
+  public:
+   VdrPluginWebProcessor(::std::shared_ptr<VdrPluginWebIf> iface) :
+      ::common::CommonServiceProcessor(iface),
+@@ -1423,6 +1734,9 @@ class VdrPluginWebProcessor : public  ::common::CommonServiceProcessor {
+     processMap_["ResetVideo"] = &VdrPluginWebProcessor::process_ResetVideo;
+     processMap_["SelectAudioTrack"] = &VdrPluginWebProcessor::process_SelectAudioTrack;
+     processMap_["IsWebActive"] = &VdrPluginWebProcessor::process_IsWebActive;
++    processMap_["SelectSubtitleTrack"] = &VdrPluginWebProcessor::process_SelectSubtitleTrack;
++    processMap_["EndOfStream"] = &VdrPluginWebProcessor::process_EndOfStream;
++    processMap_["StreamEventFilter"] = &VdrPluginWebProcessor::process_StreamEventFilter;
+   }
+ 
+   virtual ~VdrPluginWebProcessor() {}
+@@ -1573,6 +1887,33 @@ class VdrPluginWebMultiface : virtual public VdrPluginWebIf, public  ::common::C
+     return ifaces_[i]->IsWebActive();
+   }
+ 
++  bool SelectSubtitleTrack(const SelectSubtitleTrackType& input) override {
++    size_t sz = ifaces_.size();
++    size_t i = 0;
++    for (; i < (sz - 1); ++i) {
++      ifaces_[i]->SelectSubtitleTrack(input);
++    }
++    return ifaces_[i]->SelectSubtitleTrack(input);
++  }
++
++  bool EndOfStream() override {
++    size_t sz = ifaces_.size();
++    size_t i = 0;
++    for (; i < (sz - 1); ++i) {
++      ifaces_[i]->EndOfStream();
++    }
++    return ifaces_[i]->EndOfStream();
++  }
++
++  bool StreamEventFilter(const StreamEventFilterType& input) override {
++    size_t sz = ifaces_.size();
++    size_t i = 0;
++    for (; i < (sz - 1); ++i) {
++      ifaces_[i]->StreamEventFilter(input);
++    }
++    return ifaces_[i]->StreamEventFilter(input);
++  }
++
+ };
+ 
+ // The 'concurrent' client is a thread safe client that correctly handles
+@@ -1628,6 +1969,15 @@ class VdrPluginWebConcurrentClient : virtual public VdrPluginWebIf, public  ::co
+   bool IsWebActive() override;
+   int32_t send_IsWebActive();
+   bool recv_IsWebActive(const int32_t seqid);
++  bool SelectSubtitleTrack(const SelectSubtitleTrackType& input) override;
++  int32_t send_SelectSubtitleTrack(const SelectSubtitleTrackType& input);
++  bool recv_SelectSubtitleTrack(const int32_t seqid);
++  bool EndOfStream() override;
++  int32_t send_EndOfStream();
++  bool recv_EndOfStream(const int32_t seqid);
++  bool StreamEventFilter(const StreamEventFilterType& input) override;
++  int32_t send_StreamEventFilter(const StreamEventFilterType& input);
++  bool recv_StreamEventFilter(const int32_t seqid);
+ };
+ 
+ #ifdef _MSC_VER
+diff --git a/thrift-services/src-gen/VdrPluginWeb_server.skeleton.cpp b/thrift-services/src-gen/VdrPluginWeb_server.skeleton.cpp
+index f7aad7b..bf92b54 100644
+--- a/thrift-services/src-gen/VdrPluginWeb_server.skeleton.cpp
++++ b/thrift-services/src-gen/VdrPluginWeb_server.skeleton.cpp
+@@ -85,6 +85,21 @@ class VdrPluginWebHandler : virtual public VdrPluginWebIf {
+     printf("IsWebActive\n");
+   }
+ 
++  bool SelectSubtitleTrack(const SelectSubtitleTrackType& input) {
++    // Your implementation goes here
++    printf("SelectSubtitleTrack\n");
++  }
++
++  bool EndOfStream() {
++    // Your implementation goes here
++    printf("EndOfStream\n");
++  }
++
++  bool StreamEventFilter(const StreamEventFilterType& input) {
++    // Your implementation goes here
++    printf("StreamEventFilter\n");
++  }
++
+ };
+ 
+ int main(int argc, char **argv) {
+diff --git a/thrift-services/src-gen/cefbrowser_types.cpp b/thrift-services/src-gen/cefbrowser_types.cpp
+index 6f908ef..cb224a4 100644
+--- a/thrift-services/src-gen/cefbrowser_types.cpp
++++ b/thrift-services/src-gen/cefbrowser_types.cpp
+@@ -948,4 +948,300 @@ void StopVideoType::printTo(std::ostream& out) const {
+   out << ")";
+ }
+ 
++
++PlayerStatusType::~PlayerStatusType() noexcept {
++}
++
++PlayerStatusType::PlayerStatusType() noexcept
++   : position(0),
++     state(0) {
++}
++
++void PlayerStatusType::__set_position(const int64_t val) {
++  this->position = val;
++}
++
++void PlayerStatusType::__set_state(const int32_t val) {
++  this->state = val;
++}
++std::ostream& operator<<(std::ostream& out, const PlayerStatusType& obj)
++{
++  obj.printTo(out);
++  return out;
++}
++
++
++uint32_t PlayerStatusType::read(::apache::thrift::protocol::TProtocol* iprot) {
++
++  ::apache::thrift::protocol::TInputRecursionTracker tracker(*iprot);
++  uint32_t xfer = 0;
++  std::string fname;
++  ::apache::thrift::protocol::TType ftype;
++  int16_t fid;
++
++  xfer += iprot->readStructBegin(fname);
++
++  using ::apache::thrift::protocol::TProtocolException;
++
++
++  while (true)
++  {
++    xfer += iprot->readFieldBegin(fname, ftype, fid);
++    if (ftype == ::apache::thrift::protocol::T_STOP) {
++      break;
++    }
++    switch (fid)
++    {
++      case 1:
++        if (ftype == ::apache::thrift::protocol::T_I64) {
++          xfer += iprot->readI64(this->position);
++          this->__isset.position = true;
++        } else {
++          xfer += iprot->skip(ftype);
++        }
++        break;
++      case 2:
++        if (ftype == ::apache::thrift::protocol::T_I32) {
++          xfer += iprot->readI32(this->state);
++          this->__isset.state = true;
++        } else {
++          xfer += iprot->skip(ftype);
++        }
++        break;
++      default:
++        xfer += iprot->skip(ftype);
++        break;
++    }
++    xfer += iprot->readFieldEnd();
++  }
++
++  xfer += iprot->readStructEnd();
++
++  return xfer;
++}
++
++uint32_t PlayerStatusType::write(::apache::thrift::protocol::TProtocol* oprot) const {
++  uint32_t xfer = 0;
++  ::apache::thrift::protocol::TOutputRecursionTracker tracker(*oprot);
++  xfer += oprot->writeStructBegin("PlayerStatusType");
++
++  xfer += oprot->writeFieldBegin("position", ::apache::thrift::protocol::T_I64, 1);
++  xfer += oprot->writeI64(this->position);
++  xfer += oprot->writeFieldEnd();
++
++  xfer += oprot->writeFieldBegin("state", ::apache::thrift::protocol::T_I32, 2);
++  xfer += oprot->writeI32(this->state);
++  xfer += oprot->writeFieldEnd();
++
++  xfer += oprot->writeFieldStop();
++  xfer += oprot->writeStructEnd();
++  return xfer;
++}
++
++void swap(PlayerStatusType &a, PlayerStatusType &b) noexcept {
++  using ::std::swap;
++  swap(a.position, b.position);
++  swap(a.state, b.state);
++  swap(a.__isset, b.__isset);
++}
++
++bool PlayerStatusType::operator==(const PlayerStatusType & rhs) const
++{
++  if (!(position == rhs.position))
++    return false;
++  if (!(state == rhs.state))
++    return false;
++  return true;
++}
++
++PlayerStatusType::PlayerStatusType(const PlayerStatusType& other16) noexcept {
++  position = other16.position;
++  state = other16.state;
++  __isset = other16.__isset;
++}
++PlayerStatusType& PlayerStatusType::operator=(const PlayerStatusType& other17) noexcept {
++  position = other17.position;
++  state = other17.state;
++  __isset = other17.__isset;
++  return *this;
++}
++void PlayerStatusType::printTo(std::ostream& out) const {
++  using ::apache::thrift::to_string;
++  out << "PlayerStatusType(";
++  out << "position=" << to_string(position);
++  out << ", " << "state=" << to_string(state);
++  out << ")";
++}
++
++
++StreamEventType::~StreamEventType() noexcept {
++}
++
++StreamEventType::StreamEventType() noexcept
++   : componentTag(0),
++     eventId(0),
++     privateData(),
++     status() {
++}
++
++void StreamEventType::__set_componentTag(const int32_t val) {
++  this->componentTag = val;
++}
++
++void StreamEventType::__set_eventId(const int32_t val) {
++  this->eventId = val;
++}
++
++void StreamEventType::__set_privateData(const std::string& val) {
++  this->privateData = val;
++}
++
++void StreamEventType::__set_status(const std::string& val) {
++  this->status = val;
++}
++std::ostream& operator<<(std::ostream& out, const StreamEventType& obj)
++{
++  obj.printTo(out);
++  return out;
++}
++
++
++uint32_t StreamEventType::read(::apache::thrift::protocol::TProtocol* iprot) {
++
++  ::apache::thrift::protocol::TInputRecursionTracker tracker(*iprot);
++  uint32_t xfer = 0;
++  std::string fname;
++  ::apache::thrift::protocol::TType ftype;
++  int16_t fid;
++
++  xfer += iprot->readStructBegin(fname);
++
++  using ::apache::thrift::protocol::TProtocolException;
++
++
++  while (true)
++  {
++    xfer += iprot->readFieldBegin(fname, ftype, fid);
++    if (ftype == ::apache::thrift::protocol::T_STOP) {
++      break;
++    }
++    switch (fid)
++    {
++      case 1:
++        if (ftype == ::apache::thrift::protocol::T_I32) {
++          xfer += iprot->readI32(this->componentTag);
++          this->__isset.componentTag = true;
++        } else {
++          xfer += iprot->skip(ftype);
++        }
++        break;
++      case 2:
++        if (ftype == ::apache::thrift::protocol::T_I32) {
++          xfer += iprot->readI32(this->eventId);
++          this->__isset.eventId = true;
++        } else {
++          xfer += iprot->skip(ftype);
++        }
++        break;
++      case 3:
++        if (ftype == ::apache::thrift::protocol::T_STRING) {
++          xfer += iprot->readBinary(this->privateData);
++          this->__isset.privateData = true;
++        } else {
++          xfer += iprot->skip(ftype);
++        }
++        break;
++      case 4:
++        if (ftype == ::apache::thrift::protocol::T_STRING) {
++          xfer += iprot->readString(this->status);
++          this->__isset.status = true;
++        } else {
++          xfer += iprot->skip(ftype);
++        }
++        break;
++      default:
++        xfer += iprot->skip(ftype);
++        break;
++    }
++    xfer += iprot->readFieldEnd();
++  }
++
++  xfer += iprot->readStructEnd();
++
++  return xfer;
++}
++
++uint32_t StreamEventType::write(::apache::thrift::protocol::TProtocol* oprot) const {
++  uint32_t xfer = 0;
++  ::apache::thrift::protocol::TOutputRecursionTracker tracker(*oprot);
++  xfer += oprot->writeStructBegin("StreamEventType");
++
++  xfer += oprot->writeFieldBegin("componentTag", ::apache::thrift::protocol::T_I32, 1);
++  xfer += oprot->writeI32(this->componentTag);
++  xfer += oprot->writeFieldEnd();
++
++  xfer += oprot->writeFieldBegin("eventId", ::apache::thrift::protocol::T_I32, 2);
++  xfer += oprot->writeI32(this->eventId);
++  xfer += oprot->writeFieldEnd();
++
++  xfer += oprot->writeFieldBegin("privateData", ::apache::thrift::protocol::T_STRING, 3);
++  xfer += oprot->writeBinary(this->privateData);
++  xfer += oprot->writeFieldEnd();
++
++  xfer += oprot->writeFieldBegin("status", ::apache::thrift::protocol::T_STRING, 4);
++  xfer += oprot->writeString(this->status);
++  xfer += oprot->writeFieldEnd();
++
++  xfer += oprot->writeFieldStop();
++  xfer += oprot->writeStructEnd();
++  return xfer;
++}
++
++void swap(StreamEventType &a, StreamEventType &b) noexcept {
++  using ::std::swap;
++  swap(a.componentTag, b.componentTag);
++  swap(a.eventId, b.eventId);
++  swap(a.privateData, b.privateData);
++  swap(a.status, b.status);
++  swap(a.__isset, b.__isset);
++}
++
++bool StreamEventType::operator==(const StreamEventType & rhs) const
++{
++  if (!(componentTag == rhs.componentTag))
++    return false;
++  if (!(eventId == rhs.eventId))
++    return false;
++  if (!(privateData == rhs.privateData))
++    return false;
++  if (!(status == rhs.status))
++    return false;
++  return true;
++}
++
++StreamEventType::StreamEventType(const StreamEventType& other18) {
++  componentTag = other18.componentTag;
++  eventId = other18.eventId;
++  privateData = other18.privateData;
++  status = other18.status;
++  __isset = other18.__isset;
++}
++StreamEventType& StreamEventType::operator=(const StreamEventType& other19) {
++  componentTag = other19.componentTag;
++  eventId = other19.eventId;
++  privateData = other19.privateData;
++  status = other19.status;
++  __isset = other19.__isset;
++  return *this;
++}
++void StreamEventType::printTo(std::ostream& out) const {
++  using ::apache::thrift::to_string;
++  out << "StreamEventType(";
++  out << "componentTag=" << to_string(componentTag);
++  out << ", " << "eventId=" << to_string(eventId);
++  out << ", " << "privateData=" << to_string(privateData);
++  out << ", " << "status=" << to_string(status);
++  out << ")";
++}
++
+ } // namespace
+diff --git a/thrift-services/src-gen/cefbrowser_types.h b/thrift-services/src-gen/cefbrowser_types.h
+index 58b98fd..b4e9881 100644
+--- a/thrift-services/src-gen/cefbrowser_types.h
++++ b/thrift-services/src-gen/cefbrowser_types.h
+@@ -38,6 +38,10 @@ class InsertChannelType;
+ 
+ class StopVideoType;
+ 
++class PlayerStatusType;
++
++class StreamEventType;
++
+ typedef struct _LoadUrlType__isset {
+   _LoadUrlType__isset() : url(false) {}
+   bool url :1;
+@@ -346,6 +350,94 @@ void swap(StopVideoType &a, StopVideoType &b) noexcept;
+ 
+ std::ostream& operator<<(std::ostream& out, const StopVideoType& obj);
+ 
++typedef struct _PlayerStatusType__isset {
++  _PlayerStatusType__isset() : position(false), state(false) {}
++  bool position :1;
++  bool state :1;
++} _PlayerStatusType__isset;
++
++class PlayerStatusType : public virtual ::apache::thrift::TBase {
++ public:
++
++  PlayerStatusType(const PlayerStatusType&) noexcept;
++  PlayerStatusType& operator=(const PlayerStatusType&) noexcept;
++  PlayerStatusType() noexcept;
++
++  virtual ~PlayerStatusType() noexcept;
++  int64_t position;
++  int32_t state;
++
++  _PlayerStatusType__isset __isset;
++
++  void __set_position(const int64_t val);
++
++  void __set_state(const int32_t val);
++
++  bool operator == (const PlayerStatusType & rhs) const;
++  bool operator != (const PlayerStatusType &rhs) const {
++    return !(*this == rhs);
++  }
++
++  bool operator < (const PlayerStatusType & ) const;
++
++  uint32_t read(::apache::thrift::protocol::TProtocol* iprot) override;
++  uint32_t write(::apache::thrift::protocol::TProtocol* oprot) const override;
++
++  virtual void printTo(std::ostream& out) const;
++};
++
++void swap(PlayerStatusType &a, PlayerStatusType &b) noexcept;
++
++std::ostream& operator<<(std::ostream& out, const PlayerStatusType& obj);
++
++typedef struct _StreamEventType__isset {
++  _StreamEventType__isset() : componentTag(false), eventId(false), privateData(false), status(false) {}
++  bool componentTag :1;
++  bool eventId :1;
++  bool privateData :1;
++  bool status :1;
++} _StreamEventType__isset;
++
++class StreamEventType : public virtual ::apache::thrift::TBase {
++ public:
++
++  StreamEventType(const StreamEventType&);
++  StreamEventType& operator=(const StreamEventType&);
++  StreamEventType() noexcept;
++
++  virtual ~StreamEventType() noexcept;
++  int32_t componentTag;
++  int32_t eventId;
++  std::string privateData;
++  std::string status;
++
++  _StreamEventType__isset __isset;
++
++  void __set_componentTag(const int32_t val);
++
++  void __set_eventId(const int32_t val);
++
++  void __set_privateData(const std::string& val);
++
++  void __set_status(const std::string& val);
++
++  bool operator == (const StreamEventType & rhs) const;
++  bool operator != (const StreamEventType &rhs) const {
++    return !(*this == rhs);
++  }
++
++  bool operator < (const StreamEventType & ) const;
++
++  uint32_t read(::apache::thrift::protocol::TProtocol* iprot) override;
++  uint32_t write(::apache::thrift::protocol::TProtocol* oprot) const override;
++
++  virtual void printTo(std::ostream& out) const;
++};
++
++void swap(StreamEventType &a, StreamEventType &b) noexcept;
++
++std::ostream& operator<<(std::ostream& out, const StreamEventType& obj);
++
+ } // namespace
+ 
+ #endif
+diff --git a/thrift-services/src-gen/pluginweb_types.cpp b/thrift-services/src-gen/pluginweb_types.cpp
+index 595ea39..f4bb774 100644
+--- a/thrift-services/src-gen/pluginweb_types.cpp
++++ b/thrift-services/src-gen/pluginweb_types.cpp
+@@ -1026,4 +1026,231 @@ void SelectAudioTrackType::printTo(std::ostream& out) const {
+   out << ")";
+ }
+ 
++
++SelectSubtitleTrackType::~SelectSubtitleTrackType() noexcept {
++}
++
++SelectSubtitleTrackType::SelectSubtitleTrackType() noexcept
++   : subtitleTrack() {
++}
++
++void SelectSubtitleTrackType::__set_subtitleTrack(const std::string& val) {
++  this->subtitleTrack = val;
++}
++std::ostream& operator<<(std::ostream& out, const SelectSubtitleTrackType& obj)
++{
++  obj.printTo(out);
++  return out;
++}
++
++
++uint32_t SelectSubtitleTrackType::read(::apache::thrift::protocol::TProtocol* iprot) {
++
++  ::apache::thrift::protocol::TInputRecursionTracker tracker(*iprot);
++  uint32_t xfer = 0;
++  std::string fname;
++  ::apache::thrift::protocol::TType ftype;
++  int16_t fid;
++
++  xfer += iprot->readStructBegin(fname);
++
++  using ::apache::thrift::protocol::TProtocolException;
++
++
++  while (true)
++  {
++    xfer += iprot->readFieldBegin(fname, ftype, fid);
++    if (ftype == ::apache::thrift::protocol::T_STOP) {
++      break;
++    }
++    switch (fid)
++    {
++      case 1:
++        if (ftype == ::apache::thrift::protocol::T_STRING) {
++          xfer += iprot->readString(this->subtitleTrack);
++          this->__isset.subtitleTrack = true;
++        } else {
++          xfer += iprot->skip(ftype);
++        }
++        break;
++      default:
++        xfer += iprot->skip(ftype);
++        break;
++    }
++    xfer += iprot->readFieldEnd();
++  }
++
++  xfer += iprot->readStructEnd();
++
++  return xfer;
++}
++
++uint32_t SelectSubtitleTrackType::write(::apache::thrift::protocol::TProtocol* oprot) const {
++  uint32_t xfer = 0;
++  ::apache::thrift::protocol::TOutputRecursionTracker tracker(*oprot);
++  xfer += oprot->writeStructBegin("SelectSubtitleTrackType");
++
++  xfer += oprot->writeFieldBegin("subtitleTrack", ::apache::thrift::protocol::T_STRING, 1);
++  xfer += oprot->writeString(this->subtitleTrack);
++  xfer += oprot->writeFieldEnd();
++
++  xfer += oprot->writeFieldStop();
++  xfer += oprot->writeStructEnd();
++  return xfer;
++}
++
++void swap(SelectSubtitleTrackType &a, SelectSubtitleTrackType &b) noexcept {
++  using ::std::swap;
++  swap(a.subtitleTrack, b.subtitleTrack);
++  swap(a.__isset, b.__isset);
++}
++
++bool SelectSubtitleTrackType::operator==(const SelectSubtitleTrackType & rhs) const
++{
++  if (!(subtitleTrack == rhs.subtitleTrack))
++    return false;
++  return true;
++}
++
++SelectSubtitleTrackType::SelectSubtitleTrackType(const SelectSubtitleTrackType& other14) {
++  subtitleTrack = other14.subtitleTrack;
++  __isset = other14.__isset;
++}
++SelectSubtitleTrackType& SelectSubtitleTrackType::operator=(const SelectSubtitleTrackType& other15) {
++  subtitleTrack = other15.subtitleTrack;
++  __isset = other15.__isset;
++  return *this;
++}
++void SelectSubtitleTrackType::printTo(std::ostream& out) const {
++  using ::apache::thrift::to_string;
++  out << "SelectSubtitleTrackType(";
++  out << "subtitleTrack=" << to_string(subtitleTrack);
++  out << ")";
++}
++
++
++StreamEventFilterType::~StreamEventFilterType() noexcept {
++}
++
++StreamEventFilterType::StreamEventFilterType() noexcept
++   : componentTag(0),
++     enable(0) {
++}
++
++void StreamEventFilterType::__set_componentTag(const int32_t val) {
++  this->componentTag = val;
++}
++
++void StreamEventFilterType::__set_enable(const bool val) {
++  this->enable = val;
++}
++std::ostream& operator<<(std::ostream& out, const StreamEventFilterType& obj)
++{
++  obj.printTo(out);
++  return out;
++}
++
++
++uint32_t StreamEventFilterType::read(::apache::thrift::protocol::TProtocol* iprot) {
++
++  ::apache::thrift::protocol::TInputRecursionTracker tracker(*iprot);
++  uint32_t xfer = 0;
++  std::string fname;
++  ::apache::thrift::protocol::TType ftype;
++  int16_t fid;
++
++  xfer += iprot->readStructBegin(fname);
++
++  using ::apache::thrift::protocol::TProtocolException;
++
++
++  while (true)
++  {
++    xfer += iprot->readFieldBegin(fname, ftype, fid);
++    if (ftype == ::apache::thrift::protocol::T_STOP) {
++      break;
++    }
++    switch (fid)
++    {
++      case 1:
++        if (ftype == ::apache::thrift::protocol::T_I32) {
++          xfer += iprot->readI32(this->componentTag);
++          this->__isset.componentTag = true;
++        } else {
++          xfer += iprot->skip(ftype);
++        }
++        break;
++      case 2:
++        if (ftype == ::apache::thrift::protocol::T_BOOL) {
++          xfer += iprot->readBool(this->enable);
++          this->__isset.enable = true;
++        } else {
++          xfer += iprot->skip(ftype);
++        }
++        break;
++      default:
++        xfer += iprot->skip(ftype);
++        break;
++    }
++    xfer += iprot->readFieldEnd();
++  }
++
++  xfer += iprot->readStructEnd();
++
++  return xfer;
++}
++
++uint32_t StreamEventFilterType::write(::apache::thrift::protocol::TProtocol* oprot) const {
++  uint32_t xfer = 0;
++  ::apache::thrift::protocol::TOutputRecursionTracker tracker(*oprot);
++  xfer += oprot->writeStructBegin("StreamEventFilterType");
++
++  xfer += oprot->writeFieldBegin("componentTag", ::apache::thrift::protocol::T_I32, 1);
++  xfer += oprot->writeI32(this->componentTag);
++  xfer += oprot->writeFieldEnd();
++
++  xfer += oprot->writeFieldBegin("enable", ::apache::thrift::protocol::T_BOOL, 2);
++  xfer += oprot->writeBool(this->enable);
++  xfer += oprot->writeFieldEnd();
++
++  xfer += oprot->writeFieldStop();
++  xfer += oprot->writeStructEnd();
++  return xfer;
++}
++
++void swap(StreamEventFilterType &a, StreamEventFilterType &b) noexcept {
++  using ::std::swap;
++  swap(a.componentTag, b.componentTag);
++  swap(a.enable, b.enable);
++  swap(a.__isset, b.__isset);
++}
++
++bool StreamEventFilterType::operator==(const StreamEventFilterType & rhs) const
++{
++  if (!(componentTag == rhs.componentTag))
++    return false;
++  if (!(enable == rhs.enable))
++    return false;
++  return true;
++}
++
++StreamEventFilterType::StreamEventFilterType(const StreamEventFilterType& other16) noexcept {
++  componentTag = other16.componentTag;
++  enable = other16.enable;
++  __isset = other16.__isset;
++}
++StreamEventFilterType& StreamEventFilterType::operator=(const StreamEventFilterType& other17) noexcept {
++  componentTag = other17.componentTag;
++  enable = other17.enable;
++  __isset = other17.__isset;
++  return *this;
++}
++void StreamEventFilterType::printTo(std::ostream& out) const {
++  using ::apache::thrift::to_string;
++  out << "StreamEventFilterType(";
++  out << "componentTag=" << to_string(componentTag);
++  out << ", " << "enable=" << to_string(enable);
++  out << ")";
++}
++
+ } // namespace
+diff --git a/thrift-services/src-gen/pluginweb_types.h b/thrift-services/src-gen/pluginweb_types.h
+index f46cd3c..a7b7f23 100644
+--- a/thrift-services/src-gen/pluginweb_types.h
++++ b/thrift-services/src-gen/pluginweb_types.h
+@@ -36,6 +36,10 @@ class ResetVideoType;
+ 
+ class SelectAudioTrackType;
+ 
++class SelectSubtitleTrackType;
++
++class StreamEventFilterType;
++
+ typedef struct _ProcessOsdUpdateType__isset {
+   _ProcessOsdUpdateType__isset() : disp_width(false), disp_height(false), x(false), y(false), width(false), height(false), data(false) {}
+   bool disp_width :1;
+@@ -340,6 +344,82 @@ void swap(SelectAudioTrackType &a, SelectAudioTrackType &b) noexcept;
+ 
+ std::ostream& operator<<(std::ostream& out, const SelectAudioTrackType& obj);
+ 
++typedef struct _SelectSubtitleTrackType__isset {
++  _SelectSubtitleTrackType__isset() : subtitleTrack(false) {}
++  bool subtitleTrack :1;
++} _SelectSubtitleTrackType__isset;
++
++class SelectSubtitleTrackType : public virtual ::apache::thrift::TBase {
++ public:
++
++  SelectSubtitleTrackType(const SelectSubtitleTrackType&);
++  SelectSubtitleTrackType& operator=(const SelectSubtitleTrackType&);
++  SelectSubtitleTrackType() noexcept;
++
++  virtual ~SelectSubtitleTrackType() noexcept;
++  std::string subtitleTrack;
++
++  _SelectSubtitleTrackType__isset __isset;
++
++  void __set_subtitleTrack(const std::string& val);
++
++  bool operator == (const SelectSubtitleTrackType & rhs) const;
++  bool operator != (const SelectSubtitleTrackType &rhs) const {
++    return !(*this == rhs);
++  }
++
++  bool operator < (const SelectSubtitleTrackType & ) const;
++
++  uint32_t read(::apache::thrift::protocol::TProtocol* iprot) override;
++  uint32_t write(::apache::thrift::protocol::TProtocol* oprot) const override;
++
++  virtual void printTo(std::ostream& out) const;
++};
++
++void swap(SelectSubtitleTrackType &a, SelectSubtitleTrackType &b) noexcept;
++
++std::ostream& operator<<(std::ostream& out, const SelectSubtitleTrackType& obj);
++
++typedef struct _StreamEventFilterType__isset {
++  _StreamEventFilterType__isset() : componentTag(false), enable(false) {}
++  bool componentTag :1;
++  bool enable :1;
++} _StreamEventFilterType__isset;
++
++class StreamEventFilterType : public virtual ::apache::thrift::TBase {
++ public:
++
++  StreamEventFilterType(const StreamEventFilterType&) noexcept;
++  StreamEventFilterType& operator=(const StreamEventFilterType&) noexcept;
++  StreamEventFilterType() noexcept;
++
++  virtual ~StreamEventFilterType() noexcept;
++  int32_t componentTag;
++  bool enable;
++
++  _StreamEventFilterType__isset __isset;
++
++  void __set_componentTag(const int32_t val);
++
++  void __set_enable(const bool val);
++
++  bool operator == (const StreamEventFilterType & rhs) const;
++  bool operator != (const StreamEventFilterType &rhs) const {
++    return !(*this == rhs);
++  }
++
++  bool operator < (const StreamEventFilterType & ) const;
++
++  uint32_t read(::apache::thrift::protocol::TProtocol* iprot) override;
++  uint32_t write(::apache::thrift::protocol::TProtocol* oprot) const override;
++
++  virtual void printTo(std::ostream& out) const;
++};
++
++void swap(StreamEventFilterType &a, StreamEventFilterType &b) noexcept;
++
++std::ostream& operator<<(std::ostream& out, const StreamEventFilterType& obj);
++
+ } // namespace
+ 
+ #endif
+diff --git a/web.cpp b/web.cpp
+index e89576f..d3a461f 100644
+--- a/web.cpp
++++ b/web.cpp
+@@ -396,6 +396,21 @@ bool VdrPluginWebServer::IsWebActive() {
+     return (WebOSDPage::Get() != nullptr) || (videoPlayer != nullptr);
+ }
+ 
++bool VdrPluginWebServer::SelectSubtitleTrack(const SelectSubtitleTrackType &input) {
++    // not supported yet
++    return false;
++}
++
++bool VdrPluginWebServer::EndOfStream() {
++    // not supported yet
++    return true;
++}
++
++bool VdrPluginWebServer::StreamEventFilter(const StreamEventFilterType &input) {
++    // not supported yet
++    return false;
++}
++
+ VdrPluginWebIf *VdrPluginWebCloneFactory::getHandler(const TConnectionInfo &connInfo) {
+     std::shared_ptr<TSocket> sock = std::dynamic_pointer_cast<TSocket>(connInfo.transport);
+ 
+diff --git a/web.h b/web.h
+index 984815e..86a2169 100644
+--- a/web.h
++++ b/web.h
+@@ -105,6 +105,9 @@ public:
+     bool ResetVideo(const ResetVideoType& input) override;
+     bool SelectAudioTrack(const SelectAudioTrackType& input) override;
+     bool IsWebActive() override;
++    bool SelectSubtitleTrack(const SelectSubtitleTrackType& input) override;
++    bool EndOfStream() override;
++    bool StreamEventFilter(const StreamEventFilterType& input) override;
+ };
+ 
+ class VdrPluginWebCloneFactory : virtual public VdrPluginWebIfFactory {
+-- 
+2.43.0
+

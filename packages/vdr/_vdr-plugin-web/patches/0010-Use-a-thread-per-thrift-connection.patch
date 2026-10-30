@@ -1,0 +1,67 @@
+From b9e2750cc90cce9b0baca39bdcfcc5cee2a557d1 Mon Sep 17 00:00:00 2001
+From: Andreas Baierl <ichgeh@imkreisrum.de>
+Date: Thu, 29 Oct 2026 16:38:57 +0100
+Subject: [PATCH 10/34] Use a thread per thrift connection
+
+TThreadPoolServer with 4 workers serves only 4 connections at once.
+All clients keep their connections open, so further clients hang.
+
+Co-Authored-By: Claude Opus 5.5
+---
+ web.cpp | 14 +++++---------
+ web.h   |  2 +-
+ 2 files changed, 6 insertions(+), 10 deletions(-)
+
+diff --git a/web.cpp b/web.cpp
+index 2ce0061..e89576f 100644
+--- a/web.cpp
++++ b/web.cpp
+@@ -26,7 +26,7 @@
+ 
+ #define TSDIR  "%s/web/%s/%4d-%02d-%02d.%02d.%02d.%d-%d.rec"
+ 
+-TThreadPoolServer *thriftServer;
++TThreadedServer *thriftServer;
+ 
+ bool saveTS;
+ char* currentTSFilename;
+@@ -415,19 +415,15 @@ void VdrPluginWebCloneFactory::releaseHandler(CommonServiceIf* handler) {
+ }
+ 
+ void startServer() {
+-    const int workerCount = 4;
+-    std::shared_ptr<ThreadManager> threadManager = ThreadManager::newSimpleThreadManager(workerCount);
+-    threadManager->threadFactory(std::make_shared<ThreadFactory>());
+-    threadManager->start();
+-
+     std::string listenIp = bindAll ? "0.0.0.0" : vdrIp;
+ 
+-    thriftServer = new TThreadPoolServer(
++    // one thread per connection: the clients keep their connections open, a fixed
++    // pool of 4 workers blocks any further client (e.g. a new transcoder stream)
++    thriftServer = new TThreadedServer(
+             std::make_shared<VdrPluginWebProcessorFactory>(std::make_shared<VdrPluginWebCloneFactory>()),
+             std::make_shared<TServerSocket>(listenIp, vdrPort),
+             std::make_shared<TBufferedTransportFactory>(),
+-            std::make_shared<TBinaryProtocolFactory>(),
+-            threadManager);
++            std::make_shared<TBinaryProtocolFactory>());
+ 
+     thriftServer->serve();
+ }
+diff --git a/web.h b/web.h
+index 2fa9390..984815e 100644
+--- a/web.h
++++ b/web.h
+@@ -19,7 +19,7 @@
+ #include <thrift/transport/TSocket.h>
+ #include <thrift/protocol/TBinaryProtocol.h>
+ #include <thrift/transport/TBufferTransports.h>
+-#include <thrift/server/TThreadPoolServer.h>
++#include <thrift/server/TThreadedServer.h>
+ #include <thrift/transport/TServerSocket.h>
+ #include <thrift/transport/TBufferTransports.h>
+ 
+-- 
+2.43.0
+

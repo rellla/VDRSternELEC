@@ -1,0 +1,37 @@
+From 445f3966ca2abba2c3e95b99360af6b1bfe4e776 Mon Sep 17 00:00:00 2001
+From: Andreas Baierl <ichgeh@imkreisrum.de>
+Date: Thu, 29 Oct 2026 16:38:33 +0100
+Subject: [PATCH 08/34] Don't leak the old player in ResetVideo()
+
+On a video format change the old player was never deleted. Also set
+the player before launching the page, like StartVideo() does.
+
+Co-Authored-By: Claude Opus 5.5
+---
+ web.cpp | 5 +++--
+ 1 file changed, 3 insertions(+), 2 deletions(-)
+
+diff --git a/web.cpp b/web.cpp
+index 67a9553..e8c7c93 100644
+--- a/web.cpp
++++ b/web.cpp
+@@ -335,13 +335,14 @@ bool VdrPluginWebServer::ResetVideo(const ResetVideoType &input) {
+         if (videoInfo != input.videoInfo) {
+             dsyslog("[vdrweb] Device res requested, because of a video format change");
+             // videoPlayer->ResetVideo();
+-            cControl::Shutdown();
++            releasePlayer();
+ 
+             WebOSDPage* page = WebOSDPage::Create(useOutputDeviceScale, PLAYER);
+             page->Display();
+             videoPlayer = new VideoPlayer();
+-            cControl::Launch(page);
+             page->SetPlayer(videoPlayer);
++            cControl::Launch(page);
++            cControl::Attach();
+         } else {
+             dsyslog("[vdrweb] Device reset is sufficent, because video format does not change");
+             videoPlayer->ResetVideo();
+-- 
+2.43.0
+

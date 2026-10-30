@@ -1,0 +1,48 @@
+From 5bdc16e2c3ca7236c4935f8f6017d8e7f4a4c122 Mon Sep 17 00:00:00 2001
+From: Andreas Baierl <ichgeh@imkreisrum.de>
+Date: Thu, 29 Oct 2026 17:05:07 +0100
+Subject: [PATCH 14/34] Check the channel pointers in ChannelSwitch() and the
+ AIT parser
+
+GetByNumber() may return null, both dereferenced it unchecked.
+
+Co-Authored-By: Claude Opus 5.5
+---
+ ait.cpp    | 4 ++++
+ status.cpp | 5 +++++
+ 2 files changed, 9 insertions(+)
+
+diff --git a/ait.cpp b/ait.cpp
+index d8ed76a..affcb1c 100644
+--- a/ait.cpp
++++ b/ait.cpp
+@@ -147,6 +147,10 @@ cAIT::cAIT(const u_char *Data, u_short Pid) : SI::AIT(Data, true) {
+         const cChannel* currentChannel = Channels->GetByNumber(cDevice::CurrentChannel());
+ #endif
+ 
++        if (currentChannel == nullptr) {
++            continue;
++        }
++
+         const char* buffer = toHbbtvJson(currentChannel->GetChannelID().ToString(), currentChannel->Name(), aitApp.getApplicationId(), aitApp.getControlCode(), nameBuffer, URLBaseBuffer, URLLocBuffer, URLExtBuffer);
+         if (browserClient != nullptr) {
+             browserClient->InsertHbbtv(buffer);
+diff --git a/status.cpp b/status.cpp
+index d26fe11..3d3072e 100644
+--- a/status.cpp
++++ b/status.cpp
+@@ -93,6 +93,11 @@ void cHbbtvDeviceStatus::ChannelSwitch(const cDevice * vdrDevice, int channelNum
+ #else
+          auto channel = Channels->GetByNumber(channelNumber);
+ #endif
++         if (channel == nullptr) {
++            device = nullptr;
++            return;
++         }
++
+          sid = channel->Sid();
+ 
+          const char* buffer = toChannelJson(channel);
+-- 
+2.43.0
+

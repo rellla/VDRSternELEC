@@ -1,0 +1,112 @@
+From 038a4cf82e4de1db198380def9f9c909ca7ed91c Mon Sep 17 00:00:00 2001
+From: Andreas Baierl <ichgeh@imkreisrum.de>
+Date: Sun, 1 Nov 2026 15:41:47 +0100
+Subject: [PATCH 33/34] Don't call the browser with the lock of the channels
+
+A slow or hanging browser blocked VDR, which needs the lock for a
+channel switch.
+
+Co-Authored-By: Claude Opus 5.5
+---
+ ait.cpp    | 23 ++++++++++++++---------
+ status.cpp | 32 ++++++++++++++++++++------------
+ 2 files changed, 34 insertions(+), 21 deletions(-)
+
+diff --git a/ait.cpp b/ait.cpp
+index c3fd0fc..0403f9f 100644
+--- a/ait.cpp
++++ b/ait.cpp
+@@ -144,15 +144,22 @@ cAIT::cAIT(const u_char *Data, u_short Pid) : SI::AIT(Data, true) {
+             delete d;
+         }
+ 
++        std::string json;
++        {
+ #if APIVERSNUM >= 20301
+-        LOCK_CHANNELS_READ
+-        const cChannel* currentChannel = Channels->GetByNumber(cDevice::CurrentChannel());
++            LOCK_CHANNELS_READ
++            const cChannel* currentChannel = Channels->GetByNumber(cDevice::CurrentChannel());
+ #else
+-        const cChannel* currentChannel = Channels->GetByNumber(cDevice::CurrentChannel());
++            const cChannel* currentChannel = Channels->GetByNumber(cDevice::CurrentChannel());
+ #endif
+ 
+-        if (currentChannel == nullptr) {
+-            continue;
++            if (currentChannel == nullptr) {
++                continue;
++            }
++
++            const char* buffer = toHbbtvJson(currentChannel->GetChannelID().ToString(), currentChannel->Name(), aitApp.getApplicationId(), aitApp.getControlCode(), nameBuffer, URLBaseBuffer, URLLocBuffer, URLExtBuffer);
++            json = buffer;
++            free((void *) buffer);
+         }
+ 
+         // an HbbTV application which starts automatically: show the HbbTV hint.
+@@ -161,12 +168,10 @@ cAIT::cAIT(const u_char *Data, u_short Pid) : SI::AIT(Data, true) {
+             cHbbtvHint::AutostartApplicationFound();
+         }
+ 
+-        const char* buffer = toHbbtvJson(currentChannel->GetChannelID().ToString(), currentChannel->Name(), aitApp.getApplicationId(), aitApp.getControlCode(), nameBuffer, URLBaseBuffer, URLLocBuffer, URLExtBuffer);
++        // not with the lock of the channels: the browser may answer slowly
+         if (browserClient != nullptr) {
+-            browserClient->InsertHbbtv(buffer);
++            browserClient->InsertHbbtv(json);
+         }
+-
+-        free((void *) buffer);
+     }
+ }
+ 
+diff --git a/status.cpp b/status.cpp
+index 528328a..d38836f 100644
+--- a/status.cpp
++++ b/status.cpp
+@@ -199,23 +199,31 @@ void cHbbtvDeviceStatus::ChannelSwitch(const cDevice * vdrDevice, int channelNum
+       if (channelNumber) {
+          device = cDevice::ActualDevice();
+ 
++         std::string json;
++         {
+ #if APIVERSNUM >= 20301
+-         LOCK_CHANNELS_READ
+-         auto channel = Channels->GetByNumber(channelNumber);
++            LOCK_CHANNELS_READ
++            auto channel = Channels->GetByNumber(channelNumber);
+ #else
+-         auto channel = Channels->GetByNumber(channelNumber);
++            auto channel = Channels->GetByNumber(channelNumber);
+ #endif
+-         if (channel == nullptr) {
+-            device = nullptr;
+-            return;
+-         }
++            if (channel == nullptr) {
++               device = nullptr;
++               return;
++            }
+ 
+-         sid = channel->Sid();
+-         lastPresentEventId = 0;
++            sid = channel->Sid();
++            lastPresentEventId = 0;
+ 
+-         const char* buffer = toChannelJson(channel);
+-         browserClient->InsertChannel(buffer);
+-         free((void *) buffer);
++            const char* buffer = toChannelJson(channel);
++            json = buffer;
++            free((void *) buffer);
++         }
++
++         // not with the lock of the channels: the browser may answer slowly
++         if (browserClient != nullptr) {
++            browserClient->InsertChannel(json);
++         }
+ 
+          device->AttachFilter(aitFilter = new cAitFilter(sid));
+          StreamEventsChannelSwitch(device);
+-- 
+2.43.0
+

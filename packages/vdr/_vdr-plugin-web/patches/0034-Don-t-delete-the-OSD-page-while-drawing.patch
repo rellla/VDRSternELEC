@@ -1,0 +1,73 @@
+From 828f4cce11269d9779e8f948f442c7ed4cf13141 Mon Sep 17 00:00:00 2001
+From: Andreas Baierl <ichgeh@imkreisrum.de>
+Date: Sun, 1 Nov 2026 15:42:36 +0100
+Subject: [PATCH 34/34] Don't delete the OSD page while drawing
+
+The thrift threads used the page without a lock, VDR could close and
+delete it meanwhile.
+
+Co-Authored-By: Claude Opus 5.5
+---
+ web.cpp      | 9 +++++++++
+ webosdpage.h | 5 +++++
+ 2 files changed, 14 insertions(+)
+
+diff --git a/web.cpp b/web.cpp
+index ccdb0d7..f25d048 100644
+--- a/web.cpp
++++ b/web.cpp
+@@ -178,6 +178,9 @@ void VdrPluginWebServer::ping() {
+ bool VdrPluginWebServer::ProcessOsdUpdate(const ProcessOsdUpdateType &input) {
+     DEBUGLOG("[vdrweb] VdrPluginWebServer::ProcessOsdUpdate");
+ 
++    // the page must not be deleted while drawing
++    std::lock_guard<std::recursive_mutex> lock(pixmap_mutex);
++
+     WebOSDPage* page = WebOSDPage::Get();
+     if (page == nullptr) {
+         // illegal request -> abort
+@@ -195,6 +198,9 @@ bool VdrPluginWebServer::ProcessOsdUpdate(const ProcessOsdUpdateType &input) {
+ bool VdrPluginWebServer::ProcessOsdUpdateQOI(const ProcessOsdUpdateQOIType &input) {
+     DEBUGLOG("[vdrweb] VdrPluginWebServer::ProcessOsdUpdateQOI");
+ 
++    // the page must not be deleted while drawing
++    std::lock_guard<std::recursive_mutex> lock(pixmap_mutex);
++
+     WebOSDPage* page = WebOSDPage::Get();
+     if (page == nullptr) {
+         // illegal request -> abort
+@@ -423,6 +429,9 @@ bool VdrPluginWebServer::StreamEventFilter(const StreamEventFilterType &input) {
+ }
+ 
+ bool VdrPluginWebServer::ProcessOsdFrame(const ProcessOsdFrameType &input) {
++    // the page must not be deleted while drawing
++    std::lock_guard<std::recursive_mutex> lock(pixmap_mutex);
++
+     WebOSDPage* page = WebOSDPage::Get();
+     if (page == nullptr) {
+         // illegal request -> abort
+diff --git a/webosdpage.h b/webosdpage.h
+index 8f51e98..d94fdd9 100644
+--- a/webosdpage.h
++++ b/webosdpage.h
+@@ -1,5 +1,7 @@
+ #pragma once
+ 
++#include <mutex>
++
+ #include <string>
+ #include <map>
+ #include <thread>
+@@ -13,6 +15,9 @@ enum OSD_MODE {
+     CLOSED
+ };
+ 
++// protects the pages and their OSD, the thrift threads draw while VDR may close a page
++extern std::recursive_mutex pixmap_mutex;
++
+ class WebOSDPage : public cControl {
+ 
+ private:
+-- 
+2.43.0
+
