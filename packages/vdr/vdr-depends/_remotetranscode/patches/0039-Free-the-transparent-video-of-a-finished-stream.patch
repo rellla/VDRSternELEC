@@ -1,0 +1,31 @@
+From 87b6c0adfac257962930ef22b67b832eaec89b54 Mon Sep 17 00:00:00 2001
+From: Andreas Baierl <ichgeh@imkreisrum.de>
+Date: Sun, 1 Nov 2026 15:40:19 +0100
+Subject: [PATCH 39/39] Free the transparent video of a finished stream
+
+Every stream got its own transparent video in memory, a copy of the
+whole transparent movie for streams without duration, and it was
+never removed.
+
+Co-Authored-By: Claude Opus 5.5
+---
+ streamhandler.cpp | 3 +++
+ 1 file changed, 3 insertions(+)
+
+diff --git a/streamhandler.cpp b/streamhandler.cpp
+index 159040e..18ea790 100644
+--- a/streamhandler.cpp
++++ b/streamhandler.cpp
+@@ -71,6 +71,9 @@ StreamHandler::~StreamHandler() {
+     stopRequest = false;
+     stopVideo();
+     remove((movie_path + "/" + transparentVideoFile).c_str());
++
++    // the transparent video is kept in memory, every stream has its own one
++    transparentVideos.erase(transparentVideoFile);
+     delete vdrClient;
+     delete browserClient;
+ }
+-- 
+2.43.0
+

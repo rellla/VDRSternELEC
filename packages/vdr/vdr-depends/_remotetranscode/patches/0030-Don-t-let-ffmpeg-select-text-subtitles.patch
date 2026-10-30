@@ -1,0 +1,46 @@
+From 3fc2977cc44d9ea656c195d58e6186fea1894a32 Mon Sep 17 00:00:00 2001
+From: Andreas Baierl <ichgeh@imkreisrum.de>
+Date: Fri, 30 Oct 2026 13:07:56 +0100
+Subject: [PATCH 30/39] Don't let ffmpeg select text subtitles
+
+Without explicit mapping ffmpeg selects a subtitle stream too. Text
+subtitles (mov_text, WebVTT of HLS) can't be copied into a TS and
+ffmpeg aborts, the video doesn't start.
+
+Co-Authored-By: Claude Opus 5.5
+---
+ streamhandler.cpp | 7 +++++--
+ 1 file changed, 5 insertions(+), 2 deletions(-)
+
+diff --git a/streamhandler.cpp b/streamhandler.cpp
+index f665a3d..db66062 100644
+--- a/streamhandler.cpp
++++ b/streamhandler.cpp
+@@ -225,9 +225,11 @@ std::vector<std::string> StreamHandler::prepareStreamCmd(std::string url, std::s
+             }
+         }
+     } else {
+-        // let ffmpeg decide which streams to copy
++        // let ffmpeg decide which streams to copy. Its automatic selection may choose a
++        // text subtitle, which can't be copied into a TS and aborts the whole stream.
+         callStr.emplace_back("-codec");
+         callStr.emplace_back("copy");
++        callStr.emplace_back("-sn");
+     }
+ 
+     callStr.emplace_back("-f");
+@@ -312,9 +314,10 @@ std::vector<std::string> StreamHandler::prepareStreamM3uCmd(std::string url, std
+         callStr.emplace_back(a.uri);
+     }
+ 
+-    // transmux
++    // transmux. HLS subtitles (WebVTT) can't be copied into a TS.
+     callStr.emplace_back("-codec");
+     callStr.emplace_back("copy");
++    callStr.emplace_back("-sn");
+ 
+     // main input
+     if (!m3u.audio.empty()) {
+-- 
+2.43.0
+

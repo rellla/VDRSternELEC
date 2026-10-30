@@ -1,0 +1,44 @@
+From 27c1f4ff418bf2ef0a93e5cc6cf2afd4347966fe Mon Sep 17 00:00:00 2001
+From: Andreas Baierl <ichgeh@imkreisrum.de>
+Date: Thu, 29 Oct 2026 16:48:38 +0100
+Subject: [PATCH 11/39] Allow an empty referer in r_dash2ts
+
+document.referrer of a directly started HbbTV app (e.g. ZDF) is
+empty. r_dash2ts refused to work without referer, so every MPEG-DASH
+probe failed.
+
+Co-Authored-By: Claude Opus 5.5
+---
+ r_dash2ts.cpp | 9 +++++++--
+ 1 file changed, 7 insertions(+), 2 deletions(-)
+
+diff --git a/r_dash2ts.cpp b/r_dash2ts.cpp
+index e9fdb87..4944546 100644
+--- a/r_dash2ts.cpp
++++ b/r_dash2ts.cpp
+@@ -97,7 +97,8 @@ int main(int argc, char *argv[]) {
+         path_to_kodi = "/storage/.kodi";
+     }
+ 
+-    if (url.empty() || user_agent.empty() || referer.empty()) {
++    // referer may be empty, e.g. document.referrer of a directly started HbbTV app
++    if (url.empty() || user_agent.empty()) {
+         usage();
+         exit(EXIT_FAILURE);
+     }
+@@ -118,7 +119,11 @@ int main(int argc, char *argv[]) {
+ 
+     INFO("Found inputstream.adaptive Library, version {}", api_version);
+ 
+-    std::string httpHeader = "Referer=" + referer + "&User-Agent=" + user_agent;
++    std::string httpHeader = "User-Agent=" + user_agent;
++
++    if (!referer.empty()) {
++        httpHeader += "&Referer=" + referer;
++    }
+ 
+     if (!cookies.empty()) {
+         httpHeader += "&cookie=" + urlEncode(cookies);
+-- 
+2.43.0
+

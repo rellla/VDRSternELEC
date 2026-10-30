@@ -1,0 +1,47 @@
+From 644ce9370f63152ff7735be31380aa2fee75e13e Mon Sep 17 00:00:00 2001
+From: Andreas Baierl <ichgeh@imkreisrum.de>
+Date: Thu, 29 Oct 2026 16:51:08 +0100
+Subject: [PATCH 23/39] Ignore m3u audio renditions without URI
+
+Such audio is part of the variant stream. The missing URI was
+resolved to the playlist directory and ffmpeg failed to open it.
+Map the audio of the variant stream, if there is one.
+
+Co-Authored-By: Claude Opus 5.5
+---
+ m3u8handler.cpp   | 3 ++-
+ streamhandler.cpp | 4 ++++
+ 2 files changed, 6 insertions(+), 1 deletion(-)
+
+diff --git a/m3u8handler.cpp b/m3u8handler.cpp
+index 674f4b5..6b669b7 100644
+--- a/m3u8handler.cpp
++++ b/m3u8handler.cpp
+@@ -185,7 +185,8 @@ m3u_stream M3u8Handler::parseM3u() {
+         } else if (startsWith(line, starterMedia)) {
+             auto attr = parseAttributes(line.substr(starterMedia.length()));
+ 
+-            if (attr["TYPE"] == "AUDIO") {
++            // an audio rendition without URI is contained in the variant stream itself
++            if (attr["TYPE"] == "AUDIO" && !attr["URI"].empty()) {
+                 media m;
+                 m.type = attr["TYPE"];
+                 m.language = attr["LANGUAGE"];
+diff --git a/streamhandler.cpp b/streamhandler.cpp
+index 317aecc..9446064 100644
+--- a/streamhandler.cpp
++++ b/streamhandler.cpp
+@@ -284,6 +284,10 @@ std::vector<std::string> StreamHandler::prepareStreamM3uCmd(std::string url, std
+         callStr.emplace_back("-map");
+         callStr.emplace_back("0:v");
+ 
++        // audio contained in the variant itself (rendition without URI), if any
++        callStr.emplace_back("-map");
++        callStr.emplace_back("0:a?");
++
+         int idx = 1;
+         for (auto a: m3u.audio) {
+             callStr.emplace_back("-map");
+-- 
+2.43.0
+

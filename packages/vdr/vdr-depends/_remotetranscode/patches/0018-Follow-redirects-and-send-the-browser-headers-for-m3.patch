@@ -1,0 +1,89 @@
+From a229686e384bbecf5454f1e9dc7aaff9a64e3db1 Mon Sep 17 00:00:00 2001
+From: Andreas Baierl <ichgeh@imkreisrum.de>
+Date: Thu, 29 Oct 2026 16:49:55 +0100
+Subject: [PATCH 18/39] Follow redirects and send the browser headers for m3u
+
+The playlist was requested without user agent, referer and cookies,
+and redirects were not followed. Many CDNs answer with a redirect.
+
+Co-Authored-By: Claude Opus 5.5
+---
+ m3u8handler.cpp   | 18 ++++++++++++++++--
+ m3u8handler.h     |  5 ++++-
+ streamhandler.cpp |  2 +-
+ 3 files changed, 21 insertions(+), 4 deletions(-)
+
+diff --git a/m3u8handler.cpp b/m3u8handler.cpp
+index d4380cb..261b4b6 100644
+--- a/m3u8handler.cpp
++++ b/m3u8handler.cpp
+@@ -1,7 +1,8 @@
+ #include "m3u8handler.h"
+ #include "logger.h"
+ 
+-M3u8Handler::M3u8Handler(std::string uri) : webUri(uri) {
++M3u8Handler::M3u8Handler(std::string uri, std::string userAgent, std::string referer, std::string cookies)
++    : webUri(uri), userAgent(std::move(userAgent)), referer(std::move(referer)), cookies(std::move(cookies)) {
+ }
+ 
+ bool M3u8Handler::startsWith(const std::string& str, const std::string& prefix) {
+@@ -33,7 +34,20 @@ m3u_stream M3u8Handler::parseM3u() {
+         path += "?" + uri.query_string;
+     }
+ 
+-    auto res = cli.Get(path);
++    // same request as the browser and ffmpeg would do
++    httplib::Headers headers;
++    if (!userAgent.empty()) {
++        headers.emplace("User-Agent", userAgent);
++    }
++    if (!referer.empty()) {
++        headers.emplace("Referer", referer);
++    }
++    if (!cookies.empty()) {
++        headers.emplace("Cookie", cookies);
++    }
++
++    cli.set_follow_location(true);
++    auto res = cli.Get(path, headers);
+ 
+     m3u_stream result;
+     result.width = result.height = 0;
+diff --git a/m3u8handler.h b/m3u8handler.h
+index ef7d3d2..1457a21 100644
+--- a/m3u8handler.h
++++ b/m3u8handler.h
+@@ -24,7 +24,7 @@ typedef struct {
+ 
+ class M3u8Handler {
+ public:
+-    explicit M3u8Handler(std::string uri);
++    explicit M3u8Handler(std::string uri, std::string userAgent = "", std::string referer = "", std::string cookies = "");
+     m3u_stream parseM3u();
+ 
+ private:
+@@ -33,4 +33,7 @@ private:
+ 
+ private:
+     std::string webUri;
++    std::string userAgent;
++    std::string referer;
++    std::string cookies;
+ };
+\ No newline at end of file
+diff --git a/streamhandler.cpp b/streamhandler.cpp
+index faa1c79..317aecc 100644
+--- a/streamhandler.cpp
++++ b/streamhandler.cpp
+@@ -80,7 +80,7 @@ std::shared_ptr<std::string> StreamHandler::probeVideo(std::string url, std::str
+ 
+     std::shared_ptr<std::string> videoInfo;
+     if (endsWith(url, ".m3u") || endsWith(url, ".m3u8")) {
+-        auto m = M3u8Handler(url);
++        auto m = M3u8Handler(url, userAgent, referer, cookies);
+         m3u = m.parseM3u();
+ 
+         if (m3u.height == 0 && m3u.width == 0) {
+-- 
+2.43.0
+

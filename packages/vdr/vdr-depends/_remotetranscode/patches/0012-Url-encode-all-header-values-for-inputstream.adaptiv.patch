@@ -1,0 +1,34 @@
+From 4416daa043cb2252c3103aaf485d2b493a8ec0ed Mon Sep 17 00:00:00 2001
+From: Andreas Baierl <ichgeh@imkreisrum.de>
+Date: Thu, 29 Oct 2026 16:48:38 +0100
+Subject: [PATCH 12/39] Url-encode all header values for inputstream.adaptive
+
+Only the cookie was encoded. A referer with query parameters split
+the header list at its first '&'.
+
+Co-Authored-By: Claude Opus 5.5
+---
+ r_dash2ts.cpp | 5 +++--
+ 1 file changed, 3 insertions(+), 2 deletions(-)
+
+diff --git a/r_dash2ts.cpp b/r_dash2ts.cpp
+index 4944546..35ac655 100644
+--- a/r_dash2ts.cpp
++++ b/r_dash2ts.cpp
+@@ -119,10 +119,11 @@ int main(int argc, char *argv[]) {
+ 
+     INFO("Found inputstream.adaptive Library, version {}", api_version);
+ 
+-    std::string httpHeader = "User-Agent=" + user_agent;
++    // the header values must be url encoded, a '&' in the referer would split the list
++    std::string httpHeader = "User-Agent=" + urlEncode(user_agent);
+ 
+     if (!referer.empty()) {
+-        httpHeader += "&Referer=" + referer;
++        httpHeader += "&Referer=" + urlEncode(referer);
+     }
+ 
+     if (!cookies.empty()) {
+-- 
+2.43.0
+

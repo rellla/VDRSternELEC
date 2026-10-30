@@ -1,0 +1,42 @@
+From a36e3043f7635742f9e54354240de4257454b0f7 Mon Sep 17 00:00:00 2001
+From: Andreas Baierl <ichgeh@imkreisrum.de>
+Date: Thu, 29 Oct 2026 16:50:10 +0100
+Subject: [PATCH 19/39] Handle m3u playlists with CRLF line endings
+
+The '\r' stayed at the end of the stream urls and ffmpeg failed to
+open them.
+
+Co-Authored-By: Claude Opus 5.5
+---
+ m3u8handler.cpp | 8 ++++++++
+ 1 file changed, 8 insertions(+)
+
+diff --git a/m3u8handler.cpp b/m3u8handler.cpp
+index 261b4b6..4d31f6c 100644
+--- a/m3u8handler.cpp
++++ b/m3u8handler.cpp
+@@ -73,6 +73,11 @@ m3u_stream M3u8Handler::parseM3u() {
+     std::string starterIgnore = "#EXTINF:";
+ 
+     while (std::getline(stream, line)) {
++        // playlists with CRLF line endings
++        if (!line.empty() && line.back() == '\r') {
++            line.pop_back();
++        }
++
+         if (startsWith(line, starterStream)) {
+             auto splitted = split(line.substr(starterStream.length()), ',');
+ 
+@@ -85,6 +90,9 @@ m3u_stream M3u8Handler::parseM3u() {
+                         maxW = w;
+                         maxH = h;
+                         std::getline(stream, m3uMax);
++                        if (!m3uMax.empty() && m3uMax.back() == '\r') {
++                            m3uMax.pop_back();
++                        }
+ 
+                         if (!startsWith(m3uMax, "http://") && !startsWith(m3uMax, "https://")) {
+                             // this is a relative URL -> construct absolute URL
+-- 
+2.43.0
+

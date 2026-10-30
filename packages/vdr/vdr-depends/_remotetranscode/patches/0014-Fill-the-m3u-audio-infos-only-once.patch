@@ -1,0 +1,46 @@
+From 3cf56767eaa43b90104bf5226e84206256069af1 Mon Sep 17 00:00:00 2001
+From: Andreas Baierl <ichgeh@imkreisrum.de>
+Date: Thu, 29 Oct 2026 16:48:53 +0100
+Subject: [PATCH 14/39] Fill the m3u audio infos only once
+
+Every start, resume and seek appended the audio tracks again, and
+the audio infos of the previous video were never cleared.
+
+Co-Authored-By: Claude Opus 5.5
+---
+ streamhandler.cpp | 12 +++++++-----
+ 1 file changed, 7 insertions(+), 5 deletions(-)
+
+diff --git a/streamhandler.cpp b/streamhandler.cpp
+index d83bbf6..2ebb9af 100644
+--- a/streamhandler.cpp
++++ b/streamhandler.cpp
+@@ -90,6 +90,13 @@ std::shared_ptr<std::string> StreamHandler::probeVideo(std::string url, std::str
+ 
+         duration = "N/A";
+ 
++        // the audio infos are filled once per probe, not on every (re)start of the stream
++        bstreams = json::array();
++        for (const auto& a : m3u.audio) {
++            json st = json::parse("{ \"codec_type\": \"audio\", \"tags\": { \"language\": \"" + a.language + "\", \"comment\": \"" + a.name + "\" }}");
++            bstreams.push_back(st);
++        }
++
+         videoInfo = std::make_shared<std::string>();
+         *videoInfo = std::string("m3u video stream");
+     } else if (enableKodi && (endsWith(url, ".mpd") || (url.find("hbbtv.zdf.de/zdfm3/dyn/mpd.php") != std::string::npos))) {
+@@ -257,11 +264,6 @@ std::vector<std::string> StreamHandler::prepareStreamM3uCmd(std::string url, std
+     for (auto a : m3u.audio) {
+         callStr.emplace_back("-i");
+         callStr.emplace_back(a.uri);
+-
+-        // fill audio info in bstreams
+-        json st = json::parse("{ \"codec_type\": \"audio\", \"tags\": { \"language\": \"" + a.language + "\", \"comment\": \"" + a.name + "\" }}");
+-
+-        bstreams.push_back(st);
+     }
+ 
+     // transmux
+-- 
+2.43.0
+

@@ -1,0 +1,43 @@
+From 09eedb5643b88b1a8816be31f0e24c4383342e3d Mon Sep 17 00:00:00 2001
+From: Andreas Baierl <ichgeh@imkreisrum.de>
+Date: Thu, 29 Oct 2026 16:52:11 +0100
+Subject: [PATCH 25/39] Send the http headers for the m3u audio inputs too
+
+Referer, user agent and cookies were set for the first input only.
+Protected audio playlists failed.
+
+Co-Authored-By: Claude Opus 5.5
+---
+ streamhandler.cpp | 16 ++++++++++++++++
+ 1 file changed, 16 insertions(+)
+
+diff --git a/streamhandler.cpp b/streamhandler.cpp
+index 62e6788..f665a3d 100644
+--- a/streamhandler.cpp
++++ b/streamhandler.cpp
+@@ -291,6 +291,22 @@ std::vector<std::string> StreamHandler::prepareStreamM3uCmd(std::string url, std
+             callStr.emplace_back(position);
+         }
+ 
++        // the http options are input options, they apply to the next input only
++        if (!referer.empty()) {
++            callStr.emplace_back("-referer");
++            callStr.emplace_back(referer);
++        }
++
++        if (!userAgent.empty()) {
++            callStr.emplace_back("-user_agent");
++            callStr.emplace_back(userAgent);
++        }
++
++        if (!cookies.empty()) {
++            callStr.emplace_back("-headers");
++            callStr.emplace_back("Cookie: " + cookies);
++        }
++
+         addNetworkOptions(callStr, a.uri);
+         callStr.emplace_back("-i");
+         callStr.emplace_back(a.uri);
+-- 
+2.43.0
+

@@ -1,0 +1,37 @@
+From 544e68b847aecc47e00b8b5ed20265b30104f9f8 Mon Sep 17 00:00:00 2001
+From: Andreas Baierl <ichgeh@imkreisrum.de>
+Date: Thu, 29 Oct 2026 16:49:16 +0100
+Subject: [PATCH 16/39] Seek the separate m3u audio inputs too
+
+-ss was set for the video input only. After a seek or resume the
+audio of an HLS stream with separate audio playlists started at 0.
+
+Co-Authored-By: Claude Opus 5.5
+---
+ streamhandler.cpp | 8 +++++++-
+ 1 file changed, 7 insertions(+), 1 deletion(-)
+
+diff --git a/streamhandler.cpp b/streamhandler.cpp
+index 9b94414..faa1c79 100644
+--- a/streamhandler.cpp
++++ b/streamhandler.cpp
+@@ -262,9 +262,15 @@ std::vector<std::string> StreamHandler::prepareStreamM3uCmd(std::string url, std
+     callStr.emplace_back("-i");
+     callStr.emplace_back(m3u.url);
+ 
+-    // add optional audio input
++    // add optional audio input. -ss is an input option and must be repeated
++    // for every input, otherwise the audio starts at 0 after a seek or resume.
+     std::vector<std::string> audioMetadata;
+     for (auto a : m3u.audio) {
++        if (!endsWith(url, ".mpd") && (url.find("hbbtv.zdf.de/zdfm3/dyn/mpd.php") == std::string::npos)) {
++            callStr.emplace_back("-ss");
++            callStr.emplace_back(position);
++        }
++
+         callStr.emplace_back("-i");
+         callStr.emplace_back(a.uri);
+     }
+-- 
+2.43.0
+

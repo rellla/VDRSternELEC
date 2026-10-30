@@ -1,0 +1,41 @@
+From 67b1235e3f1db885cde5c4ab56135df5def36233 Mon Sep 17 00:00:00 2001
+From: Andreas Baierl <ichgeh@imkreisrum.de>
+Date: Thu, 29 Oct 2026 16:51:03 +0100
+Subject: [PATCH 22/39] Use the audio group of the selected m3u variant
+
+The audio group of the last variant in the playlist was used, not
+the one of the variant with the highest resolution.
+
+Co-Authored-By: Claude Opus 5.5
+---
+ m3u8handler.cpp | 7 ++++---
+ 1 file changed, 4 insertions(+), 3 deletions(-)
+
+diff --git a/m3u8handler.cpp b/m3u8handler.cpp
+index db5f6a6..674f4b5 100644
+--- a/m3u8handler.cpp
++++ b/m3u8handler.cpp
+@@ -169,6 +169,10 @@ m3u_stream M3u8Handler::parseM3u() {
+                 if (w > maxW) {
+                     maxW = w;
+                     maxH = h;
++
++                    // the audio group of the selected variant
++                    audioGroup = attr.count("AUDIO") ? attr["AUDIO"] : "";
++
+                     std::getline(stream, m3uMax);
+                     if (!m3uMax.empty() && m3uMax.back() == '\r') {
+                         m3uMax.pop_back();
+@@ -178,9 +182,6 @@ m3u_stream M3u8Handler::parseM3u() {
+                 }
+             }
+ 
+-            if (attr.count("AUDIO")) {
+-                audioGroup = attr["AUDIO"];
+-            }
+         } else if (startsWith(line, starterMedia)) {
+             auto attr = parseAttributes(line.substr(starterMedia.length()));
+ 
+-- 
+2.43.0
+

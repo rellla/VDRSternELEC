@@ -1,0 +1,72 @@
+From 40db1e166f9e12fbf24f0ab12c9f9547e71887a8 Mon Sep 17 00:00:00 2001
+From: Andreas Baierl <ichgeh@imkreisrum.de>
+Date: Thu, 29 Oct 2026 16:47:44 +0100
+Subject: [PATCH 08/39] Fix AudioInfo for streams without all tags
+
+A missing 'comment' or 'language' tag threw a json type_error, so
+AudioInfo always failed for ordinary files. The index also counted
+the video streams.
+
+Co-Authored-By: Claude Opus 5.5
+---
+ streamhandler.cpp | 36 +++++++++++++++++++++++-------------
+ 1 file changed, 23 insertions(+), 13 deletions(-)
+
+diff --git a/streamhandler.cpp b/streamhandler.cpp
+index 5d1a81f..4004ace 100644
+--- a/streamhandler.cpp
++++ b/streamhandler.cpp
+@@ -761,27 +761,37 @@ bool StreamHandler::createVideoWithLength(std::string seconds, const std::string
+ 
+ std::string StreamHandler::getAudioInfo() {
+     json result;
++    result["stream"] = json::array();
+ 
+-    // add audio streams
++    // add audio streams, the index counts audio streams only
+     int audioIndex = 0;
+     for (auto& v : bstreams) {
+-        if (v["codec_type"] == "audio") {
+-            std::string language;
+-            std::string comment;
+-
+-            if (v.contains("tags")) {
+-                language = v["tags"]["language"];
+-                comment = v["tags"]["comment"];
++        if (!v.is_object() || v.value("codec_type", "") != "audio") {
++            continue;
++        }
+ 
+-                json lang;
+-                lang["index"] = audioIndex;
+-                lang["language"] = language;
+-                lang["comment"] = comment;
++        std::string language;
++        std::string comment;
+ 
+-                result["stream"].push_back(lang);
++        // tags are optional and may contain only some of the values
++        if (v.contains("tags") && v["tags"].is_object()) {
++            const auto& tags = v["tags"];
++            if (tags.contains("language") && tags["language"].is_string()) {
++                language = tags["language"];
++            }
++            if (tags.contains("comment") && tags["comment"].is_string()) {
++                comment = tags["comment"];
++            } else if (tags.contains("handler_name") && tags["handler_name"].is_string()) {
++                comment = tags["handler_name"];
+             }
+         }
+ 
++        json lang;
++        lang["index"] = audioIndex;
++        lang["language"] = language;
++        lang["comment"] = comment;
++
++        result["stream"].push_back(lang);
+         audioIndex++;
+     }
+ 
+-- 
+2.43.0
+

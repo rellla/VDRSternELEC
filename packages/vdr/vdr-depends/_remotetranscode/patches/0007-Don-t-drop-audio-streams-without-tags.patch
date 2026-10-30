@@ -1,0 +1,30 @@
+From 625c4ed2d3333f82c7623c7ac2868d43cd374122 Mon Sep 17 00:00:00 2001
+From: Andreas Baierl <ichgeh@imkreisrum.de>
+Date: Thu, 29 Oct 2026 16:47:29 +0100
+Subject: [PATCH 07/39] Don't drop audio streams without tags
+
+Audio streams without any tags were never mapped, so the video
+played without sound.
+
+Co-Authored-By: Claude Opus 5.5
+---
+ streamhandler.cpp | 3 +++
+ 1 file changed, 3 insertions(+)
+
+diff --git a/streamhandler.cpp b/streamhandler.cpp
+index ffd7a89..5d1a81f 100644
+--- a/streamhandler.cpp
++++ b/streamhandler.cpp
+@@ -601,6 +601,9 @@ std::shared_ptr<std::string> StreamHandler::probeFfmpeg(const std::string& url)
+                         } else {
+                             bestProgram.push_back(el);
+                         }
++                    } else {
++                        // audio without any tags
++                        bestProgram.push_back(el);
+                     }
+                 }
+             }
+-- 
+2.43.0
+

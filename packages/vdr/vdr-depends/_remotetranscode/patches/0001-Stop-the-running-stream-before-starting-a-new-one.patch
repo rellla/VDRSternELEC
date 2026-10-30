@@ -1,0 +1,30 @@
+From aaa9bb7e07574eaae5d1334e4fd275fc327e24c7 Mon Sep 17 00:00:00 2001
+From: Andreas Baierl <ichgeh@imkreisrum.de>
+Date: Thu, 29 Oct 2026 16:45:04 +0100
+Subject: [PATCH 01/39] Stop the running stream before starting a new one
+
+streamVideo() overwrote the process pointer without stopping the old
+ffmpeg, so two processes sent TS packets to VDR.
+
+Co-Authored-By: Claude Opus 5.5
+---
+ streamhandler.cpp | 3 +++
+ 1 file changed, 3 insertions(+)
+
+diff --git a/streamhandler.cpp b/streamhandler.cpp
+index 63c81f2..beb4ffd 100644
+--- a/streamhandler.cpp
++++ b/streamhandler.cpp
+@@ -320,6 +320,9 @@ bool StreamHandler::streamVideo(std::string url, std::string position, std::stri
+ 
+     DEBUG("StreamVideo: {} -> {}", position, url);
+ 
++    // never run two ffmpeg processes for the same stream
++    stopVideo();
++
+     // create parameter list
+     std::vector<std::string> callStr;
+ 
+-- 
+2.43.0
+

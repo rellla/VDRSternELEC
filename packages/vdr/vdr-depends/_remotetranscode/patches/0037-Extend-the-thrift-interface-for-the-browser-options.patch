@@ -1,0 +1,950 @@
+From a0eaac03fd5fbcfd9d651d9a1484ae3aa135a66f Mon Sep 17 00:00:00 2001
+From: Andreas Baierl <ichgeh@imkreisrum.de>
+Date: Sun, 1 Nov 2026 15:33:41 +0100
+Subject: [PATCH 37/39] Extend the thrift interface for the browser options
+
+Co-Authored-By: Claude Opus 5.5
+---
+ thrift-services/cefbrowser.thrift             |   8 +-
+ thrift-services/src-client/BrowserClient.cpp  |  12 +
+ thrift-services/src-client/BrowserClient.h    |   1 +
+ thrift-services/src-gen/CefBrowser.cpp        | 418 ++++++++++++++++++
+ thrift-services/src-gen/CefBrowser.h          | 120 +++++
+ .../src-gen/CefBrowser_server.skeleton.cpp    |   5 +
+ thrift-services/src-gen/cefbrowser_types.cpp  | 149 ++++++-
+ thrift-services/src-gen/cefbrowser_types.h    |  42 ++
+ 8 files changed, 742 insertions(+), 13 deletions(-)
+
+diff --git a/thrift-services/cefbrowser.thrift b/thrift-services/cefbrowser.thrift
+index d57c0ce..9a650a1 100644
+--- a/thrift-services/cefbrowser.thrift
++++ b/thrift-services/cefbrowser.thrift
+@@ -51,6 +51,11 @@ struct RenderParametersType {
+     2: i32 frameRate           // frames per second, 0 = unchanged
+ }
+ 
++struct BrowserOptionsType {
++    1: bool mse = true,        // Media Source Extensions for VDR
++    2: bool zdfQuirks = true   // special handling of the ZDF applications
++}
++
+ struct StreamEventType {
+     1: i32 componentTag,
+     2: i32 eventId,
+@@ -70,5 +75,6 @@ service CefBrowser extends common.CommonService {
+     bool StopVideo(1: StopVideoType input) throws (1:common.OperationFailed err),
+     bool PlayerStatus(1: PlayerStatusType input) throws (1:common.OperationFailed err),
+     bool StreamEvent(1: StreamEventType input) throws (1:common.OperationFailed err),
+-    bool SetRenderParameters(1: RenderParametersType input) throws (1:common.OperationFailed err)
++    bool SetRenderParameters(1: RenderParametersType input) throws (1:common.OperationFailed err),
++    bool SetBrowserOptions(1: BrowserOptionsType input) throws (1:common.OperationFailed err)
+ }
+\ No newline at end of file
+diff --git a/thrift-services/src-client/BrowserClient.cpp b/thrift-services/src-client/BrowserClient.cpp
+index ded9f97..5d934cd 100644
+--- a/thrift-services/src-client/BrowserClient.cpp
++++ b/thrift-services/src-client/BrowserClient.cpp
+@@ -264,3 +264,15 @@ bool BrowserClient::SetRenderParameters(int width, int frameRate) {
+         return client->SetRenderParameters(input);
+     });
+ }
++
++bool BrowserClient::SetBrowserOptions(bool mse, bool zdfQuirks) {
++    DEBUGLOG("BrowserClient::SetBrowserOptions: mse %d, zdf quirks %d", mse, zdfQuirks);
++
++    return processInternal([&]() -> bool {
++        BrowserOptionsType input;
++        input.mse = mse;
++        input.zdfQuirks = zdfQuirks;
++
++        return client->SetBrowserOptions(input);
++    });
++}
+diff --git a/thrift-services/src-client/BrowserClient.h b/thrift-services/src-client/BrowserClient.h
+index beb7235..6830021 100644
+--- a/thrift-services/src-client/BrowserClient.h
++++ b/thrift-services/src-client/BrowserClient.h
+@@ -33,6 +33,7 @@ public:
+     bool PlayerStatus(int64_t position, int state);
+     bool StreamEvent(int componentTag, int eventId, const std::string& privateData, const std::string& status);
+     bool SetRenderParameters(int width, int frameRate);
++    bool SetBrowserOptions(bool mse, bool zdfQuirks);
+ 
+ private:
+     bool connect();
+diff --git a/thrift-services/src-gen/CefBrowser.cpp b/thrift-services/src-gen/CefBrowser.cpp
+index 396de6b..d19d284 100644
+--- a/thrift-services/src-gen/CefBrowser.cpp
++++ b/thrift-services/src-gen/CefBrowser.cpp
+@@ -2531,6 +2531,218 @@ uint32_t CefBrowser_SetRenderParameters_presult::read(::apache::thrift::protocol
+   return xfer;
+ }
+ 
++
++CefBrowser_SetBrowserOptions_args::~CefBrowser_SetBrowserOptions_args() noexcept {
++}
++
++CefBrowser_SetBrowserOptions_args::CefBrowser_SetBrowserOptions_args() noexcept {
++}
++
++uint32_t CefBrowser_SetBrowserOptions_args::read(::apache::thrift::protocol::TProtocol* iprot) {
++
++  ::apache::thrift::protocol::TInputRecursionTracker tracker(*iprot);
++  uint32_t xfer = 0;
++  std::string fname;
++  ::apache::thrift::protocol::TType ftype;
++  int16_t fid;
++
++  xfer += iprot->readStructBegin(fname);
++
++  using ::apache::thrift::protocol::TProtocolException;
++
++
++  while (true)
++  {
++    xfer += iprot->readFieldBegin(fname, ftype, fid);
++    if (ftype == ::apache::thrift::protocol::T_STOP) {
++      break;
++    }
++    switch (fid)
++    {
++      case 1:
++        if (ftype == ::apache::thrift::protocol::T_STRUCT) {
++          xfer += this->input.read(iprot);
++          this->__isset.input = true;
++        } else {
++          xfer += iprot->skip(ftype);
++        }
++        break;
++      default:
++        xfer += iprot->skip(ftype);
++        break;
++    }
++    xfer += iprot->readFieldEnd();
++  }
++
++  xfer += iprot->readStructEnd();
++
++  return xfer;
++}
++
++uint32_t CefBrowser_SetBrowserOptions_args::write(::apache::thrift::protocol::TProtocol* oprot) const {
++  uint32_t xfer = 0;
++  ::apache::thrift::protocol::TOutputRecursionTracker tracker(*oprot);
++  xfer += oprot->writeStructBegin("CefBrowser_SetBrowserOptions_args");
++
++  xfer += oprot->writeFieldBegin("input", ::apache::thrift::protocol::T_STRUCT, 1);
++  xfer += this->input.write(oprot);
++  xfer += oprot->writeFieldEnd();
++
++  xfer += oprot->writeFieldStop();
++  xfer += oprot->writeStructEnd();
++  return xfer;
++}
++
++
++CefBrowser_SetBrowserOptions_pargs::~CefBrowser_SetBrowserOptions_pargs() noexcept {
++}
++
++
++uint32_t CefBrowser_SetBrowserOptions_pargs::write(::apache::thrift::protocol::TProtocol* oprot) const {
++  uint32_t xfer = 0;
++  ::apache::thrift::protocol::TOutputRecursionTracker tracker(*oprot);
++  xfer += oprot->writeStructBegin("CefBrowser_SetBrowserOptions_pargs");
++
++  xfer += oprot->writeFieldBegin("input", ::apache::thrift::protocol::T_STRUCT, 1);
++  xfer += (*(this->input)).write(oprot);
++  xfer += oprot->writeFieldEnd();
++
++  xfer += oprot->writeFieldStop();
++  xfer += oprot->writeStructEnd();
++  return xfer;
++}
++
++
++CefBrowser_SetBrowserOptions_result::~CefBrowser_SetBrowserOptions_result() noexcept {
++}
++
++CefBrowser_SetBrowserOptions_result::CefBrowser_SetBrowserOptions_result() noexcept
++   : success(0) {
++}
++
++uint32_t CefBrowser_SetBrowserOptions_result::read(::apache::thrift::protocol::TProtocol* iprot) {
++
++  ::apache::thrift::protocol::TInputRecursionTracker tracker(*iprot);
++  uint32_t xfer = 0;
++  std::string fname;
++  ::apache::thrift::protocol::TType ftype;
++  int16_t fid;
++
++  xfer += iprot->readStructBegin(fname);
++
++  using ::apache::thrift::protocol::TProtocolException;
++
++
++  while (true)
++  {
++    xfer += iprot->readFieldBegin(fname, ftype, fid);
++    if (ftype == ::apache::thrift::protocol::T_STOP) {
++      break;
++    }
++    switch (fid)
++    {
++      case 0:
++        if (ftype == ::apache::thrift::protocol::T_BOOL) {
++          xfer += iprot->readBool(this->success);
++          this->__isset.success = true;
++        } else {
++          xfer += iprot->skip(ftype);
++        }
++        break;
++      case 1:
++        if (ftype == ::apache::thrift::protocol::T_STRUCT) {
++          xfer += this->err.read(iprot);
++          this->__isset.err = true;
++        } else {
++          xfer += iprot->skip(ftype);
++        }
++        break;
++      default:
++        xfer += iprot->skip(ftype);
++        break;
++    }
++    xfer += iprot->readFieldEnd();
++  }
++
++  xfer += iprot->readStructEnd();
++
++  return xfer;
++}
++
++uint32_t CefBrowser_SetBrowserOptions_result::write(::apache::thrift::protocol::TProtocol* oprot) const {
++
++  uint32_t xfer = 0;
++
++  xfer += oprot->writeStructBegin("CefBrowser_SetBrowserOptions_result");
++
++  if (this->__isset.success) {
++    xfer += oprot->writeFieldBegin("success", ::apache::thrift::protocol::T_BOOL, 0);
++    xfer += oprot->writeBool(this->success);
++    xfer += oprot->writeFieldEnd();
++  } else if (this->__isset.err) {
++    xfer += oprot->writeFieldBegin("err", ::apache::thrift::protocol::T_STRUCT, 1);
++    xfer += this->err.write(oprot);
++    xfer += oprot->writeFieldEnd();
++  }
++  xfer += oprot->writeFieldStop();
++  xfer += oprot->writeStructEnd();
++  return xfer;
++}
++
++
++CefBrowser_SetBrowserOptions_presult::~CefBrowser_SetBrowserOptions_presult() noexcept {
++}
++
++
++uint32_t CefBrowser_SetBrowserOptions_presult::read(::apache::thrift::protocol::TProtocol* iprot) {
++
++  ::apache::thrift::protocol::TInputRecursionTracker tracker(*iprot);
++  uint32_t xfer = 0;
++  std::string fname;
++  ::apache::thrift::protocol::TType ftype;
++  int16_t fid;
++
++  xfer += iprot->readStructBegin(fname);
++
++  using ::apache::thrift::protocol::TProtocolException;
++
++
++  while (true)
++  {
++    xfer += iprot->readFieldBegin(fname, ftype, fid);
++    if (ftype == ::apache::thrift::protocol::T_STOP) {
++      break;
++    }
++    switch (fid)
++    {
++      case 0:
++        if (ftype == ::apache::thrift::protocol::T_BOOL) {
++          xfer += iprot->readBool((*(this->success)));
++          this->__isset.success = true;
++        } else {
++          xfer += iprot->skip(ftype);
++        }
++        break;
++      case 1:
++        if (ftype == ::apache::thrift::protocol::T_STRUCT) {
++          xfer += this->err.read(iprot);
++          this->__isset.err = true;
++        } else {
++          xfer += iprot->skip(ftype);
++        }
++        break;
++      default:
++        xfer += iprot->skip(ftype);
++        break;
++    }
++    xfer += iprot->readFieldEnd();
++  }
++
++  xfer += iprot->readStructEnd();
++
++  return xfer;
++}
++
+ bool CefBrowserClient::LoadUrl(const LoadUrlType& input)
+ {
+   send_LoadUrl(input);
+@@ -3262,6 +3474,67 @@ bool CefBrowserClient::recv_SetRenderParameters()
+   throw ::apache::thrift::TApplicationException(::apache::thrift::TApplicationException::MISSING_RESULT, "SetRenderParameters failed: unknown result");
+ }
+ 
++bool CefBrowserClient::SetBrowserOptions(const BrowserOptionsType& input)
++{
++  send_SetBrowserOptions(input);
++  return recv_SetBrowserOptions();
++}
++
++void CefBrowserClient::send_SetBrowserOptions(const BrowserOptionsType& input)
++{
++  int32_t cseqid = 0;
++  oprot_->writeMessageBegin("SetBrowserOptions", ::apache::thrift::protocol::T_CALL, cseqid);
++
++  CefBrowser_SetBrowserOptions_pargs args;
++  args.input = &input;
++  args.write(oprot_);
++
++  oprot_->writeMessageEnd();
++  oprot_->getTransport()->writeEnd();
++  oprot_->getTransport()->flush();
++}
++
++bool CefBrowserClient::recv_SetBrowserOptions()
++{
++
++  int32_t rseqid = 0;
++  std::string fname;
++  ::apache::thrift::protocol::TMessageType mtype;
++
++  iprot_->readMessageBegin(fname, mtype, rseqid);
++  if (mtype == ::apache::thrift::protocol::T_EXCEPTION) {
++    ::apache::thrift::TApplicationException x;
++    x.read(iprot_);
++    iprot_->readMessageEnd();
++    iprot_->getTransport()->readEnd();
++    throw x;
++  }
++  if (mtype != ::apache::thrift::protocol::T_REPLY) {
++    iprot_->skip(::apache::thrift::protocol::T_STRUCT);
++    iprot_->readMessageEnd();
++    iprot_->getTransport()->readEnd();
++  }
++  if (fname.compare("SetBrowserOptions") != 0) {
++    iprot_->skip(::apache::thrift::protocol::T_STRUCT);
++    iprot_->readMessageEnd();
++    iprot_->getTransport()->readEnd();
++  }
++  bool _return;
++  CefBrowser_SetBrowserOptions_presult result;
++  result.success = &_return;
++  result.read(iprot_);
++  iprot_->readMessageEnd();
++  iprot_->getTransport()->readEnd();
++
++  if (result.__isset.success) {
++    return _return;
++  }
++  if (result.__isset.err) {
++    throw result.err;
++  }
++  throw ::apache::thrift::TApplicationException(::apache::thrift::TApplicationException::MISSING_RESULT, "SetBrowserOptions failed: unknown result");
++}
++
+ bool CefBrowserProcessor::dispatchCall(::apache::thrift::protocol::TProtocol* iprot, ::apache::thrift::protocol::TProtocol* oprot, const std::string& fname, int32_t seqid, void* callContext) {
+   ProcessMap::iterator pfn;
+   pfn = processMap_.find(fname);
+@@ -3956,6 +4229,63 @@ void CefBrowserProcessor::process_SetRenderParameters(int32_t seqid, ::apache::t
+   }
+ }
+ 
++void CefBrowserProcessor::process_SetBrowserOptions(int32_t seqid, ::apache::thrift::protocol::TProtocol* iprot, ::apache::thrift::protocol::TProtocol* oprot, void* callContext)
++{
++  void* ctx = nullptr;
++  if (this->eventHandler_.get() != nullptr) {
++    ctx = this->eventHandler_->getContext("CefBrowser.SetBrowserOptions", callContext);
++  }
++  ::apache::thrift::TProcessorContextFreer freer(this->eventHandler_.get(), ctx, "CefBrowser.SetBrowserOptions");
++
++  if (this->eventHandler_.get() != nullptr) {
++    this->eventHandler_->preRead(ctx, "CefBrowser.SetBrowserOptions");
++  }
++
++  CefBrowser_SetBrowserOptions_args args;
++  args.read(iprot);
++  iprot->readMessageEnd();
++  uint32_t bytes = iprot->getTransport()->readEnd();
++
++  if (this->eventHandler_.get() != nullptr) {
++    this->eventHandler_->postRead(ctx, "CefBrowser.SetBrowserOptions", bytes);
++  }
++
++  CefBrowser_SetBrowserOptions_result result;
++  try {
++    result.success = iface_->SetBrowserOptions(args.input);
++    result.__isset.success = true;
++  } catch ( ::common::OperationFailed &err) {
++    result.err = std::move(err);
++    result.__isset.err = true;
++  } catch (const std::exception& e) {
++    if (this->eventHandler_.get() != nullptr) {
++      this->eventHandler_->handlerError(ctx, "CefBrowser.SetBrowserOptions");
++    }
++
++    ::apache::thrift::TApplicationException x(e.what());
++    oprot->writeMessageBegin("SetBrowserOptions", ::apache::thrift::protocol::T_EXCEPTION, seqid);
++    x.write(oprot);
++    oprot->writeMessageEnd();
++    oprot->getTransport()->writeEnd();
++    oprot->getTransport()->flush();
++    return;
++  }
++
++  if (this->eventHandler_.get() != nullptr) {
++    this->eventHandler_->preWrite(ctx, "CefBrowser.SetBrowserOptions");
++  }
++
++  oprot->writeMessageBegin("SetBrowserOptions", ::apache::thrift::protocol::T_REPLY, seqid);
++  result.write(oprot);
++  oprot->writeMessageEnd();
++  bytes = oprot->getTransport()->writeEnd();
++  oprot->getTransport()->flush();
++
++  if (this->eventHandler_.get() != nullptr) {
++    this->eventHandler_->postWrite(ctx, "CefBrowser.SetBrowserOptions", bytes);
++  }
++}
++
+ ::std::shared_ptr< ::apache::thrift::TProcessor > CefBrowserProcessorFactory::getProcessor(const ::apache::thrift::TConnectionInfo& connInfo) {
+   ::apache::thrift::ReleaseHandler< CefBrowserIfFactory > cleanup(handlerFactory_);
+   ::std::shared_ptr< CefBrowserIf > handler(handlerFactory_->getHandler(connInfo), cleanup);
+@@ -5018,5 +5348,93 @@ bool CefBrowserConcurrentClient::recv_SetRenderParameters(const int32_t seqid)
+   } // end while(true)
+ }
+ 
++bool CefBrowserConcurrentClient::SetBrowserOptions(const BrowserOptionsType& input)
++{
++  int32_t seqid = send_SetBrowserOptions(input);
++  return recv_SetBrowserOptions(seqid);
++}
++
++int32_t CefBrowserConcurrentClient::send_SetBrowserOptions(const BrowserOptionsType& input)
++{
++  int32_t cseqid = this->sync_->generateSeqId();
++  ::apache::thrift::async::TConcurrentSendSentry sentry(this->sync_.get());
++  oprot_->writeMessageBegin("SetBrowserOptions", ::apache::thrift::protocol::T_CALL, cseqid);
++
++  CefBrowser_SetBrowserOptions_pargs args;
++  args.input = &input;
++  args.write(oprot_);
++
++  oprot_->writeMessageEnd();
++  oprot_->getTransport()->writeEnd();
++  oprot_->getTransport()->flush();
++
++  sentry.commit();
++  return cseqid;
++}
++
++bool CefBrowserConcurrentClient::recv_SetBrowserOptions(const int32_t seqid)
++{
++
++  int32_t rseqid = 0;
++  std::string fname;
++  ::apache::thrift::protocol::TMessageType mtype;
++
++  // the read mutex gets dropped and reacquired as part of waitForWork()
++  // The destructor of this sentry wakes up other clients
++  ::apache::thrift::async::TConcurrentRecvSentry sentry(this->sync_.get(), seqid);
++
++  while(true) {
++    if(!this->sync_->getPending(fname, mtype, rseqid)) {
++      iprot_->readMessageBegin(fname, mtype, rseqid);
++    }
++    if(seqid == rseqid) {
++      if (mtype == ::apache::thrift::protocol::T_EXCEPTION) {
++        ::apache::thrift::TApplicationException x;
++        x.read(iprot_);
++        iprot_->readMessageEnd();
++        iprot_->getTransport()->readEnd();
++        sentry.commit();
++        throw x;
++      }
++      if (mtype != ::apache::thrift::protocol::T_REPLY) {
++        iprot_->skip(::apache::thrift::protocol::T_STRUCT);
++        iprot_->readMessageEnd();
++        iprot_->getTransport()->readEnd();
++      }
++      if (fname.compare("SetBrowserOptions") != 0) {
++        iprot_->skip(::apache::thrift::protocol::T_STRUCT);
++        iprot_->readMessageEnd();
++        iprot_->getTransport()->readEnd();
++
++        // in a bad state, don't commit
++        using ::apache::thrift::protocol::TProtocolException;
++        throw TProtocolException(TProtocolException::INVALID_DATA);
++      }
++      bool _return;
++      CefBrowser_SetBrowserOptions_presult result;
++      result.success = &_return;
++      result.read(iprot_);
++      iprot_->readMessageEnd();
++      iprot_->getTransport()->readEnd();
++
++      if (result.__isset.success) {
++        sentry.commit();
++        return _return;
++      }
++      if (result.__isset.err) {
++        sentry.commit();
++        throw result.err;
++      }
++      // in a bad state, don't commit
++      throw ::apache::thrift::TApplicationException(::apache::thrift::TApplicationException::MISSING_RESULT, "SetBrowserOptions failed: unknown result");
++    }
++    // seqid != rseqid
++    this->sync_->updatePending(fname, mtype, rseqid);
++
++    // this will temporarily unlock the readMutex, and let other clients get work done
++    this->sync_->waitForWork(seqid);
++  } // end while(true)
++}
++
+ } // namespace
+ 
+diff --git a/thrift-services/src-gen/CefBrowser.h b/thrift-services/src-gen/CefBrowser.h
+index 847e064..8034a2a 100644
+--- a/thrift-services/src-gen/CefBrowser.h
++++ b/thrift-services/src-gen/CefBrowser.h
+@@ -35,6 +35,7 @@ class CefBrowserIf : virtual public  ::common::CommonServiceIf {
+   virtual bool PlayerStatus(const PlayerStatusType& input) = 0;
+   virtual bool StreamEvent(const StreamEventType& input) = 0;
+   virtual bool SetRenderParameters(const RenderParametersType& input) = 0;
++  virtual bool SetBrowserOptions(const BrowserOptionsType& input) = 0;
+ };
+ 
+ class CefBrowserIfFactory : virtual public  ::common::CommonServiceIfFactory {
+@@ -112,6 +113,10 @@ class CefBrowserNull : virtual public CefBrowserIf , virtual public  ::common::C
+     bool _return = false;
+     return _return;
+   }
++  bool SetBrowserOptions(const BrowserOptionsType& /* input */) override {
++    bool _return = false;
++    return _return;
++  }
+ };
+ 
+ typedef struct _CefBrowser_LoadUrl_args__isset {
+@@ -1280,6 +1285,104 @@ class CefBrowser_SetRenderParameters_presult {
+ 
+ };
+ 
++typedef struct _CefBrowser_SetBrowserOptions_args__isset {
++  _CefBrowser_SetBrowserOptions_args__isset() : input(false) {}
++  bool input :1;
++} _CefBrowser_SetBrowserOptions_args__isset;
++
++class CefBrowser_SetBrowserOptions_args {
++ public:
++
++  CefBrowser_SetBrowserOptions_args(const CefBrowser_SetBrowserOptions_args&) noexcept;
++  CefBrowser_SetBrowserOptions_args& operator=(const CefBrowser_SetBrowserOptions_args&) noexcept;
++  CefBrowser_SetBrowserOptions_args() noexcept;
++
++  virtual ~CefBrowser_SetBrowserOptions_args() noexcept;
++  BrowserOptionsType input;
++
++  _CefBrowser_SetBrowserOptions_args__isset __isset;
++
++  void __set_input(const BrowserOptionsType& val);
++
++  bool operator == (const CefBrowser_SetBrowserOptions_args & rhs) const;
++  bool operator != (const CefBrowser_SetBrowserOptions_args &rhs) const {
++    return !(*this == rhs);
++  }
++
++  bool operator < (const CefBrowser_SetBrowserOptions_args & ) const;
++
++  uint32_t read(::apache::thrift::protocol::TProtocol* iprot);
++  uint32_t write(::apache::thrift::protocol::TProtocol* oprot) const;
++
++};
++
++
++class CefBrowser_SetBrowserOptions_pargs {
++ public:
++
++
++  virtual ~CefBrowser_SetBrowserOptions_pargs() noexcept;
++  const BrowserOptionsType* input;
++
++  uint32_t write(::apache::thrift::protocol::TProtocol* oprot) const;
++
++};
++
++typedef struct _CefBrowser_SetBrowserOptions_result__isset {
++  _CefBrowser_SetBrowserOptions_result__isset() : success(false), err(false) {}
++  bool success :1;
++  bool err :1;
++} _CefBrowser_SetBrowserOptions_result__isset;
++
++class CefBrowser_SetBrowserOptions_result {
++ public:
++
++  CefBrowser_SetBrowserOptions_result(const CefBrowser_SetBrowserOptions_result&);
++  CefBrowser_SetBrowserOptions_result& operator=(const CefBrowser_SetBrowserOptions_result&);
++  CefBrowser_SetBrowserOptions_result() noexcept;
++
++  virtual ~CefBrowser_SetBrowserOptions_result() noexcept;
++  bool success;
++   ::common::OperationFailed err;
++
++  _CefBrowser_SetBrowserOptions_result__isset __isset;
++
++  void __set_success(const bool val);
++
++  void __set_err(const  ::common::OperationFailed& val);
++
++  bool operator == (const CefBrowser_SetBrowserOptions_result & rhs) const;
++  bool operator != (const CefBrowser_SetBrowserOptions_result &rhs) const {
++    return !(*this == rhs);
++  }
++
++  bool operator < (const CefBrowser_SetBrowserOptions_result & ) const;
++
++  uint32_t read(::apache::thrift::protocol::TProtocol* iprot);
++  uint32_t write(::apache::thrift::protocol::TProtocol* oprot) const;
++
++};
++
++typedef struct _CefBrowser_SetBrowserOptions_presult__isset {
++  _CefBrowser_SetBrowserOptions_presult__isset() : success(false), err(false) {}
++  bool success :1;
++  bool err :1;
++} _CefBrowser_SetBrowserOptions_presult__isset;
++
++class CefBrowser_SetBrowserOptions_presult {
++ public:
++
++
++  virtual ~CefBrowser_SetBrowserOptions_presult() noexcept;
++  bool* success;
++   ::common::OperationFailed err;
++
++  _CefBrowser_SetBrowserOptions_presult__isset __isset;
++
++  uint32_t read(::apache::thrift::protocol::TProtocol* iprot);
++
++};
++
+ class CefBrowserClient : virtual public CefBrowserIf, public  ::common::CommonServiceClient {
+  public:
+   CefBrowserClient(std::shared_ptr< ::apache::thrift::protocol::TProtocol> prot) :
+@@ -1327,6 +1430,9 @@ class CefBrowserClient : virtual public CefBrowserIf, public  ::common::CommonSe
+   bool SetRenderParameters(const RenderParametersType& input) override;
+   void send_SetRenderParameters(const RenderParametersType& input);
+   bool recv_SetRenderParameters();
++  bool SetBrowserOptions(const BrowserOptionsType& input) override;
++  void send_SetBrowserOptions(const BrowserOptionsType& input);
++  bool recv_SetBrowserOptions();
+ };
+ 
+ class CefBrowserProcessor : public  ::common::CommonServiceProcessor {
+@@ -1349,6 +1455,7 @@ class CefBrowserProcessor : public  ::common::CommonServiceProcessor {
+   void process_PlayerStatus(int32_t seqid, ::apache::thrift::protocol::TProtocol* iprot, ::apache::thrift::protocol::TProtocol* oprot, void* callContext);
+   void process_StreamEvent(int32_t seqid, ::apache::thrift::protocol::TProtocol* iprot, ::apache::thrift::protocol::TProtocol* oprot, void* callContext);
+   void process_SetRenderParameters(int32_t seqid, ::apache::thrift::protocol::TProtocol* iprot, ::apache::thrift::protocol::TProtocol* oprot, void* callContext);
++  void process_SetBrowserOptions(int32_t seqid, ::apache::thrift::protocol::TProtocol* iprot, ::apache::thrift::protocol::TProtocol* oprot, void* callContext);
+  public:
+   CefBrowserProcessor(::std::shared_ptr<CefBrowserIf> iface) :
+      ::common::CommonServiceProcessor(iface),
+@@ -1365,6 +1472,7 @@ class CefBrowserProcessor : public  ::common::CommonServiceProcessor {
+     processMap_["PlayerStatus"] = &CefBrowserProcessor::process_PlayerStatus;
+     processMap_["StreamEvent"] = &CefBrowserProcessor::process_StreamEvent;
+     processMap_["SetRenderParameters"] = &CefBrowserProcessor::process_SetRenderParameters;
++    processMap_["SetBrowserOptions"] = &CefBrowserProcessor::process_SetBrowserOptions;
+   }
+ 
+   virtual ~CefBrowserProcessor() {}
+@@ -1506,6 +1614,15 @@ class CefBrowserMultiface : virtual public CefBrowserIf, public  ::common::Commo
+     return ifaces_[i]->SetRenderParameters(input);
+   }
+ 
++  bool SetBrowserOptions(const BrowserOptionsType& input) override {
++    size_t sz = ifaces_.size();
++    size_t i = 0;
++    for (; i < (sz - 1); ++i) {
++      ifaces_[i]->SetBrowserOptions(input);
++    }
++    return ifaces_[i]->SetBrowserOptions(input);
++  }
++
+ };
+ 
+ // The 'concurrent' client is a thread safe client that correctly handles
+@@ -1558,6 +1675,9 @@ class CefBrowserConcurrentClient : virtual public CefBrowserIf, public  ::common
+   bool SetRenderParameters(const RenderParametersType& input) override;
+   int32_t send_SetRenderParameters(const RenderParametersType& input);
+   bool recv_SetRenderParameters(const int32_t seqid);
++  bool SetBrowserOptions(const BrowserOptionsType& input) override;
++  int32_t send_SetBrowserOptions(const BrowserOptionsType& input);
++  bool recv_SetBrowserOptions(const int32_t seqid);
+ };
+ 
+ #ifdef _MSC_VER
+diff --git a/thrift-services/src-gen/CefBrowser_server.skeleton.cpp b/thrift-services/src-gen/CefBrowser_server.skeleton.cpp
+index 0ad8358..a8281d3 100644
+--- a/thrift-services/src-gen/CefBrowser_server.skeleton.cpp
++++ b/thrift-services/src-gen/CefBrowser_server.skeleton.cpp
+@@ -80,6 +80,11 @@ class CefBrowserHandler : virtual public CefBrowserIf {
+     printf("SetRenderParameters\n");
+   }
+ 
++  bool SetBrowserOptions(const BrowserOptionsType& input) {
++    // Your implementation goes here
++    printf("SetBrowserOptions\n");
++  }
++
+ };
+ 
+ int main(int argc, char **argv) {
+diff --git a/thrift-services/src-gen/cefbrowser_types.cpp b/thrift-services/src-gen/cefbrowser_types.cpp
+index a3bd307..5e64fa3 100644
+--- a/thrift-services/src-gen/cefbrowser_types.cpp
++++ b/thrift-services/src-gen/cefbrowser_types.cpp
+@@ -1199,6 +1199,131 @@ void RenderParametersType::printTo(std::ostream& out) const {
+ }
+ 
+ 
++BrowserOptionsType::~BrowserOptionsType() noexcept {
++}
++
++BrowserOptionsType::BrowserOptionsType() noexcept
++   : mse(true),
++     zdfQuirks(true) {
++}
++
++void BrowserOptionsType::__set_mse(const bool val) {
++  this->mse = val;
++}
++
++void BrowserOptionsType::__set_zdfQuirks(const bool val) {
++  this->zdfQuirks = val;
++}
++std::ostream& operator<<(std::ostream& out, const BrowserOptionsType& obj)
++{
++  obj.printTo(out);
++  return out;
++}
++
++
++uint32_t BrowserOptionsType::read(::apache::thrift::protocol::TProtocol* iprot) {
++
++  ::apache::thrift::protocol::TInputRecursionTracker tracker(*iprot);
++  uint32_t xfer = 0;
++  std::string fname;
++  ::apache::thrift::protocol::TType ftype;
++  int16_t fid;
++
++  xfer += iprot->readStructBegin(fname);
++
++  using ::apache::thrift::protocol::TProtocolException;
++
++
++  while (true)
++  {
++    xfer += iprot->readFieldBegin(fname, ftype, fid);
++    if (ftype == ::apache::thrift::protocol::T_STOP) {
++      break;
++    }
++    switch (fid)
++    {
++      case 1:
++        if (ftype == ::apache::thrift::protocol::T_BOOL) {
++          xfer += iprot->readBool(this->mse);
++          this->__isset.mse = true;
++        } else {
++          xfer += iprot->skip(ftype);
++        }
++        break;
++      case 2:
++        if (ftype == ::apache::thrift::protocol::T_BOOL) {
++          xfer += iprot->readBool(this->zdfQuirks);
++          this->__isset.zdfQuirks = true;
++        } else {
++          xfer += iprot->skip(ftype);
++        }
++        break;
++      default:
++        xfer += iprot->skip(ftype);
++        break;
++    }
++    xfer += iprot->readFieldEnd();
++  }
++
++  xfer += iprot->readStructEnd();
++
++  return xfer;
++}
++
++uint32_t BrowserOptionsType::write(::apache::thrift::protocol::TProtocol* oprot) const {
++  uint32_t xfer = 0;
++  ::apache::thrift::protocol::TOutputRecursionTracker tracker(*oprot);
++  xfer += oprot->writeStructBegin("BrowserOptionsType");
++
++  xfer += oprot->writeFieldBegin("mse", ::apache::thrift::protocol::T_BOOL, 1);
++  xfer += oprot->writeBool(this->mse);
++  xfer += oprot->writeFieldEnd();
++
++  xfer += oprot->writeFieldBegin("zdfQuirks", ::apache::thrift::protocol::T_BOOL, 2);
++  xfer += oprot->writeBool(this->zdfQuirks);
++  xfer += oprot->writeFieldEnd();
++
++  xfer += oprot->writeFieldStop();
++  xfer += oprot->writeStructEnd();
++  return xfer;
++}
++
++void swap(BrowserOptionsType &a, BrowserOptionsType &b) noexcept {
++  using ::std::swap;
++  swap(a.mse, b.mse);
++  swap(a.zdfQuirks, b.zdfQuirks);
++  swap(a.__isset, b.__isset);
++}
++
++bool BrowserOptionsType::operator==(const BrowserOptionsType & rhs) const
++{
++  if (!(mse == rhs.mse))
++    return false;
++  if (!(zdfQuirks == rhs.zdfQuirks))
++    return false;
++  return true;
++}
++
++BrowserOptionsType::BrowserOptionsType(const BrowserOptionsType& other20) noexcept {
++  mse = other20.mse;
++  zdfQuirks = other20.zdfQuirks;
++  __isset = other20.__isset;
++}
++BrowserOptionsType& BrowserOptionsType::operator=(const BrowserOptionsType& other21) noexcept {
++  mse = other21.mse;
++  zdfQuirks = other21.zdfQuirks;
++  __isset = other21.__isset;
++  return *this;
++}
++void BrowserOptionsType::printTo(std::ostream& out) const {
++  using ::apache::thrift::to_string;
++  out << "BrowserOptionsType(";
++  out << "mse=" << to_string(mse);
++  out << ", " << "zdfQuirks=" << to_string(zdfQuirks);
++  out << ")";
++}
++
++
+ StreamEventType::~StreamEventType() noexcept {
+ }
+ 
+@@ -1344,19 +1469,19 @@ bool StreamEventType::operator==(const StreamEventType & rhs) const
+   return true;
+ }
+ 
+-StreamEventType::StreamEventType(const StreamEventType& other20) {
+-  componentTag = other20.componentTag;
+-  eventId = other20.eventId;
+-  privateData = other20.privateData;
+-  status = other20.status;
+-  __isset = other20.__isset;
++StreamEventType::StreamEventType(const StreamEventType& other22) {
++  componentTag = other22.componentTag;
++  eventId = other22.eventId;
++  privateData = other22.privateData;
++  status = other22.status;
++  __isset = other22.__isset;
+ }
+-StreamEventType& StreamEventType::operator=(const StreamEventType& other21) {
+-  componentTag = other21.componentTag;
+-  eventId = other21.eventId;
+-  privateData = other21.privateData;
+-  status = other21.status;
+-  __isset = other21.__isset;
++StreamEventType& StreamEventType::operator=(const StreamEventType& other23) {
++  componentTag = other23.componentTag;
++  eventId = other23.eventId;
++  privateData = other23.privateData;
++  status = other23.status;
++  __isset = other23.__isset;
+   return *this;
+ }
+ void StreamEventType::printTo(std::ostream& out) const {
+diff --git a/thrift-services/src-gen/cefbrowser_types.h b/thrift-services/src-gen/cefbrowser_types.h
+index e34177d..dac23af 100644
+--- a/thrift-services/src-gen/cefbrowser_types.h
++++ b/thrift-services/src-gen/cefbrowser_types.h
+@@ -42,6 +42,8 @@ class PlayerStatusType;
+ 
+ class RenderParametersType;
+ 
++class BrowserOptionsType;
++
+ class StreamEventType;
+ 
+ typedef struct _LoadUrlType__isset {
+@@ -432,6 +434,46 @@ void swap(RenderParametersType &a, RenderParametersType &b) noexcept;
+ 
+ std::ostream& operator<<(std::ostream& out, const RenderParametersType& obj);
+ 
++typedef struct _BrowserOptionsType__isset {
++  _BrowserOptionsType__isset() : mse(true), zdfQuirks(true) {}
++  bool mse :1;
++  bool zdfQuirks :1;
++} _BrowserOptionsType__isset;
++
++class BrowserOptionsType : public virtual ::apache::thrift::TBase {
++ public:
++
++  BrowserOptionsType(const BrowserOptionsType&) noexcept;
++  BrowserOptionsType& operator=(const BrowserOptionsType&) noexcept;
++  BrowserOptionsType() noexcept;
++
++  virtual ~BrowserOptionsType() noexcept;
++  bool mse;
++  bool zdfQuirks;
++
++  _BrowserOptionsType__isset __isset;
++
++  void __set_mse(const bool val);
++
++  void __set_zdfQuirks(const bool val);
++
++  bool operator == (const BrowserOptionsType & rhs) const;
++  bool operator != (const BrowserOptionsType &rhs) const {
++    return !(*this == rhs);
++  }
++
++  bool operator < (const BrowserOptionsType & ) const;
++
++  uint32_t read(::apache::thrift::protocol::TProtocol* iprot) override;
++  uint32_t write(::apache::thrift::protocol::TProtocol* oprot) const override;
++
++  virtual void printTo(std::ostream& out) const;
++};
++
++void swap(BrowserOptionsType &a, BrowserOptionsType &b) noexcept;
++
++std::ostream& operator<<(std::ostream& out, const BrowserOptionsType& obj);
++
+ typedef struct _StreamEventType__isset {
+   _StreamEventType__isset() : componentTag(false), eventId(false), privateData(false), status(false) {}
+   bool componentTag :1;
+-- 
+2.43.0
+

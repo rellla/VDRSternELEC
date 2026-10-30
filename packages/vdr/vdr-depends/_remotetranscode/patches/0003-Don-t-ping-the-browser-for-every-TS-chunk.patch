@@ -1,0 +1,41 @@
+From 1ebb515f4ded49482603b47be52c9985c0068ef6 Mon Sep 17 00:00:00 2001
+From: Andreas Baierl <ichgeh@imkreisrum.de>
+Date: Thu, 29 Oct 2026 16:46:09 +0100
+Subject: [PATCH 03/39] Don't ping the browser for every TS chunk
+
+Each chunk needed an additional round trip to the browser. The
+browser is not involved in the TS transfer at all. Also report a
+stream error only once instead of for every following chunk.
+
+Co-Authored-By: Claude Opus 5.5
+---
+ streamhandler.cpp | 11 +++--------
+ 1 file changed, 3 insertions(+), 8 deletions(-)
+
+diff --git a/streamhandler.cpp b/streamhandler.cpp
+index 6123c29..58adc85 100644
+--- a/streamhandler.cpp
++++ b/streamhandler.cpp
+@@ -348,16 +348,11 @@ bool StreamHandler::streamVideo(std::string url, std::string position, std::stri
+             }
+ 
+             if (hasStreamError()) {
++                // report the error only once and stop the stream
+                 browserClient->StreamError("Encrypted Stream");
++                stopRequest = true;
++                terminateStream();
+             } else {
+-                if (!browserClient->ping()) {
+-                    // connection problems? abort transcoding
+-                    ERROR("Unable to connect to browser. Abort transcoding...");
+-                    stopRequest = true;
+-                    terminateStream();
+-                    return;
+-                }
+-
+                 std::string packets = std::string(bytes, n);
+                 if (!vdrClient->ProcessTSPacket(packets)) {
+                     // connection problems? abort transcoding
+-- 
+2.43.0
+
