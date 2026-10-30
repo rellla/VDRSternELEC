@@ -51,6 +51,20 @@ post_makeinstall_target() {
   	cp ${PKG_DIR}/_system.d/remotetranscode.service ${INSTALL}/usr/local/system.d/remotetranscode.service
   fi
 
+  mkdir -p ${INSTALL}/storage/.config/vdrlibs/save
+  mkdir -p ${INSTALL}/storage/.config/vdrlibs/bin
+  mv ${INSTALL}/usr/local/bin/remotrans ${INSTALL}/storage/.config/vdrlibs/save/remotrans
+  ln -s ${INSTALL}/storage/.config/vdrlibs/save/remotrans ${INSTALL}/storage/.config/vdrlibs/bin/remotrans
+  ln -s ${INSTALL}/storage/.config/vdrlibs/bin/remotrans ${INSTALL}/usr/local/bin/remotrans
+
+  mv ${INSTALL}/usr/local/bin/r_dash2ts ${INSTALL}/storage/.config/vdrlibs/save/r_dash2ts
+  ln -s ${INSTALL}/storage/.config/vdrlibs/save/r_dash2ts ${INSTALL}/storage/.config/vdrlibs/bin/r_dash2ts
+  ln -s ${INSTALL}/storage/.config/vdrlibs/bin/r_dash2ts ${INSTALL}/usr/local/bin/r_dash2ts
+
+  mv ${INSTALL}/usr/local/bin/r_dash2ts_debug ${INSTALL}/storage/.config/vdrlibs/save/r_dash2ts_debug
+  ln -s /storage/.config/vdrlibs/save/r_dash2ts_debug ${INSTALL}/storage/.config/vdrlibs/bin/r_dash2ts_debug
+  ln -s /storage/.config/vdrlibs/bin/r_dash2ts_debug ${INSTALL}/usr/local/bin/r_dash2ts_debug
+
   # zip everything
   mkdir -p ${INSTALL}/usr/local/config
   cd ${INSTALL}
