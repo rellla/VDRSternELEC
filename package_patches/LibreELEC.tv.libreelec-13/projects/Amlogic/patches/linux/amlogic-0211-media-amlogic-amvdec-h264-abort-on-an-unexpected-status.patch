@@ -1,0 +1,48 @@
+From 8b47139013c7e54e7cfcfe0b8e79218fc6b6bae5 Mon Sep 17 00:00:00 2001
+From: Andreas Baierl <ichgeh@imkreisrum.de>
+Date: Fri, 6 Nov 2026 18:06:51 +0100
+Subject: [PATCH] media: amlogic: amvdec: h264: abort on an unexpected status
+ of a frame
+
+The threaded interrupt handler aborts on an unexpected firmware status
+only for field pictures. For frame pictures the status is ignored, but
+the firmware waits for an action, so the job never finishes and the
+decoder hangs until the queues are stopped.
+
+This happens with a damaged access unit, e.g. with missing slices after
+a reception error: the firmware runs out of input before the picture is
+complete and reports a data request instead of the picture done status.
+
+Abort on an unexpected status of frame pictures too.
+
+Co-Authored-By: Claude Opus 5.5
+---
+ drivers/media/platform/amlogic/amvdec/codec_h264.c | 12 +++++++++---
+ 1 file changed, 9 insertions(+), 3 deletions(-)
+
+diff --git a/drivers/media/platform/amlogic/amvdec/codec_h264.c b/drivers/media/platform/amlogic/amvdec/codec_h264.c
+index 0dbf2e0..7a82fa5 100644
+--- a/drivers/media/platform/amlogic/amvdec/codec_h264.c
++++ b/drivers/media/platform/amlogic/amvdec/codec_h264.c
+@@ -1913,9 +1913,15 @@ static irqreturn_t codec_h264_threaded_isr(struct amvdec_session *sess)
+ 				h264->multi_done_pending = true;
+ 				schedule_work(&sess->esparser_queue_work);
+ 			}
+-		} else if (h264->multi_field_picture) {
+-			dev_err_ratelimited(core->dev_dec, "h264 field: unexpected status=%#x phase=%u\n",
+-					    status, READ_ONCE(h264->multi_field_phase));
++		} else {
++			/*
++			 * Any other status (e.g. the firmware ran out of input on a
++			 * damaged access unit) waits for an action, which isn't sent.
++			 * Abort, otherwise the job never finishes.
++			 */
++			dev_err_ratelimited(core->dev_dec, "h264 multi: unexpected status=%#x field=%u phase=%u\n",
++					    status, h264->multi_field_picture,
++					    READ_ONCE(h264->multi_field_phase));
+ 			codec_h264_multi_abort(sess);
+ 		}
+ 		return IRQ_HANDLED;
+-- 
+2.43.0
+
