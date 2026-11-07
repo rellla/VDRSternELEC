@@ -1,0 +1,25 @@
+From 937eb956383ea61fca2255759c1469b43ef6a197 Mon Sep 17 00:00:00 2001
+From: Andreas Baierl <ichgeh@imkreisrum.de>
+Date: Sat, 7 Nov 2026 11:37:17 +0100
+Subject: [PATCH] remote: remove exclusive access
+
+---
+ remote.c | 2 --
+ 1 file changed, 2 deletions(-)
+
+diff --git a/remote.c b/remote.c
+index 7fe25a2..c981881 100644
+--- a/remote.c
++++ b/remote.c
+@@ -294,8 +294,6 @@ cRemoteDevInput::cRemoteDevInput(const char *name, int f, char *d)
+ #define EVIOCGRAB  _IOW('E', 0x90, int)   /* Grab/Release device */
+ #endif
+     data[0] = 1;
+-    if (ioctl(f, EVIOCGRAB, data) == 0)
+-        dsyslog("%s: exclusive access granted", name);
+ 
+     // setup keymap
+     const char *setupStr = GetSetup();
+-- 
+2.47.3
+
