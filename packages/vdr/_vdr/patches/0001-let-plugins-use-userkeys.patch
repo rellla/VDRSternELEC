@@ -1,0 +1,30 @@
+From ac8b45603b9264c328c25228fd3593d83e1229d0 Mon Sep 17 00:00:00 2001
+From: Andreas Baierl <ichgeh@imkreisrum.de>
+Date: Fri, 20 Nov 2026 15:55:24 +0100
+Subject: [PATCH] let plugins use userkeys
+
+---
+ vdr.c | 7 ++++++-
+ 1 file changed, 6 insertions(+), 1 deletion(-)
+
+diff --git a/vdr.c b/vdr.c
+index 48b53e63..4f855242 100644
+--- a/vdr.c
++++ b/vdr.c
+@@ -1349,7 +1349,12 @@ int main(int argc, char *argv[])
+                             DirectMainFunction(osRecordings, Setup.OpenRecMenuAtLastReplayed); break;
+           case kSetup:      DirectMainFunction(osSetup); break;
+           case kCommands:   DirectMainFunction(osCommands); break;
+-          case kUser0 ... kUser9: cRemote::PutMacro(key); key = kNone; break;
++          case kUser0 ... kUser9:
++               if (KeyMacros.Get(key)) {
++                  cRemote::PutMacro(key);
++                  key = kNone;
++                  }
++               break;
+           case k_Plugin: {
+                const char *PluginName = cRemote::GetPlugin();
+                if (PluginName) {
+-- 
+2.47.3
+
