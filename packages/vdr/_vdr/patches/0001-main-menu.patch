@@ -1,0 +1,1036 @@
+From 7498471b2e70609021de8e7ae42ce2494e0d21af Mon Sep 17 00:00:00 2001
+From: Andreas Baierl <ichgeh@imkreisrum.de>
+Date: Mon, 23 Nov 2026 12:48:26 +0100
+Subject: [PATCH] main menu
+
+---
+ config.c    |   3 +-
+ config.h    |   3 +-
+ menu.c      | 132 ++++++++++++++++++++++++++++++++++++++++++----------
+ menu.h      |   2 +
+ osdbase.h   |   1 +
+ po/ar.po    |   5 +-
+ po/ca_ES.po |   5 +-
+ po/cs_CZ.po |   5 +-
+ po/da_DK.po |   5 +-
+ po/de_DE.po |   5 +-
+ po/el_GR.po |   5 +-
+ po/es_ES.po |   5 +-
+ po/et_EE.po |   5 +-
+ po/fi_FI.po |   5 +-
+ po/fr_FR.po |   5 +-
+ po/hr_HR.po |   5 +-
+ po/hu_HU.po |   5 +-
+ po/it_IT.po |   5 +-
+ po/lt_LT.po |   5 +-
+ po/mk_MK.po |   5 +-
+ po/nl_NL.po |   5 +-
+ po/nn_NO.po |   5 +-
+ po/pl_PL.po |   5 +-
+ po/pt_PT.po |   5 +-
+ po/ro_RO.po |   5 +-
+ po/ru_RU.po |   5 +-
+ po/sk_SK.po |   5 +-
+ po/sl_SI.po |   5 +-
+ po/sr_RS.po |   5 +-
+ po/sv_SE.po |   5 +-
+ po/tr_TR.po |   5 +-
+ po/uk_UA.po |   5 +-
+ po/zh_CN.po |   5 +-
+ vdr.5       |  78 +++++++++++++++++++++++++++++++
+ vdr.c       |   1 +
+ 35 files changed, 305 insertions(+), 55 deletions(-)
+
+diff --git a/config.c b/config.c
+index 38bd1785..4ba32b55 100644
+--- a/config.c
++++ b/config.c
+@@ -270,8 +270,9 @@ bool cNestedItemList::Save(void)
+   return result;
+ }
+ 
+-// --- Folders and Commands --------------------------------------------------
++// --- Menu, Folders and Commands --------------------------------------------
+ 
++cNestedItemList MainMenu;
+ cNestedItemList Folders;
+ cNestedItemList Commands;
+ cNestedItemList RecordingCommands;
+diff --git a/config.h b/config.h
+index 4c59e482..fb6b04dc 100644
+--- a/config.h
++++ b/config.h
+@@ -207,7 +207,7 @@ public:
+   virtual ~cNestedItem() override;
+   virtual int Compare(const cListObject &ListObject) const override;
+   const char *Text(void) const { return text; }
+-  cList<cNestedItem> *SubItems(void) { return subItems; }
++  cList<cNestedItem> *SubItems(void) const { return subItems; }
+   void AddSubItem(cNestedItem *Item);
+   void SetText(const char *Text);
+   void SetSubItems(bool On);
+@@ -232,6 +232,7 @@ public:
+   bool Acceptable(in_addr_t Address);
+   };
+ 
++extern cNestedItemList MainMenu;
+ extern cNestedItemList Folders;
+ extern cNestedItemList Commands;
+ extern cNestedItemList RecordingCommands;
+diff --git a/menu.c b/menu.c
+index 070e6103..43786b7c 100644
+--- a/menu.c
++++ b/menu.c
+@@ -4726,6 +4726,22 @@ eOSState cMenuSetup::ProcessKey(eKeys Key)
+   return state;
+ }
+ 
++// --- cMenuSubItem ----------------------------------------------------------
++
++class cMenuSubItem : public cOsdItem {
++private:
++  const cNestedItem *item;
++public:
++  cMenuSubItem(const char *Name, const cNestedItem *Item);
++  const cNestedItem *Item(void) const { return item; }
++  };
++
++cMenuSubItem::cMenuSubItem(const char *Name, const cNestedItem *Item)
++:cOsdItem(Name, osSubMenu)
++{
++  item = Item;
++}
++
+ // --- cMenuPluginItem -------------------------------------------------------
+ 
+ class cMenuPluginItem : public cOsdItem {
+@@ -4753,6 +4769,7 @@ cMenuMain::cMenuMain(eOSState State, bool OpenSubMenus)
+ :cOsdMenu("")
+ {
+   SetMenuCategory(mcMain);
++  currentSubMenu = NULL;
+   replaying = false;
+   deletedRecordingsItem = NULL;
+   stopReplayItem = NULL;
+@@ -4783,36 +4800,85 @@ cOsdObject *cMenuMain::PluginOsdObject(void)
+ 
+ void cMenuMain::Set(void)
+ {
++  deletedRecordingsItem = NULL;
++  stopReplayItem = NULL;
++  cancelEditingItem = NULL;
++  stopRecordingItem = NULL;
+   Clear();
+   SetTitle("VDR");
+   SetHasHotkeys();
+ 
+-  // Basic menu items:
+-
+-  Add(new cOsdItem(hk(tr("Schedule")),   osSchedule));
+-  Add(new cOsdItem(hk(tr("Channels")),   osChannels));
+-  Add(new cOsdItem(hk(tr("Timers")),     osTimers));
+-  Add(new cOsdItem(hk(tr("Recordings")), osRecordings));
+-
+-  // Plugins:
+-
+-  for (int i = 0; ; i++) {
+-      cPlugin *p = cPluginManager::GetPlugin(i);
+-      if (p) {
+-         const char *item = p->MainMenuEntry();
+-         if (item)
+-            Add(new cMenuPluginItem(hk(item), i));
++  if (MainMenu.Count() == 0) {
++     // Default menu:
++     MainMenu.Add(new cNestedItem("=Schedule"));
++     MainMenu.Add(new cNestedItem("=Channels"));
++     MainMenu.Add(new cNestedItem("=Timers"));
++     MainMenu.Add(new cNestedItem("=Recordings"));
++     MainMenu.Add(new cNestedItem("=Plugins"));
++     MainMenu.Add(new cNestedItem("=Setup"));
++     MainMenu.Add(new cNestedItem("=Commands"));
++     MainMenu.Save();
++     }
++
++  if (items.Size())
++     Add(new cOsdItem(items[items.Size() - 1]->Text(), osUnknown, false));
++  const cList<cNestedItem> *Items = items.Size() ? items[items.Size() - 1]->SubItems() : &MainMenu;
++  for (const cNestedItem *Item = Items->First(); Item; Item = Items->Next(Item)) {
++      if (const char *s = Item->Text()) {
++         if (*s == '=') {
++            s++;
++            if      (!strcmp(s, "Schedule"))   Add(new cOsdItem(hk(tr("Schedule")),   osSchedule));
++            else if (!strcmp(s, "Channels"))   Add(new cOsdItem(hk(tr("Channels")),   osChannels));
++            else if (!strcmp(s, "Timers"))     Add(new cOsdItem(hk(tr("Timers")),     osTimers));
++            else if (!strcmp(s, "Recordings")) Add(new cOsdItem(hk(tr("Recordings")), osRecordings));
++            else if (!strcmp(s, "Setup"))      Add(new cOsdItem(hk(tr("Setup")),      osSetup));
++            else if (!strcmp(s, "Plugins")) {
++               for (int i = 0; ; i++) {
++                   if (cPlugin *p = cPluginManager::GetPlugin(i)) {
++                      if (const char *entry = p->MainMenuEntry())
++                         Add(new cMenuPluginItem(hk(entry), i));
++                      }
++                   else
++                      break;
++                   }
++               }
++            else if (!strcmp(s, "Commands")) {
++               if (Commands.Count())
++                  Add(new cOsdItem(hk(tr("Commands")), osCommands));
++               }
++            else
++               esyslog("ERROR: unknown menu item '=%s' in menu.conf", s);
++            }
++         else if (*s == '@') {
++            bool Found = false;
++            const char *Title = strchr(s, ':');
++            cString Name(s + 1, Title);
++            if (Title)
++               Title++;
++            for (int i = 0; ; i++) {
++                if (cPlugin *p = cPluginManager::GetPlugin(i)) {
++                   if (!strcmp(Name, p->Name())) {
++                      Found = true;
++                      if (const char *entry = p->MainMenuEntry())
++                         Add(new cMenuPluginItem(hk(Title ? Title : entry), i));
++                      else
++                         esyslog("ERROR: plugin '@%s' has no main menu entry in menu.conf", *Name);
++                      break;
++                      }
++                   }
++                else
++                   break;
++                }
++            if (!Found)
++               esyslog("ERROR: plugin '@%s' not found in menu.conf", *Name);
++            }
++         else if (Item->SubItems())
++            Add(new cMenuSubItem(hk(s), Item), Item == currentSubMenu);
++         else
++            Add(new cOsdItem(s, osUnknown, false));
+          }
+-      else
+-         break;
+       }
+-
+-  // More basic menu items:
+-
+-  Add(new cOsdItem(hk(tr("Setup")),      osSetup));
+-  if (Commands.Count())
+-     Add(new cOsdItem(hk(tr("Button$Commands")),  osCommands));
+-
++  currentSubMenu = NULL;
+   Update(true);
+ 
+   Display();
+@@ -4822,6 +4888,9 @@ bool cMenuMain::Update(bool Force)
+ {
+   bool result = false;
+ 
++  if (items.Size())
++     return result;
++
+   // Deleted recordings:
+   {
+     LOCK_DELETEDRECORDINGS_READ;
+@@ -4873,7 +4942,7 @@ bool cMenuMain::Update(bool Force)
+      }
+ 
+   // Record control:
+-  if (cRecordControls::StateChanged(recordControlsState)) {
++  if (Force || cRecordControls::StateChanged(recordControlsState)) {
+      while (stopRecordingItem) {
+            cOsdItem *it = Next(stopRecordingItem);
+            Del(stopRecordingItem->Index());
+@@ -4940,6 +5009,19 @@ eOSState cMenuMain::ProcessKey(eKeys Key)
+                          state = osEnd;
+                        }
+                        break;
++    case osSubMenu:    if (cMenuSubItem *item = (cMenuSubItem *)Get(Current())) {
++                          items.Append(item->Item());
++                          Set();
++                          state = osContinue;
++                          }
++                       break;
++    case osBack:       if (items.Size()) {
++                          currentSubMenu = items[items.Size() - 1];
++                          items.Remove(items.Size() - 1);
++                          Set();
++                          state = osContinue;
++                          }
++                       break;
+     default: switch (Key) {
+                case kRecord:
+                case kRed:    if (!HadSubMenu)
+diff --git a/menu.h b/menu.h
+index b7470d10..e69083ee 100644
+--- a/menu.h
++++ b/menu.h
+@@ -109,6 +109,8 @@ public:
+ 
+ class cMenuMain : public cOsdMenu {
+ private:
++  cVector<const cNestedItem *> items;
++  const cNestedItem *currentSubMenu;
+   bool replaying;
+   cOsdItem *deletedRecordingsItem;
+   cOsdItem *stopReplayItem;
+diff --git a/osdbase.h b/osdbase.h
+index 343b4ce2..d55fbd04 100644
+--- a/osdbase.h
++++ b/osdbase.h
+@@ -32,6 +32,7 @@ enum eOSState { osUnknown,
+                 osStopRecord,
+                 osStopReplay,
+                 osCancelEdit,
++                osSubMenu,
+                 osBack,
+                 osEnd,
+                 os_User, // the following values can be used locally
+diff --git a/po/ar.po b/po/ar.po
+index 882356ea..6363fd05 100644
+--- a/po/ar.po
++++ b/po/ar.po
+@@ -7,7 +7,7 @@ msgid ""
+ msgstr ""
+ "Project-Id-Version: VDR 2.8.4\n"
+ "Report-Msgid-Bugs-To: <vdr-bugs@tvdr.de>\n"
+-"POT-Creation-Date: 2026-09-25 10:59+0200\n"
++"POT-Creation-Date: 2026-11-22 15:25+0100\n"
+ "PO-Revision-Date: 2008-10-16 11:16-0400\n"
+ "Last-Translator: Osama Alrawab <alrawab@hotmail.com>\n"
+ "Language-Team: Arabic <ar@li.org>\n"
+@@ -1513,6 +1513,9 @@ msgstr "هل حقا تريد اعادة التشغيل"
+ msgid " Stop recording "
+ msgstr " ايقاف التسجيل "
+ 
++msgid "Commands"
++msgstr "الاوامر"
++
+ #. TRANSLATORS: note the leading blank!
+ msgid " Deleted recordings"
+ msgstr ""
+diff --git a/po/ca_ES.po b/po/ca_ES.po
+index 8e0f4315..29342c35 100644
+--- a/po/ca_ES.po
++++ b/po/ca_ES.po
+@@ -10,7 +10,7 @@ msgid ""
+ msgstr ""
+ "Project-Id-Version: VDR 2.8.4\n"
+ "Report-Msgid-Bugs-To: <vdr-bugs@tvdr.de>\n"
+-"POT-Creation-Date: 2026-09-25 10:59+0200\n"
++"POT-Creation-Date: 2026-11-22 15:25+0100\n"
+ "PO-Revision-Date: 2008-03-02 19:02+0100\n"
+ "Last-Translator: Luca Olivetti <luca@ventoso.org>\n"
+ "Language-Team: Catalan <vdr@linuxtv.org>\n"
+@@ -1512,6 +1512,9 @@ msgstr "Segur que voleu reiniciar?"
+ msgid " Stop recording "
+ msgstr " Aturar la gravaci� "
+ 
++msgid "Commands"
++msgstr "Ordres"
++
+ #. TRANSLATORS: note the leading blank!
+ msgid " Deleted recordings"
+ msgstr ""
+diff --git a/po/cs_CZ.po b/po/cs_CZ.po
+index fa20214c..5f82017b 100644
+--- a/po/cs_CZ.po
++++ b/po/cs_CZ.po
+@@ -10,7 +10,7 @@ msgid ""
+ msgstr ""
+ "Project-Id-Version: VDR 2.8.4\n"
+ "Report-Msgid-Bugs-To: <vdr-bugs@tvdr.de>\n"
+-"POT-Creation-Date: 2026-09-25 10:59+0200\n"
++"POT-Creation-Date: 2026-11-22 15:25+0100\n"
+ "PO-Revision-Date: 2010-05-06 11:00+0200\n"
+ "Last-Translator: Aleš Juřík <ajurik@quick.cz>\n"
+ "Language-Team: Czech <vdr@linuxtv.org>\n"
+@@ -1512,6 +1512,9 @@ msgstr "Opravdu restartovat?"
+ msgid " Stop recording "
+ msgstr " Zastavit nahrávání "
+ 
++msgid "Commands"
++msgstr "Příkazy"
++
+ #. TRANSLATORS: note the leading blank!
+ msgid " Deleted recordings"
+ msgstr ""
+diff --git a/po/da_DK.po b/po/da_DK.po
+index ab531dd8..8e155b8d 100644
+--- a/po/da_DK.po
++++ b/po/da_DK.po
+@@ -7,7 +7,7 @@ msgid ""
+ msgstr ""
+ "Project-Id-Version: VDR 2.8.4\n"
+ "Report-Msgid-Bugs-To: <vdr-bugs@tvdr.de>\n"
+-"POT-Creation-Date: 2026-09-25 10:59+0200\n"
++"POT-Creation-Date: 2026-11-22 15:25+0100\n"
+ "PO-Revision-Date: 2007-08-12 14:17+0200\n"
+ "Last-Translator: Mogens Elneff <mogens@elneff.dk>\n"
+ "Language-Team: Danish <vdr@linuxtv.org>\n"
+@@ -1509,6 +1509,9 @@ msgstr "Vil du virkelig genstarte?"
+ msgid " Stop recording "
+ msgstr " Stop optagelse "
+ 
++msgid "Commands"
++msgstr "Kommandoer"
++
+ #. TRANSLATORS: note the leading blank!
+ msgid " Deleted recordings"
+ msgstr ""
+diff --git a/po/de_DE.po b/po/de_DE.po
+index 50c3391e..fa5033e8 100644
+--- a/po/de_DE.po
++++ b/po/de_DE.po
+@@ -10,7 +10,7 @@ msgid ""
+ msgstr ""
+ "Project-Id-Version: VDR 2.8.4\n"
+ "Report-Msgid-Bugs-To: <vdr-bugs@tvdr.de>\n"
+-"POT-Creation-Date: 2026-09-25 10:59+0200\n"
++"POT-Creation-Date: 2026-11-22 15:25+0100\n"
+ "PO-Revision-Date: 2015-02-10 13:45+0100\n"
+ "Last-Translator: Stefan Hofmann <stefan.hofmann@t-online.de>\n"
+ "Language-Team: German <vdr@linuxtv.org>\n"
+@@ -1512,6 +1512,9 @@ msgstr "Wirklich neu starten?"
+ msgid " Stop recording "
+ msgstr " Aufzeichnung beenden "
+ 
++msgid "Commands"
++msgstr "Befehle"
++
+ #. TRANSLATORS: note the leading blank!
+ msgid " Deleted recordings"
+ msgstr " Gel�schte Aufzeichnungen"
+diff --git a/po/el_GR.po b/po/el_GR.po
+index 3b3063f7..7306db84 100644
+--- a/po/el_GR.po
++++ b/po/el_GR.po
+@@ -7,7 +7,7 @@ msgid ""
+ msgstr ""
+ "Project-Id-Version: VDR 2.8.4\n"
+ "Report-Msgid-Bugs-To: <vdr-bugs@tvdr.de>\n"
+-"POT-Creation-Date: 2026-09-25 10:59+0200\n"
++"POT-Creation-Date: 2026-11-22 15:25+0100\n"
+ "PO-Revision-Date: 2007-08-12 14:17+0200\n"
+ "Last-Translator: Dimitrios Dimitrakos <mail@dimitrios.de>\n"
+ "Language-Team: Greek <vdr@linuxtv.org>\n"
+@@ -1509,6 +1509,9 @@ msgstr "N
+ msgid " Stop recording "
+ msgstr " ����� ������� "
+ 
++msgid "Commands"
++msgstr "�������"
++
+ #. TRANSLATORS: note the leading blank!
+ msgid " Deleted recordings"
+ msgstr ""
+diff --git a/po/es_ES.po b/po/es_ES.po
+index bfd00f65..5d6b0456 100644
+--- a/po/es_ES.po
++++ b/po/es_ES.po
+@@ -8,7 +8,7 @@ msgid ""
+ msgstr ""
+ "Project-Id-Version: VDR 2.8.4\n"
+ "Report-Msgid-Bugs-To: <vdr-bugs@tvdr.de>\n"
+-"POT-Creation-Date: 2026-09-25 10:59+0200\n"
++"POT-Creation-Date: 2026-11-22 15:25+0100\n"
+ "PO-Revision-Date: 2015-02-19 23:00+0100\n"
+ "Last-Translator: Gabriel Bonich <gbonich@gmail.com>\n"
+ "Language-Team: Spanish <vdr@linuxtv.org>\n"
+@@ -1510,6 +1510,9 @@ msgstr "
+ msgid " Stop recording "
+ msgstr " Parar grabaci�n "
+ 
++msgid "Commands"
++msgstr "�rdenes"
++
+ #. TRANSLATORS: note the leading blank!
+ msgid " Deleted recordings"
+ msgstr ""
+diff --git a/po/et_EE.po b/po/et_EE.po
+index 7f5e91ee..e119e080 100644
+--- a/po/et_EE.po
++++ b/po/et_EE.po
+@@ -7,7 +7,7 @@ msgid ""
+ msgstr ""
+ "Project-Id-Version: VDR 2.8.4\n"
+ "Report-Msgid-Bugs-To: <vdr-bugs@tvdr.de>\n"
+-"POT-Creation-Date: 2026-09-25 10:59+0200\n"
++"POT-Creation-Date: 2026-11-22 15:25+0100\n"
+ "PO-Revision-Date: 2007-08-12 14:17+0200\n"
+ "Last-Translator: Arthur Konovalov <artlov@gmail.com>\n"
+ "Language-Team: Estonian <vdr@linuxtv.org>\n"
+@@ -1509,6 +1509,9 @@ msgstr "Taaskäivitada?"
+ msgid " Stop recording "
+ msgstr " Lõpeta salvestamine "
+ 
++msgid "Commands"
++msgstr "Käsud"
++
+ #. TRANSLATORS: note the leading blank!
+ msgid " Deleted recordings"
+ msgstr ""
+diff --git a/po/fi_FI.po b/po/fi_FI.po
+index 33818876..d57d5c9e 100644
+--- a/po/fi_FI.po
++++ b/po/fi_FI.po
+@@ -12,7 +12,7 @@ msgid ""
+ msgstr ""
+ "Project-Id-Version: VDR 2.8.4\n"
+ "Report-Msgid-Bugs-To: <vdr-bugs@tvdr.de>\n"
+-"POT-Creation-Date: 2026-09-25 10:59+0200\n"
++"POT-Creation-Date: 2026-11-22 15:25+0100\n"
+ "PO-Revision-Date: 2007-08-15 15:52+0200\n"
+ "Last-Translator: Marko Mäkelä <marko.makela@iki.fi>\n"
+ "Language-Team: Finnish <vdr@linuxtv.org>\n"
+@@ -1514,6 +1514,9 @@ msgstr "Käynnistetäänkö uudelleen?"
+ msgid " Stop recording "
+ msgstr " Lopeta tallennus "
+ 
++msgid "Commands"
++msgstr "Komennot"
++
+ #. TRANSLATORS: note the leading blank!
+ msgid " Deleted recordings"
+ msgstr " Poistetut tallenteet"
+diff --git a/po/fr_FR.po b/po/fr_FR.po
+index 0da0cbf4..0d59b53a 100644
+--- a/po/fr_FR.po
++++ b/po/fr_FR.po
+@@ -18,7 +18,7 @@ msgid ""
+ msgstr ""
+ "Project-Id-Version: VDR 2.8.4\n"
+ "Report-Msgid-Bugs-To: <vdr-bugs@tvdr.de>\n"
+-"POT-Creation-Date: 2026-09-25 10:59+0200\n"
++"POT-Creation-Date: 2026-11-22 15:25+0100\n"
+ "PO-Revision-Date: 2018-04-14 10:16+0100\n"
+ "Last-Translator: Bernard Jaulin <bernard.jaulin@gmail.com>\n"
+ "Language-Team: French <vdr@linuxtv.org>\n"
+@@ -1520,6 +1520,9 @@ msgstr "Confirmer le redémarrage ?"
+ msgid " Stop recording "
+ msgstr " Arrêter l'enregistrement "
+ 
++msgid "Commands"
++msgstr "Commandes"
++
+ #. TRANSLATORS: note the leading blank!
+ msgid " Deleted recordings"
+ msgstr ""
+diff --git a/po/hr_HR.po b/po/hr_HR.po
+index b8b7f2e6..433435ce 100644
+--- a/po/hr_HR.po
++++ b/po/hr_HR.po
+@@ -9,7 +9,7 @@ msgid ""
+ msgstr ""
+ "Project-Id-Version: VDR 2.8.4\n"
+ "Report-Msgid-Bugs-To: <vdr-bugs@tvdr.de>\n"
+-"POT-Creation-Date: 2026-09-25 10:59+0200\n"
++"POT-Creation-Date: 2026-11-22 15:25+0100\n"
+ "PO-Revision-Date: 2008-03-17 19:00+0100\n"
+ "Last-Translator: Adrian Caval <anrxc@sysphere.org>\n"
+ "Language-Team: Croatian <vdr@linuxtv.org>\n"
+@@ -1511,6 +1511,9 @@ msgstr "Zaista ponovo pokrenuti?"
+ msgid " Stop recording "
+ msgstr " Prekini snimanje "
+ 
++msgid "Commands"
++msgstr "Naredbe"
++
+ #. TRANSLATORS: note the leading blank!
+ msgid " Deleted recordings"
+ msgstr ""
+diff --git a/po/hu_HU.po b/po/hu_HU.po
+index a5da92a1..51aa3671 100644
+--- a/po/hu_HU.po
++++ b/po/hu_HU.po
+@@ -11,7 +11,7 @@ msgid ""
+ msgstr ""
+ "Project-Id-Version: VDR 2.8.4\n"
+ "Report-Msgid-Bugs-To: <vdr-bugs@tvdr.de>\n"
+-"POT-Creation-Date: 2026-09-25 10:59+0200\n"
++"POT-Creation-Date: 2026-11-22 15:25+0100\n"
+ "PO-Revision-Date: 2024-02-09 06:29+0000\n"
+ "Last-Translator: István Füley <ifuley@tigercomp.ro>\n"
+ "Language-Team: Hungarian\n"
+@@ -1517,6 +1517,9 @@ msgstr "Tényleg újraindítani?"
+ msgid " Stop recording "
+ msgstr " Felvételt befejezni "
+ 
++msgid "Commands"
++msgstr "Parancsok"
++
+ #. TRANSLATORS: note the leading blank!
+ msgid " Deleted recordings"
+ msgstr " Törölt felvételek"
+diff --git a/po/it_IT.po b/po/it_IT.po
+index bed29769..f5aa408b 100644
+--- a/po/it_IT.po
++++ b/po/it_IT.po
+@@ -11,7 +11,7 @@ msgid ""
+ msgstr ""
+ "Project-Id-Version: VDR 2.8.4\n"
+ "Report-Msgid-Bugs-To: <vdr-bugs@tvdr.de>\n"
+-"POT-Creation-Date: 2026-09-25 10:59+0200\n"
++"POT-Creation-Date: 2026-11-22 15:25+0100\n"
+ "PO-Revision-Date: 2026-03-21 18:00+0100\n"
+ "Last-Translator: Diego Pierotto <vdr-italian@tiscali.it>\n"
+ "Language-Team: Italian <vdr@linuxtv.org>\n"
+@@ -1515,6 +1515,9 @@ msgstr "Eseguire un riavvio?"
+ msgid " Stop recording "
+ msgstr " Ferma registrazione "
+ 
++msgid "Commands"
++msgstr "Comandi"
++
+ #. TRANSLATORS: note the leading blank!
+ msgid " Deleted recordings"
+ msgstr " Registrazioni eliminate"
+diff --git a/po/lt_LT.po b/po/lt_LT.po
+index 930a9a0a..5aa0a26f 100644
+--- a/po/lt_LT.po
++++ b/po/lt_LT.po
+@@ -7,7 +7,7 @@ msgid ""
+ msgstr ""
+ "Project-Id-Version: VDR 2.8.4\n"
+ "Report-Msgid-Bugs-To: <vdr-bugs@tvdr.de>\n"
+-"POT-Creation-Date: 2026-09-25 10:59+0200\n"
++"POT-Creation-Date: 2026-11-22 15:25+0100\n"
+ "PO-Revision-Date: 2015-02-11 14:02+0200\n"
+ "Last-Translator: Valdemaras Pipiras <varas@ambernet.lt>\n"
+ "Language-Team: Lithuanian <vdr@linuxtv.org>\n"
+@@ -1509,6 +1509,9 @@ msgstr "Tikrai perkrauti?"
+ msgid " Stop recording "
+ msgstr " Sustabdyti įrašinėjimą "
+ 
++msgid "Commands"
++msgstr "Komandos"
++
+ #. TRANSLATORS: note the leading blank!
+ msgid " Deleted recordings"
+ msgstr ""
+diff --git a/po/mk_MK.po b/po/mk_MK.po
+index 9b11cc13..707ff32f 100644
+--- a/po/mk_MK.po
++++ b/po/mk_MK.po
+@@ -7,7 +7,7 @@ msgid ""
+ msgstr ""
+ "Project-Id-Version: VDR 2.8.4\n"
+ "Report-Msgid-Bugs-To: <vdr-bugs@tvdr.de>\n"
+-"POT-Creation-Date: 2026-09-25 10:59+0200\n"
++"POT-Creation-Date: 2026-11-22 15:25+0100\n"
+ "PO-Revision-Date: 2018-03-31 21:47+0100\n"
+ "Last-Translator: Dimitar Petrovski <dimeptr@gmail.com>\n"
+ "Language-Team: Macedonian <kde-i18n-doc@kde.org>\n"
+@@ -1511,6 +1511,9 @@ msgstr "Рестартирање?"
+ msgid " Stop recording "
+ msgstr " Запри снимање "
+ 
++msgid "Commands"
++msgstr "Наредби"
++
+ #. TRANSLATORS: note the leading blank!
+ msgid " Deleted recordings"
+ msgstr ""
+diff --git a/po/nl_NL.po b/po/nl_NL.po
+index eeb07b83..1e6903b6 100644
+--- a/po/nl_NL.po
++++ b/po/nl_NL.po
+@@ -13,7 +13,7 @@ msgid ""
+ msgstr ""
+ "Project-Id-Version: VDR 2.8.4\n"
+ "Report-Msgid-Bugs-To: <vdr-bugs@tvdr.de>\n"
+-"POT-Creation-Date: 2026-09-25 10:59+0200\n"
++"POT-Creation-Date: 2026-11-22 15:25+0100\n"
+ "PO-Revision-Date: 2026-07-22 11:43+0100\n"
+ "Last-Translator: Carel Willemse <carel@nekanali.nl>\n"
+ "Language-Team: Dutch <vdr@linuxtv.org>\n"
+@@ -1515,6 +1515,9 @@ msgstr "Werkelijk opnieuw starten?"
+ msgid " Stop recording "
+ msgstr " Stop opnemen "
+ 
++msgid "Commands"
++msgstr "Commando's"
++
+ #. TRANSLATORS: note the leading blank!
+ msgid " Deleted recordings"
+ msgstr " Verwijderde opnamen"
+diff --git a/po/nn_NO.po b/po/nn_NO.po
+index 1079b037..09e7c030 100644
+--- a/po/nn_NO.po
++++ b/po/nn_NO.po
+@@ -8,7 +8,7 @@ msgid ""
+ msgstr ""
+ "Project-Id-Version: VDR 2.8.4\n"
+ "Report-Msgid-Bugs-To: <vdr-bugs@tvdr.de>\n"
+-"POT-Creation-Date: 2026-09-25 10:59+0200\n"
++"POT-Creation-Date: 2026-11-22 15:25+0100\n"
+ "PO-Revision-Date: 2007-08-12 14:17+0200\n"
+ "Last-Translator: Truls Slevigen <truls@slevigen.no>\n"
+ "Language-Team: Norwegian Nynorsk <vdr@linuxtv.org>\n"
+@@ -1510,6 +1510,9 @@ msgstr "Vil du virkelig starte p
+ msgid " Stop recording "
+ msgstr " Stopp opptak fra "
+ 
++msgid "Commands"
++msgstr "Kommandoer"
++
+ #. TRANSLATORS: note the leading blank!
+ msgid " Deleted recordings"
+ msgstr ""
+diff --git a/po/pl_PL.po b/po/pl_PL.po
+index ef7895f3..eba98e04 100644
+--- a/po/pl_PL.po
++++ b/po/pl_PL.po
+@@ -10,7 +10,7 @@ msgid ""
+ msgstr ""
+ "Project-Id-Version: VDR 2.8.4\n"
+ "Report-Msgid-Bugs-To: <vdr-bugs@tvdr.de>\n"
+-"POT-Creation-Date: 2026-09-25 10:59+0200\n"
++"POT-Creation-Date: 2026-11-22 15:25+0100\n"
+ "PO-Revision-Date: 2026-01-15 23:47+0100\n"
+ "Last-Translator: Tomasz Maciej Nowak <tmn505@gmail.com>\n"
+ "Language-Team: Polish <vdr@linuxtv.org>\n"
+@@ -1512,6 +1512,9 @@ msgstr "Na pewno zrestartować?"
+ msgid " Stop recording "
+ msgstr " Zatrzymaj nagrywanie "
+ 
++msgid "Commands"
++msgstr "Polecenia"
++
+ #. TRANSLATORS: note the leading blank!
+ msgid " Deleted recordings"
+ msgstr " Skasowane nagrania"
+diff --git a/po/pt_PT.po b/po/pt_PT.po
+index 8b2fb9a6..a623905f 100644
+--- a/po/pt_PT.po
++++ b/po/pt_PT.po
+@@ -8,7 +8,7 @@ msgid ""
+ msgstr ""
+ "Project-Id-Version: VDR 2.8.4\n"
+ "Report-Msgid-Bugs-To: <vdr-bugs@tvdr.de>\n"
+-"POT-Creation-Date: 2026-09-25 10:59+0200\n"
++"POT-Creation-Date: 2026-11-22 15:25+0100\n"
+ "PO-Revision-Date: 2010-03-28 22:49+0100\n"
+ "Last-Translator: Cris Silva <hudokkow@gmail.com>\n"
+ "Language-Team: Portuguese <vdr@linuxtv.org>\n"
+@@ -1510,6 +1510,9 @@ msgstr "Quer mesmo reiniciar?"
+ msgid " Stop recording "
+ msgstr " Parar grava��o "
+ 
++msgid "Commands"
++msgstr "Comandos"
++
+ #. TRANSLATORS: note the leading blank!
+ msgid " Deleted recordings"
+ msgstr ""
+diff --git a/po/ro_RO.po b/po/ro_RO.po
+index 5de95694..263fd07e 100644
+--- a/po/ro_RO.po
++++ b/po/ro_RO.po
+@@ -8,7 +8,7 @@ msgid ""
+ msgstr ""
+ "Project-Id-Version: VDR 2.8.4\n"
+ "Report-Msgid-Bugs-To: <vdr-bugs@tvdr.de>\n"
+-"POT-Creation-Date: 2026-09-25 10:59+0200\n"
++"POT-Creation-Date: 2026-11-22 15:25+0100\n"
+ "PO-Revision-Date: 2015-02-11 22:26+0100\n"
+ "Last-Translator: Lucian Muresan <lucianm@users.sourceforge.net>\n"
+ "Language-Team: Romanian <vdr@linuxtv.org>\n"
+@@ -1511,6 +1511,9 @@ msgstr "Sigur repornesc?"
+ msgid " Stop recording "
+ msgstr " Opreşte înregistrarea "
+ 
++msgid "Commands"
++msgstr "Comenzi"
++
+ #. TRANSLATORS: note the leading blank!
+ msgid " Deleted recordings"
+ msgstr ""
+diff --git a/po/ru_RU.po b/po/ru_RU.po
+index c5ca9dfe..6fd6d8e0 100644
+--- a/po/ru_RU.po
++++ b/po/ru_RU.po
+@@ -8,7 +8,7 @@ msgid ""
+ msgstr ""
+ "Project-Id-Version: VDR 2.8.4\n"
+ "Report-Msgid-Bugs-To: <vdr-bugs@tvdr.de>\n"
+-"POT-Creation-Date: 2026-09-25 10:59+0200\n"
++"POT-Creation-Date: 2026-11-22 15:25+0100\n"
+ "PO-Revision-Date: 2016-12-27 17:13+0100\n"
+ "Last-Translator: Pridvorov Andrey <ua0lnj@bk.ru>\n"
+ "Language-Team: Russian <vdr@linuxtv.org>\n"
+@@ -1510,6 +1510,9 @@ msgstr "Действительно перезапустить?"
+ msgid " Stop recording "
+ msgstr " Прекратить запись "
+ 
++msgid "Commands"
++msgstr "Команды"
++
+ #. TRANSLATORS: note the leading blank!
+ msgid " Deleted recordings"
+ msgstr ""
+diff --git a/po/sk_SK.po b/po/sk_SK.po
+index 4557aea4..b8bea437 100644
+--- a/po/sk_SK.po
++++ b/po/sk_SK.po
+@@ -7,7 +7,7 @@ msgid ""
+ msgstr ""
+ "Project-Id-Version: VDR 2.8.4\n"
+ "Report-Msgid-Bugs-To: <vdr-bugs@tvdr.de>\n"
+-"POT-Creation-Date: 2026-09-25 10:59+0200\n"
++"POT-Creation-Date: 2026-11-22 15:25+0100\n"
+ "PO-Revision-Date: 2015-02-17 18:59+0100\n"
+ "Last-Translator: Milan Hrala <hrala.milan@gmail.com>\n"
+ "Language-Team: Slovak <vdr@linuxtv.org>\n"
+@@ -1510,6 +1510,9 @@ msgstr "Naozaj re
+ msgid " Stop recording "
+ msgstr " Zastavi� nahr�vanie "
+ 
++msgid "Commands"
++msgstr "Pr�kazy"
++
+ #. TRANSLATORS: note the leading blank!
+ msgid " Deleted recordings"
+ msgstr ""
+diff --git a/po/sl_SI.po b/po/sl_SI.po
+index 995c9821..e5871844 100644
+--- a/po/sl_SI.po
++++ b/po/sl_SI.po
+@@ -8,7 +8,7 @@ msgid ""
+ msgstr ""
+ "Project-Id-Version: VDR 2.8.4\n"
+ "Report-Msgid-Bugs-To: <vdr-bugs@tvdr.de>\n"
+-"POT-Creation-Date: 2026-09-25 10:59+0200\n"
++"POT-Creation-Date: 2026-11-22 15:25+0100\n"
+ "PO-Revision-Date: 2013-03-04 12:46+0100\n"
+ "Last-Translator: Matjaz Thaler <matjaz.thaler@guest.arnes.si>\n"
+ "Language-Team: Slovenian <vdr@linuxtv.org>\n"
+@@ -1510,6 +1510,9 @@ msgstr "Zares ponoven zagon?"
+ msgid " Stop recording "
+ msgstr " Prekini snemanje "
+ 
++msgid "Commands"
++msgstr "Ukazi"
++
+ #. TRANSLATORS: note the leading blank!
+ msgid " Deleted recordings"
+ msgstr ""
+diff --git a/po/sr_RS.po b/po/sr_RS.po
+index f8b40bb1..c5089d1e 100644
+--- a/po/sr_RS.po
++++ b/po/sr_RS.po
+@@ -8,7 +8,7 @@ msgid ""
+ msgstr ""
+ "Project-Id-Version: VDR 2.8.4\n"
+ "Report-Msgid-Bugs-To: <vdr-bugs@tvdr.de>\n"
+-"POT-Creation-Date: 2026-09-25 10:59+0200\n"
++"POT-Creation-Date: 2026-11-22 15:25+0100\n"
+ "PO-Revision-Date: 2013-03-16 15:05+0100\n"
+ "Last-Translator: Zoran Turalija <zoran.turalija@gmail.com>\n"
+ "Language-Team: Serbian <vdr@linuxtv.org>\n"
+@@ -1510,6 +1510,9 @@ msgstr "Stvarno restartovati sistem?"
+ msgid " Stop recording "
+ msgstr " Zaustavi snimanje "
+ 
++msgid "Commands"
++msgstr "Komande"
++
+ #. TRANSLATORS: note the leading blank!
+ msgid " Deleted recordings"
+ msgstr ""
+diff --git a/po/sv_SE.po b/po/sv_SE.po
+index 5a597fa9..039437a4 100644
+--- a/po/sv_SE.po
++++ b/po/sv_SE.po
+@@ -12,7 +12,7 @@ msgid ""
+ msgstr ""
+ "Project-Id-Version: VDR 2.8.4\n"
+ "Report-Msgid-Bugs-To: <vdr-bugs@tvdr.de>\n"
+-"POT-Creation-Date: 2026-09-25 10:59+0200\n"
++"POT-Creation-Date: 2026-11-22 15:25+0100\n"
+ "PO-Revision-Date: 2015-02-12 21:58+0100\n"
+ "Last-Translator: Magnus Sirvi� <sirwio@hotmail.com>\n"
+ "Language-Team: Swedish <vdr@linuxtv.org>\n"
+@@ -1514,6 +1514,9 @@ msgstr "Vill du verkligen starta om?"
+ msgid " Stop recording "
+ msgstr " Avsluta inspelning "
+ 
++msgid "Commands"
++msgstr "Kommandon"
++
+ #. TRANSLATORS: note the leading blank!
+ msgid " Deleted recordings"
+ msgstr ""
+diff --git a/po/tr_TR.po b/po/tr_TR.po
+index 285992ab..dd7a8a90 100644
+--- a/po/tr_TR.po
++++ b/po/tr_TR.po
+@@ -7,7 +7,7 @@ msgid ""
+ msgstr ""
+ "Project-Id-Version: VDR 2.8.4\n"
+ "Report-Msgid-Bugs-To: <vdr-bugs@tvdr.de>\n"
+-"POT-Creation-Date: 2026-09-25 10:59+0200\n"
++"POT-Creation-Date: 2026-11-22 15:25+0100\n"
+ "PO-Revision-Date: 2008-02-28 00:33+0100\n"
+ "Last-Translator: Oktay Yolge�en <oktay_73@yahoo.de>\n"
+ "Language-Team: Turkish <vdr@linuxtv.org>\n"
+@@ -1509,6 +1509,9 @@ msgstr "Ger
+ msgid " Stop recording "
+ msgstr " �ekimi bitir "
+ 
++msgid "Commands"
++msgstr "Komutlar"
++
+ #. TRANSLATORS: note the leading blank!
+ msgid " Deleted recordings"
+ msgstr ""
+diff --git a/po/uk_UA.po b/po/uk_UA.po
+index 1962bbd4..7ce553d9 100644
+--- a/po/uk_UA.po
++++ b/po/uk_UA.po
+@@ -7,7 +7,7 @@ msgid ""
+ msgstr ""
+ "Project-Id-Version: VDR 2.8.4\n"
+ "Report-Msgid-Bugs-To: <vdr-bugs@tvdr.de>\n"
+-"POT-Creation-Date: 2026-09-25 10:59+0200\n"
++"POT-Creation-Date: 2026-11-22 15:25+0100\n"
+ "PO-Revision-Date: 2018-03-18 20:00+0100\n"
+ "Last-Translator: Yarema aka Knedlyk <yupadmin@gmail.com>\n"
+ "Language-Team: Ukrainian <vdr@linuxtv.org>\n"
+@@ -1510,6 +1510,9 @@ msgstr "Дійсно перезапустити?"
+ msgid " Stop recording "
+ msgstr " Зупинити запис "
+ 
++msgid "Commands"
++msgstr "Команди"
++
+ #. TRANSLATORS: note the leading blank!
+ msgid " Deleted recordings"
+ msgstr ""
+diff --git a/po/zh_CN.po b/po/zh_CN.po
+index 07560993..812a47de 100644
+--- a/po/zh_CN.po
++++ b/po/zh_CN.po
+@@ -7,7 +7,7 @@ msgid ""
+ msgstr ""
+ "Project-Id-Version: VDR 2.8.4\n"
+ "Report-Msgid-Bugs-To: <vdr-bugs@tvdr.de>\n"
+-"POT-Creation-Date: 2026-09-25 10:59+0200\n"
++"POT-Creation-Date: 2026-11-22 15:25+0100\n"
+ "PO-Revision-Date: 2013-03-04 14:52+0800\n"
+ "Last-Translator: NFVDR <nfvdr@live.com>\n"
+ "Language-Team: Chinese (simplified) <nfvdr@live.com>\n"
+@@ -1511,6 +1511,9 @@ msgstr "是否重启？"
+ msgid " Stop recording "
+ msgstr " 是否停止录像? "
+ 
++msgid "Commands"
++msgstr "常用操作命令"
++
+ #. TRANSLATORS: note the leading blank!
+ msgid " Deleted recordings"
+ msgstr ""
+diff --git a/vdr.5 b/vdr.5
+index 59e366a2..649df084 100644
+--- a/vdr.5
++++ b/vdr.5
+@@ -616,6 +616,84 @@ Note that the color keys will only execute their macro function
+ in "normal viewing" mode (i.e. when no other menu or player is active). The
+ \fIUser1\fR...\fIUser9\fR keys will always execute their macro function.
+ There may be up to 15 keys in such a key sequence.
++
++.SS MENU
++The file \fImenu.conf\fR can be used to override the default main menu.
++Each line contains one menu item definition. Leading whitespace
++and everything after and including a '#' is ignored.
++
++The default menu items can be referenced by these keywords:
++.PP
++.EX
++=Schedule
++=Channels
++=Timers
++=Recordings
++=Plugins
++=Setup
++=Commands
++.EE
++.PP
++Note that these keywords need to be given exactly as listed here (with the leading '=').
++The actual text shown in the menu will be translated to your selected language (if any).
++
++A line ending with '{' defines a sub menu (i.e. a menu that contains other items),
++and a line consisting of only '}' ends the definition of a sub menu:
++.PP
++.EX
++My special menu {
++  =Setup
++  =Commands
++  }
++.EE
++.PP
++
++You can also create menu items that call the main menu action of a plugin.
++This is done by writing the name of the plugin with a leading '@', as in
++.PP
++.EX
++@myplugin
++.EE
++.PP
++This will create a menu item that shows the string returned by the plugin's
++MainMenuEntry() function and, when selected, calls the plugin's MainMenuAction()
++function.
++If you want the menu item to show a different text than the one given by the
++plugin's MainMenuEntry() function, you can override this by adding your own
++text, separated by a ':', as in
++.PP
++.EX
++@myplugin:My item text
++.EE
++.PP
++Note that there may be no blanks surrounding the ':'.
++
++Here's what a fancy main menu might look like:
++.PP
++.EX
++@tvguide:Programm
++=Recordings
++@web:HbbTV
++@drmdevice:Mediaplayer
++@hyperion:Ambilight
++@actionmenu
++Plugins {
++  =Plugins
++  }
++VDR {
++  =Timers
++  =Schedule
++  =Channels
++  =Recordings
++  =Commands
++  }
++=Setup
++.EE
++.PP
++
++If no \fImenu.conf\fR is present, it will be automatically generated with the default
++items when the main menu is opened for the first time.
++
+ .SS FOLDERS
+ The file \fIfolders.conf\fR contains the definitions of folders that can be used
+ in the "Edit timer" menu. Each line contains one folder definition. Leading whitespace
+diff --git a/vdr.c b/vdr.c
+index 48b53e63..32e09d3e 100644
+--- a/vdr.c
++++ b/vdr.c
+@@ -825,6 +825,7 @@ int main(int argc, char *argv[])
+ 
+   // Configuration data:
+ 
++  MainMenu.Load(AddDirectory(ConfigDirectory, "menu.conf"));
+   Setup.Load(AddDirectory(ConfigDirectory, "setup.conf"));
+   Sources.Load(AddDirectory(ConfigDirectory, "sources.conf"), true, true);
+   Diseqcs.Load(AddDirectory(ConfigDirectory, "diseqc.conf"), true, Setup.DiSEqC);
+-- 
+2.47.3
+
